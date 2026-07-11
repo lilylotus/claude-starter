@@ -1,0 +1,6 @@
+server:
+  port: 48080
+
+spring:
+  application:
+    name: demo
