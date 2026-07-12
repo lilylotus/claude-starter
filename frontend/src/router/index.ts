@@ -12,7 +12,6 @@ declare module 'vue-router' {
 }
 
 const stubDescriptions: Record<string, string> = {
-  '/identity/users': '管理组织内的用户账号：创建、禁用、重置密码，以及查看每个用户当前拥有的角色。',
   '/application/list': '登记接入本系统的应用，每个应用拥有独立的权限点集合和访问密钥。',
   '/application/secret': '查看和轮换应用的访问密钥，密钥仅在生成时完整显示一次。',
   '/permission/roles': '定义角色并为角色勾选权限点，用户通过被赋予角色间接获得权限——这是 RBAC 的核心。',
@@ -24,6 +23,8 @@ const stubDescriptions: Record<string, string> = {
 // 已经落地真实业务组件的路由，按 path 覆盖默认的占位组件
 const implementedComponents: Record<string, () => Promise<unknown>> = {
   '/identity/orgs': () => import('@/views/identity/org/OrgManagementView.vue'),
+  '/identity/users': () => import('@/views/identity/user/UserManagementView.vue'),
+  '/system/dicts': () => import('@/views/system/dict/DictManagementView.vue'),
 }
 
 const menuRoutes = MENU_GROUPS.flatMap((group) =>

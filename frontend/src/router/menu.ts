@@ -8,8 +8,8 @@ export const MENU_GROUPS: MenuGroup[] = [
     title: '身份管理',
     icon: UserFilled,
     children: [
-      { title: '用户管理', path: '/identity/users', permissionKey: 'identity:user:view' },
       { title: '组织管理', path: '/identity/orgs', permissionKey: 'identity:org:view' },
+      { title: '用户管理', path: '/identity/users', permissionKey: 'identity:user:view' },
     ],
   },
   {
@@ -36,6 +36,7 @@ export const MENU_GROUPS: MenuGroup[] = [
     icon: Setting,
     children: [
       { title: '菜单管理', path: '/system/menus', permissionKey: 'system:menu:view' },
+      { title: '字典管理', path: '/system/dicts', permissionKey: 'system:dict:view' },
       { title: '操作日志', path: '/system/logs', permissionKey: 'system:log:view' },
     ],
   },
