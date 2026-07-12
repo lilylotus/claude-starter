@@ -2,13 +2,11 @@
 
 本文件为 Claude Code（claude.ai/code）在本仓库中工作时提供指导。
 
-## 仓库现状
+## 项目情况
 
-这是一个刚起步的 monorepo，尚未初始化为 git 仓库。目前只包含一个骨架状态的 Spring Boot
-后端（默认 `demo` 包，还没有真正的业务接口）、一个还没有任何 change/spec 的 OpenSpec 配置，
-以及尚不存在的前端目录。这里大部分"架构"其实是编码在 `.claude/agents/` 下自定义
-subagent 里的预期结构，而不是已经存在的代码——在假设某种约定成立之前，先读一遍下面
-总结的那几份 agent 文件。
+此项目是基于 RBAC （Role-Based Access Controll）的权限管理系统
+
+- 前端目录为 `frontend/`，后端目录为 `backend/`
 
 ## 常用命令
 
@@ -21,11 +19,18 @@ subagent 里的预期结构，而不是已经存在的代码——在假设某�
 ```
 
 跑单个测试类/方法用 Gradle 的 `--tests` 过滤参数，例如：
-`./gradlew test --tests "com.example.demo.DemoApplicationTests"`。
+`./gradlew test --tests "cn.nihility.rbac.RbacApplicationTests"`。
 
-前端目录（`frontend/`）目前还不存在。首次需要时会通过 Vite 脚手架搭建
-（`npm create vite@latest frontend -- --template vue-ts`）——动手之前先看
-`.claude/agents/vue3-frontend-dev.md` 里具体的搭建步骤和约定。
+前端（运行于 `frontend/`）：
+
+```bash
+npm install           # 安装依赖
+npm run dev            # 本地开发，默认 http://localhost:5173，/api 反向代理到后端 48080
+npm run build           # vue-tsc 类型检查 + vite build，产物在 frontend/dist
+```
+
+演示登录账号：`admin` / `admin123`（后端还没有鉴权接口，登录逻辑先用
+`src/api/auth.ts` 里的本地模拟实现占位，接口就绪后按同一函数签名替换即可）。
 
 OpenSpec 变更工作流（schema：`spec-driven`，见 `openspec/config.yaml`）：
 
@@ -41,13 +46,37 @@ openspec instructions apply --change "<name>" --json    # 需要读取/同步的
 ## 架构
 
 - `backend/` — Java 21 + Spring Boot 3.5.16，Gradle Wrapper，依赖解析会先走阿里云镜像
-  再回退到 Maven Central（见 `backend/build.gradle` 里的 `repositories`）。当前已有依赖：
-  `spring-boot-starter-web`、`spring-boot-starter-validation`、
-  `springdoc-openapi-starter-webmvc-ui`（Swagger UI，路径 `/swagger-ui.html`）、
-  `mapstruct`、`mybatis-plus-boot-starter`、`lombok`。**目前没有**配置 JPA/JDBC 驱动——
-  如果任务需要持久化，先跟用户确认方案，不要自作主张加驱动。基础包名是 `com.example.demo`。
-- `frontend/` — 尚未创建。搭建后的预期技术栈：Vue 3 + TypeScript + Vite + Element Plus +
-  Pinia + vue-router + axios，只用 Composition API（`<script setup lang="ts">`）。
+  再回退到 Maven Central（见 `backend/build.gradle` 里的 `repositories`）。基础包名是
+  `cn.nihility.rbac`（Gradle `group` 为 `cn.nihility`），启动类 `RbacApplication`。当前
+  已有依赖：`spring-boot-starter-web`、`spring-boot-starter-validation`、
+  `springdoc-openapi-starter-webmvc-ui:2.8.17`（锁定 2.x——3.x 目标 Spring Boot 4，
+  与本项目的 Boot 3.5 不兼容；Swagger UI 路径 `/swagger-ui.html`）、`mapstruct`、
+  `com.baomidou:mybatis-plus-spring-boot3-starter`（不要用 `mybatis-plus-boot-starter`，
+  它固定依赖了不兼容 Spring Framework 6.2 的 `mybatis-spring:2.1.2`，Mapper Bean
+  注册会报错）、`com.mysql:mysql-connector-j`、`flyway-mysql`、`lombok`。持久层已用
+  MyBatis-Plus + MySQL，表结构用 Flyway 迁移脚本管理（`src/main/resources/db/migration/
+  V*__*.sql`），表名统一加 `tab_` 前缀。MyBatis 原生 `<settings>`（驼峰↔下划线映射等）
+  写在 `src/main/resources/mybatis/mybatis.conf`，由 `application.yml` 里
+  `mybatis-plus.config-location` 指向它，不要再用 `mybatis-plus.configuration` 内联写法；
+  以后需要手写 SQL 的自定义 Mapper XML 统一放在 `src/main/resources/mybatis/mapper/`
+  下（对应 `mybatis-plus.mapper-locations: classpath*:mybatis/mapper/*.xml`），目前还
+  没有任何 XML。MyBatis-Plus 专属配置（如 `global-config.db-config.id-type`）仍留在
+  `application.yml`，因为原生 `mybatis-config.xml` 表达不了这些。全局响应包装
+  `{ code, message, data }` 和业务异常处理在 `common/` 下（`Result`、
+  `GlobalResponseAdvice`、`BusinessException`、`GlobalExceptionHandler`），新模块直接
+  复用，不要各自重复实现一套。
+- `frontend/` — Vue 3 + TypeScript + Vite + Element Plus + Pinia + vue-router + axios，
+  只用 Composition API（`<script setup lang="ts">`），Element Plus 组件通过
+  `unplugin-auto-import`/`unplugin-vue-components` 自动引入，无需手写 import。
+  `src/` 下结构：`api/`（axios 实例 + 按模块的请求封装）、`stores/`（Pinia，目前只有
+  `auth`）、`router/`（`index.ts` 路由表 + `menu.ts` 侧边栏四个一级菜单的数据源）、
+  `layout/`（`AppLayout.vue` 整体外壳 + `components/SideNav.vue`、`HeaderBar.vue`）、
+  `views/`（`login/`、`dashboard/`，以及权限点/角色/用户等尚未实现业务逻辑的页面
+  统一复用 `views/PlaceholderView.vue`，靠路由 `meta.title/description/permissionKey`
+  驱动文案）、`styles/`（`variables.scss` 设计令牌 + `element-theme.scss` 覆盖 Element
+  Plus 的 CSS 变量，把默认蓝换成品牌蓝 `#2D6CDF`）、`types/`。视觉上有一条贯穿登录页
+  动画、侧边栏子菜单连接线、面包屑分隔符、概览页时间线的"链式连接"视觉语言（圆点 +
+  虚线），呼应 RBAC 里身份→角色→权限→资源的层层关联，改动这几处时保持这条视觉语言一致。
 - `openspec/` — spec-driven 的变更管理。`openspec/changes/` 存放进行中的 change 提案
   （proposal.md/design.md/tasks.md），`openspec/changes/archive/` 存放已归档的，
   `openspec/specs/` 存放同步后的权威 spec。两者目前都是空的。
@@ -57,9 +86,14 @@ openspec instructions apply --change "<name>" --json    # 需要读取/同步的
 ### 后端约定（`.claude/agents/springboot-backend-dev.md`）
 
 - 新代码按分层组织：`controller/`（薄层：接收参数、触发 `@Valid`、调用 service，不写业务逻辑）→
-  `service/`（+ `impl/`）→ `dto/`（不要直接暴露 entity）→ `entity/`（一旦引入持久层）→
-  `mapper/`（MapStruct `@Mapper(componentModel = "spring")` 接口负责 entity↔DTO 转换，
-  不要手写转换代码）→ `exception/`（自定义异常 + `@RestControllerAdvice` 全局处理器）。
+  `service/`（+ `impl/`）→ `dto/`（不要直接暴露 entity）→ `entity/`（持久层实体）→
+  `mapper/`（MyBatis-Plus `BaseMapper` 数据访问接口）→ `mapstruct/`（MapStruct `@Mapper`
+  接口负责 entity↔DTO 转换，不要手写转换代码；**不使用** `componentModel = "spring"`，
+  即不注册为 Spring bean，改为接口内声明
+  `Xxx INSTANCE = Mappers.getMapper(Xxx.class);` 静态单例，调用方直接
+  `XxxConvert.INSTANCE.xxx(...)`，不做构造器注入，例如
+  `cn.nihility.rbac.org.mapstruct.OrgConvert`）→ `exception/`（自定义异常 +
+  `@RestControllerAdvice` 全局处理器）。
 - 请求 DTO 上使用 `jakarta.validation` 注解（`@NotBlank`、`@NotNull`、`@Size` 等），
   配合 controller 方法参数上的 `@Valid`。
 - 优先使用精确的 Lombok 注解（`@Getter`/`@Setter`/`@Builder`/`@RequiredArgsConstructor`），
@@ -70,18 +104,25 @@ openspec instructions apply --change "<name>" --json    # 需要读取/同步的
   和代码保持同步。
 - 修改 `build.gradle` 新增依赖前，先跟用户确认。
 
-### 前端约定（`.claude/agents/vue3-frontend-dev.md`，`frontend/` 创建之后适用）
+### 前端约定（`.claude/agents/vue3-frontend-dev.md`）
 
-- `src/api/`（按后端模块划分的 axios 封装）——组件里不要直接调用 `axios`。
-- `src/components/`（PascalCase、多单词命名）、`src/views/`（路由页面）、`src/router/`、
-  `src/stores/`（Pinia，一个业务领域一个 store，用 `defineStore('x', () => {...})` 的
-  setup 语法）、`src/types/`（TS 类型，字段命名和后端 DTO 对齐）。
-- axios 响应拦截器统一解包后端 `{ code, message, data }` 的响应结构，组件拿到的是
-  解包后的 `data`。
+- `src/api/`（按后端模块划分的 axios 封装）——组件里不要直接调用 `axios`。新增业务组件
+  时按需建 `src/components/`（PascalCase、多单词命名），一个业务领域一个 Pinia store
+  （setup 语法 `defineStore('x', () => {...})`），类型放 `src/types/`，字段命名和后端
+  DTO 对齐。
+- `src/api/request.ts` 里的 axios 响应拦截器统一解包后端 `{ code, message, data }` 的
+  响应结构，组件/store 拿到的是解包后的 `data`；非 0 的 `code` 会被拦截器统一
+  `ElMessage.error` 提示并 reject，调用方不用重复写错误提示。
 - Element Plus 组件按需引入（配置好 `unplugin-vue-components` /
   `unplugin-auto-import` 后自动导入）；表单校验规则应尽量和后端的 Bean Validation
   规则保持一致。
 - 2 空格缩进（和后端 `.editorconfig` 的 4 空格不同）——两套风格不要混用。
+
+### OpenSpec 规范
+
+注意：
+- 所有编码之前必须先创建 OpenSpec 规范的标准 `tasks.md` / `design.md` / `proposal.md` 过程文档
+- 编码完成后若有调整在更新 OpenSpec 规范的标准 `tasks.md` / `design.md` / `proposal.md` 过程文档
 
 ### OpenSpec 文档同步（`.claude/agents/openspec-doc-sync.md`）
 

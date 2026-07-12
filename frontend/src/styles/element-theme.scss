@@ -1,0 +1,65 @@
+// 把 Element Plus 的 CSS 变量改写成本项目的品牌蓝，而不是它自带的默认蓝（#409EFF）。
+// 数值按 el-color-primary 的 light-3/5/7/8/9、dark-2 生成规则手工取色。
+
+:root {
+  --el-color-primary: var(--color-primary);
+  --el-color-primary-light-3: #6f95e8;
+  --el-color-primary-light-5: #9bb8ee;
+  --el-color-primary-light-7: #c6d7f5;
+  --el-color-primary-light-8: #d9e4f8;
+  --el-color-primary-light-9: #ecf2fc;
+  --el-color-primary-dark-2: var(--color-primary-strong);
+
+  --el-color-success: var(--color-success);
+  --el-color-warning: var(--color-warning);
+  --el-color-danger: var(--color-danger);
+  --el-color-error: var(--color-danger);
+
+  --el-text-color-primary: var(--color-ink);
+  --el-text-color-regular: var(--color-text);
+  --el-text-color-secondary: var(--color-text-secondary);
+  --el-text-color-placeholder: var(--color-text-tertiary);
+
+  --el-border-color: var(--color-border);
+  --el-border-color-light: var(--color-border);
+  --el-border-color-lighter: var(--color-border);
+  --el-fill-color-blank: var(--color-surface);
+  --el-bg-color: var(--color-surface);
+  --el-bg-color-page: var(--color-canvas);
+
+  --el-font-family: var(--font-body);
+  --el-border-radius-base: var(--radius-sm);
+  --el-border-radius-small: 6px;
+  --el-border-radius-round: var(--radius-pill);
+
+  --el-box-shadow-light: var(--shadow-sm);
+}
+
+// 按钮/卡片略微加大圆角，比 Element 默认更柔和、更友好
+.el-button {
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+}
+
+.el-card {
+  --el-card-border-radius: var(--radius-md);
+  border-color: var(--color-border);
+  box-shadow: var(--shadow-sm) !important;
+}
+
+.el-menu {
+  border-right: none !important;
+}
+
+.el-dialog {
+  border-radius: var(--radius-lg);
+}
+
+.el-input__wrapper,
+.el-textarea__inner {
+  border-radius: var(--radius-sm);
+}
+
+.el-tag {
+  border-radius: var(--radius-sm);
+}

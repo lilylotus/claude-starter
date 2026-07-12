@@ -1,0 +1,59 @@
+// 设计令牌：RBAC 权限管理系统的视觉基调——明亮、友好的蓝色系。
+// 所有颜色/间距/圆角/阴影/字体均从这里派生，组件内不要写死色值。
+
+:root {
+  // ---- 品牌色：Skyline Blue ----
+  --color-primary: #2d6cdf;
+  --color-primary-strong: #1b4fb8; // hover / active / pressed
+  --color-primary-soft: #eaf1ff; // 选中态、浅色底
+  --color-primary-softer: #f4f8ff; // 页面底色
+
+  // ---- 暖色点缀：仅用于强调/徽标，避免整屏偏冷 ----
+  --color-accent: #ff9f43;
+  --color-accent-soft: #fff3e6;
+
+  // ---- 中性色：带一点蓝调的墨色，而不是纯灰 ----
+  --color-ink: #16244a; // 标题
+  --color-text: #33436b; // 正文
+  --color-text-secondary: #5b6b8c;
+  --color-text-tertiary: #93a0be;
+  --color-border: #e2e8f5;
+  --color-border-strong: #c9d6ef;
+  --color-canvas: #f4f8ff; // 应用整体背景
+  --color-surface: #ffffff; // 卡片/面板
+  --color-surface-raised: #ffffff;
+
+  // ---- 语义色 ----
+  --color-success: #21a76b;
+  --color-warning: #f5a623;
+  --color-danger: #e5484d;
+
+  // ---- 字体 ----
+  --font-display:
+    'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei', -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Roboto, sans-serif;
+  --font-body: var(--font-display);
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  // ---- 圆角：比 Element 默认更圆，呼应"友好"的调性 ----
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+
+  // ---- 阴影：蓝色调的柔光阴影，而不是纯黑 ----
+  --shadow-sm: 0 1px 2px rgba(22, 36, 74, 0.06);
+  --shadow-md: 0 8px 24px rgba(45, 108, 223, 0.12);
+  --shadow-lg: 0 20px 48px rgba(45, 108, 223, 0.16);
+
+  // ---- 链式连接动线：贯穿侧边栏 / 面包屑 / 登录页的签名视觉语言 ----
+  --chain-dot-size: 8px;
+  --chain-dot-size-sm: 6px;
+  --chain-line-color: var(--color-border-strong);
+  --chain-line-color-active: var(--color-primary);
+
+  // ---- 布局尺寸 ----
+  --layout-sider-width: 232px;
+  --layout-sider-collapsed-width: 64px;
+  --layout-header-height: 60px;
+}
