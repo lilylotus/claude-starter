@@ -62,7 +62,7 @@ async function fetchOrgTree() {
   orgTree.value = await orgApi.getOrgTree()
 }
 
-// ---- 认证类型下拉框（数据源为字典模块 position_type 字典类型下的启用项） ----
+// ---- 任职类型下拉框（数据源为字典模块 position_type 字典类型下的启用项） ----
 
 const positionTypeOptions = ref<DictItemOption[]>([])
 
@@ -130,7 +130,7 @@ const rules: FormRules<UserFormRequest> = {
 
 // 任职信息子表单每行的独立校验规则，通过动态 prop（positions.{index}.xxx）挂载
 const positionOrgRule = [{ required: true, message: '请选择所属组织', trigger: 'change' }]
-const positionTypeRule = [{ required: true, message: '请选择认证类型', trigger: 'change' }]
+const positionTypeRule = [{ required: true, message: '请选择任职类型', trigger: 'change' }]
 
 const dialogTitle = computed(() => (dialogMode.value === 'create' ? '新增用户' : '编辑用户'))
 
@@ -375,25 +375,24 @@ async function handleDelete(row: UserRow) {
           <div v-else class="user-position-list">
             <div v-for="(position, index) in form.positions" :key="index" class="user-position-row">
               <div class="user-position-row__fields">
-                <el-form-item label="所属组织" label-width="76px" :prop="`positions.${index}.orgId`" :rules="positionOrgRule">
+                <el-form-item label="所属组织" label-width="90px" :prop="`positions.${index}.orgId`" :rules="positionOrgRule">
                   <el-tree-select
                     v-model="position.orgId"
                     :data="orgTree"
                     :props="{ label: 'name', children: 'children' }"
                     node-key="id"
                     check-strictly
-                    default-expand-all
                     placeholder="请选择组织"
                     style="width: 100%"
                   />
                 </el-form-item>
                 <el-form-item
-                  label="认证类型"
-                  label-width="76px"
+                  label="任职类型"
+                  label-width="90px"
                   :prop="`positions.${index}.positionType`"
                   :rules="positionTypeRule"
                 >
-                  <el-select v-model="position.positionType" placeholder="请选择认证类型" style="width: 100%">
+                  <el-select v-model="position.positionType" placeholder="请选择任职类型" style="width: 100%">
                     <el-option
                       v-for="opt in positionTypeOptions"
                       :key="opt.code"
@@ -451,7 +450,7 @@ async function handleDelete(row: UserRow) {
         <h3 class="user-detail-positions__title">任职记录</h3>
         <el-table :data="detailData?.positions ?? []" empty-text="暂无任职记录">
           <el-table-column prop="orgName" label="所属组织" min-width="120" />
-          <el-table-column label="认证类型" min-width="100">
+          <el-table-column label="任职类型" min-width="100">
             <template #default="{ row }">{{ positionTypeLabel(row.positionType) }}</template>
           </el-table-column>
           <el-table-column prop="positionAddress" label="任职地址" min-width="140" />
