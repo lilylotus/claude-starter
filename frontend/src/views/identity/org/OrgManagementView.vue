@@ -90,6 +90,30 @@ const editableTreeSelectData = computed(() => {
   return pruneSubtree(treeSelectData.value, editingId.value)
 })
 
+// 在（含虚拟根的）树中查找目标节点从根到自身的祖先路径（含自身），找不到返回 null
+function findAncestorPath(
+  nodes: (OrgTreeNode & { children?: OrgTreeNode[] })[],
+  targetId: number,
+  path: number[] = [],
+): number[] | null {
+  for (const node of nodes) {
+    const nextPath = [...path, node.id]
+    if (node.id === targetId) return nextPath
+    const found = findAncestorPath(node.children ?? [], targetId, nextPath)
+    if (found) return found
+  }
+  return null
+}
+
+// 上级组织选择器默认展开的节点 key：
+// 新增时只展开虚拟根，仅显示顶级组织；编辑时展开到当前上级组织所在路径（不含其自身），
+// 使其在列表中可见但不展开更深层级；每次打开弹窗都靠 treeSelectRenderKey 重新挂载生效
+const treeSelectExpandedKeys = computed(() => {
+  if (dialogMode.value === 'create' || form.parentId === null) return [0]
+  const path = findAncestorPath(editableTreeSelectData.value, form.parentId)
+  return path ? path.slice(0, -1) : [0]
+})
+
 // ---- 新增/编辑弹窗 ----
 
 const dialogVisible = ref(false)
@@ -97,6 +121,9 @@ const dialogMode = ref<'create' | 'edit'>('create')
 const editingId = ref<number | null>(null)
 const submitting = ref(false)
 const formRef = ref<FormInstance>()
+// el-tree 只在初始挂载时读取 default-expanded-keys，此后非响应式；弹窗内容常驻不会
+// 因切换新增/编辑重新挂载，因此每次打开弹窗都递增这个 key 强制 el-tree-select 重新挂载
+const treeSelectRenderKey = ref(0)
 
 // 表单里的 parentId 在“未选中任何左侧树节点就新增”时允许暂时为空（由用户手动选择），
 // 提交前会校验为必填，真正提交给后端时保证已经是合法的 number
@@ -127,6 +154,7 @@ function openCreateDialog() {
   form.parentId = orgStore.selectedId
   form.showOrder = 0
   form.remark = ''
+  treeSelectRenderKey.value++
   dialogVisible.value = true
 }
 
@@ -139,6 +167,7 @@ async function openEditDialog(row: OrgRow) {
   form.parentId = detail.parentId
   form.showOrder = detail.showOrder
   form.remark = detail.remark
+  treeSelectRenderKey.value++
   dialogVisible.value = true
 }
 
@@ -299,11 +328,12 @@ async function handleDelete(row: OrgRow) {
                非叶子节点点击只会展开/收起；上级组织可能本身已经有子组织，必须开启
                check-strictly 才能把任意真实组织节点选为上级 -->
           <el-tree-select
+            :key="treeSelectRenderKey"
             v-model="form.parentId"
             :data="editableTreeSelectData"
             :props="{ label: 'name', children: 'children' }"
             node-key="id"
-            default-expand-all
+            :default-expanded-keys="treeSelectExpandedKeys"
             check-strictly
             style="width: 100%"
           />
