@@ -70,13 +70,15 @@ public interface UserConvert {
     void updateEntity(UserUpdateRequest request, @MappingTarget UserEntity entity);
 
     /**
-     * 任职记录请求转实体，供新增场景使用；id/所属用户/审计字段由服务层另行赋值。
+     * 任职记录请求转实体，供新增场景使用；id/所属用户/状态/审计字段由服务层另行赋值
+     * （新增记录的状态由服务层显式置为启用）。
      *
      * @param request 任职记录请求
      * @return 任职记录实体
      */
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "userId", ignore = true)
+    @Mapping(target = "status", ignore = true)
     @Mapping(target = "createBy", ignore = true)
     @Mapping(target = "createTime", ignore = true)
     @Mapping(target = "updateBy", ignore = true)
@@ -84,14 +86,15 @@ public interface UserConvert {
     UserPositionEntity toPositionEntity(UserPositionRequest request);
 
     /**
-     * 把任职记录更新请求的字段合并到已有任职记录实体上；id/所属用户/创建审计字段不受影响，
-     * 更新审计字段由服务层另行刷新。
+     * 把任职记录更新请求的字段合并到已有任职记录实体上；id/所属用户/状态/创建审计字段
+     * 不受影响，更新审计字段由服务层另行刷新。
      *
      * @param request 任职记录请求
      * @param entity  待更新的任职记录实体
      */
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "userId", ignore = true)
+    @Mapping(target = "status", ignore = true)
     @Mapping(target = "createBy", ignore = true)
     @Mapping(target = "createTime", ignore = true)
     @Mapping(target = "updateBy", ignore = true)

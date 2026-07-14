@@ -24,6 +24,7 @@ const stubDescriptions: Record<string, string> = {
 const implementedComponents: Record<string, () => Promise<unknown>> = {
   '/identity/orgs': () => import('@/views/identity/org/OrgManagementView.vue'),
   '/identity/users': () => import('@/views/identity/user/UserManagementView.vue'),
+  '/identity/positions': () => import('@/views/identity/position/PositionManagementView.vue'),
   '/system/dicts': () => import('@/views/system/dict/DictManagementView.vue'),
 }
 

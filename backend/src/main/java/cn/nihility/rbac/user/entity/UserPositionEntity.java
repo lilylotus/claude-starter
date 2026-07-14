@@ -12,9 +12,11 @@ import lombok.Setter;
 
 /**
  * 用户任职记录持久化实体，对应表 {@code tab_user_position}，通过 {@code userId} 关联
- * {@code tab_user.id}、{@code orgId} 关联 {@code tab_org.id}（不建物理外键）。任职记录
- * 随用户创建/更新接口整体提交并做物理删除，不像 {@link UserEntity} 那样存在独立的
- * {@code status} 列表达启停用/逻辑删除语义。
+ * {@code tab_user.id}、{@code orgId} 关联 {@code tab_org.id}（不建物理外键）。该实体同时
+ * 被两个入口复用：用户管理内嵌子表单随用户创建/更新接口整体提交、按行 diff（未出现在
+ * 请求列表中的既有记录物理删除），以及独立的任职管理入口（按 {@code orgId} 查询、
+ * 单条增删改）。与 {@link UserEntity} 一致，拥有独立的 {@code status} 列表达
+ * 启用/停用/逻辑删除语义（逻辑删除不做物理删除）。
  */
 @Getter
 @Setter
@@ -48,6 +50,9 @@ public class UserPositionEntity {
 
     /** 备注。 */
     private String remark;
+
+    /** 状态：2000=启用，3000=停用，-1000=已删除（逻辑删除）。 */
+    private Integer status;
 
     /** 创建人。 */
     private String createBy;

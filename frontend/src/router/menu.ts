@@ -10,6 +10,7 @@ export const MENU_GROUPS: MenuGroup[] = [
     children: [
       { title: '组织管理', path: '/identity/orgs', permissionKey: 'identity:org:view' },
       { title: '用户管理', path: '/identity/users', permissionKey: 'identity:user:view' },
+      { title: '任职管理', path: '/identity/positions', permissionKey: 'identity:position:view' },
     ],
   },
   {

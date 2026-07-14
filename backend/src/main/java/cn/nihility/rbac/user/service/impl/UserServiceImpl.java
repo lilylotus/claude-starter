@@ -4,6 +4,7 @@ import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.org.entity.OrgEntity;
 import cn.nihility.rbac.org.mapper.OrgMapper;
+import cn.nihility.rbac.user.constant.PositionStatus;
 import cn.nihility.rbac.user.constant.UserStatus;
 import cn.nihility.rbac.user.dto.UserCreateRequest;
 import cn.nihility.rbac.user.dto.UserPositionRequest;
@@ -219,7 +220,8 @@ public class UserServiceImpl implements UserService {
     }
 
     /**
-     * 按用户 id 查询其全部任职记录（按显示序号降序、id 升序排列），并批量回填组织名称。
+     * 按用户 id 查询其全部未被逻辑删除的任职记录（按显示序号降序、id 升序排列），
+     * 并批量回填组织名称。
      *
      * @param userId 用户 id
      * @return 任职记录视图对象列表
@@ -227,6 +229,7 @@ public class UserServiceImpl implements UserService {
     private List<UserPositionVO> listPositionsWithOrgName(Long userId) {
         List<UserPositionEntity> entities = userPositionMapper.selectList(new LambdaQueryWrapper<UserPositionEntity>()
                 .eq(UserPositionEntity::getUserId, userId)
+                .ne(UserPositionEntity::getStatus, PositionStatus.DELETED)
                 .orderByDesc(UserPositionEntity::getShowOrder)
                 .orderByAsc(UserPositionEntity::getId));
         return toPositionVOListWithOrgName(entities);
@@ -256,10 +259,12 @@ public class UserServiceImpl implements UserService {
     }
 
     /**
-     * 把请求中的任职记录列表与用户当前既有的任职记录做增量 diff：携带 {@code id} 且属于
-     * 当前用户的按行更新（保留原创建审计信息，刷新更新审计信息）；不携带 {@code id} 的作为
-     * 新记录插入；当前用户既有记录中未出现在本次请求列表中的物理删除；请求携带不属于当前
-     * 用户的任职记录 id 时拒绝整个更新。
+     * 把请求中的任职记录列表与用户当前未被逻辑删除的既有任职记录做增量 diff：携带
+     * {@code id} 且属于当前用户未被逻辑删除的既有记录的按行更新（保留原创建审计信息，
+     * 刷新更新审计信息，不修改其 {@code status}）；不携带 {@code id} 的作为新记录插入，
+     * {@code status} 显式置为 {@link PositionStatus#ENABLED}；当前用户未被逻辑删除的既有
+     * 记录中未出现在本次请求列表中的物理删除；请求携带不属于当前用户的任职记录 id 时拒绝
+     * 整个更新。已被逻辑删除的既有记录不参与本次 diff。
      *
      * @param userId    用户 id
      * @param positions 请求中的任职记录列表，可为空（视为清空全部既有任职记录）
@@ -268,7 +273,9 @@ public class UserServiceImpl implements UserService {
         List<UserPositionRequest> requests = positions != null ? positions : List.of();
 
         List<UserPositionEntity> existingList = userPositionMapper.selectList(
-                new LambdaQueryWrapper<UserPositionEntity>().eq(UserPositionEntity::getUserId, userId));
+                new LambdaQueryWrapper<UserPositionEntity>()
+                        .eq(UserPositionEntity::getUserId, userId)
+                        .ne(UserPositionEntity::getStatus, PositionStatus.DELETED));
         Map<Long, UserPositionEntity> existingById = existingList.stream()
                 .collect(Collectors.toMap(UserPositionEntity::getId, entity -> entity));
 
@@ -291,6 +298,7 @@ public class UserServiceImpl implements UserService {
             } else {
                 UserPositionEntity entity = UserConvert.INSTANCE.toPositionEntity(request);
                 entity.setUserId(userId);
+                entity.setStatus(PositionStatus.ENABLED);
                 entity.setCreateBy(DEFAULT_OPERATOR);
                 entity.setCreateTime(now);
                 entity.setUpdateBy(DEFAULT_OPERATOR);
