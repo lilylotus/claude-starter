@@ -21,8 +21,10 @@ const userStore = useUserStore()
 
 onMounted(() => {
   userStore.fetchPage()
-  fetchOrgTree()
   fetchPositionTypeOptions()
+  // 全量组织树（orgTree，供新增/编辑弹窗内任职子表单“所属组织”选择器用）不在这里预加载：
+  // 只有打开弹窗时才需要它，此处预加载会让绝大多数只浏览/搜索用户列表的页面访问都白白
+  // 发一次 GET /api/orgs/tree（见 openCreateDialog/openEditDialog）
 })
 
 // ---- 搜索栏（姓名/手机号/身份证号，三者均可选，组合为“与”关系） ----
@@ -153,7 +155,9 @@ function resetForm() {
   form.positions = []
 }
 
-function openCreateDialog() {
+// 任职子表单“所属组织”选择器要用的全量组织树只在真正打开弹窗时才按需请求
+async function openCreateDialog() {
+  await fetchOrgTree()
   dialogMode.value = 'create'
   editingId.value = null
   resetForm()
@@ -164,6 +168,7 @@ async function openEditDialog(row: UserRow) {
   dialogMode.value = 'edit'
   editingId.value = row.id
   const detail = await userApi.getUserById(row.id)
+  await fetchOrgTree()
   form.name = detail.name
   form.code = detail.code
   form.gender = detail.gender

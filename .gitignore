@@ -1,6 +1,5 @@
 .claude/
 **/generated/**
-frontend/package-lock.json
 frontend/node_modules/**
 
 HELP.md
