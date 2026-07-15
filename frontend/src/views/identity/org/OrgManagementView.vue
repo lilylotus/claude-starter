@@ -10,13 +10,16 @@ import { ORG_STATUS_ENABLED, type OrgFormRequest, type OrgRow, type OrgTreeNode 
 const orgStore = useOrgStore()
 
 onMounted(() => {
-  orgStore.fetchTree()
   // 左侧导航树不需要在这里主动拉取顶级节点：el-tree 在 lazy 模式下挂载时会自动对
   // 根节点调用一次 loadNode（parentId = 0），navTreeTopLevel 只用于增删改之后的
   // 局部刷新（见 orgStore.refreshNavTreeBranch），这里主动调用会造成重复请求
   // 隐式触发一次顶级组织（parentId = 0）的分页查询填充右侧表格，
   // 但不调用 selectNode／不设置 selectedId：默认态下标题仍保持空白，
   // 表格数据源（parentId）与标题（selectedId）是两个独立状态，详见 design.md 决策 3
+  //
+  // 全量组织树（orgStore.tree，供弹窗“上级组织”选择器用）不在这里预加载：
+  // 只有打开新增/编辑弹窗时才需要它，此处预加载会让绝大多数从不新增/编辑的页面访问
+  // 都白白发一次 GET /api/orgs/tree（见 openCreateDialog/openEditDialog）
   orgStore.fetchChildren(0)
 })
 
@@ -33,26 +36,16 @@ function loadNode(node: Node, resolve: (data: OrgTreeNode[]) => void) {
 }
 
 function handleNodeClick(node: OrgTreeNode) {
-  orgStore.selectNode(node.id)
+  orgStore.selectNode(node.id, node.name)
 }
 
 const rightPanelEmptyText = '暂无下级组织'
 
-// 从组织树中按 id 递归查找节点名称，用于拼接右侧面板标题
-function findNodeName(nodes: OrgTreeNode[], id: number): string | null {
-  for (const node of nodes) {
-    if (node.id === id) return node.name
-    const found = findNodeName(node.children ?? [], id)
-    if (found !== null) return found
-  }
-  return null
-}
-
-// 右侧面板标题：未选中任何左侧树节点时保持空白，选中后显示”[组织名称]下级组织”
+// 右侧面板标题：未选中任何左侧树节点时保持空白，选中后显示”[组织名称]下级组织”；
+// 节点名称直接来自点击事件（懒加载树节点数据自带 name），不依赖全量树查找
 const rightPanelTitle = computed(() => {
   if (orgStore.selectedId === null) return ''
-  const name = findNodeName(orgStore.tree, orgStore.selectedId)
-  return name ? `[${name}]下级组织` : ''
+  return orgStore.selectedName ? `[${orgStore.selectedName}]下级组织` : ''
 })
 
 function handlePageChange(targetPage: number) {
@@ -145,7 +138,10 @@ const rules: FormRules<OrgForm> = {
 
 const dialogTitle = computed(() => (dialogMode.value === 'create' ? '新增组织' : '编辑组织'))
 
-function openCreateDialog() {
+// 上级组织选择器要用的全量组织树只在真正打开弹窗时才按需请求（见 design.md 决策 1），
+// 请求完成、拿到最新数据后再展示弹窗
+async function openCreateDialog() {
+  await orgStore.fetchTree()
   dialogMode.value = 'create'
   editingId.value = null
   form.name = ''
@@ -162,6 +158,7 @@ async function openEditDialog(row: OrgRow) {
   dialogMode.value = 'edit'
   editingId.value = row.id
   const detail = await orgApi.getOrgById(row.id)
+  await orgStore.fetchTree()
   form.name = detail.name
   form.code = detail.code
   form.parentId = detail.parentId

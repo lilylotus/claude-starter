@@ -13,6 +13,9 @@ export const useOrgStore = defineStore('org', () => {
   // “标题”依赖 selectedId，“表格数据源（当前查询用的 parentId）”依赖 currentParentId，
   // 这是两个故意独立的状态，不要把它们耦合在一起（详见 design.md 决策 3）。
   const selectedId = ref<number | null>(null)
+  // 当前选中节点的名称，随 selectNode 一起写入，直接来自左侧树点击事件自带的数据，
+  // 供右侧面板标题使用，避免为了拿一个名字去依赖全量树（orgStore.tree）
+  const selectedName = ref<string | null>(null)
   // 当前用于查询右侧表格的 parentId；默认 0（顶级组织），与 selectedId 是否为 null 无关
   const currentParentId = ref(0)
   const children = ref<OrgRow[]>([])
@@ -91,21 +94,22 @@ export const useOrgStore = defineStore('org', () => {
     await fetchChildren(currentParentId.value, targetPage)
   }
 
-  // 选中左侧树节点：记录 selectedId，重置为第一页并加载其直接子节点
-  async function selectNode(id: number) {
+  // 选中左侧树节点：记录 selectedId/selectedName，重置为第一页并加载其直接子节点
+  async function selectNode(id: number, name: string) {
     selectedId.value = id
+    selectedName.value = name
     await fetchChildren(id, 1)
   }
 
   // 清空选中状态，标题恢复空白；表格仍展示顶级组织的默认列表（不清空 children）
   function clearSelection() {
     selectedId.value = null
+    selectedName.value = null
   }
 
-  // 任意增删改操作之后调用：刷新树（名称/状态变化也要体现在树上），并刷新当前分页的子表格；
-  // 若刷新后当前页超出新的总页数，则回退到最后一页
+  // 任意增删改操作之后调用：刷新当前分页的子表格；若刷新后当前页超出新的总页数，则回退到最后一页。
+  // 弹窗用的全量树（tree）不在这里主动刷新——下次打开新增/编辑弹窗时会重新拉取，天然是最新数据
   async function refreshAfterMutation() {
-    await fetchTree()
     await fetchChildren(currentParentId.value)
     const lastPage = total.value === 0 ? 1 : Math.ceil(total.value / pageSize.value)
     if (page.value > lastPage) {
@@ -117,6 +121,7 @@ export const useOrgStore = defineStore('org', () => {
     tree,
     treeLoading,
     selectedId,
+    selectedName,
     currentParentId,
     children,
     childrenLoading,
