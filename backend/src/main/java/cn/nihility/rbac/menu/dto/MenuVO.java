@@ -1,0 +1,73 @@
+package cn.nihility.rbac.menu.dto;
+
+import io.swagger.v3.oas.annotations.media.Schema;
+import java.time.LocalDateTime;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+/**
+ * 资源详情/列表行视图对象。
+ */
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+@Schema(description = "资源详情")
+public class MenuVO {
+
+    /** 主键 id。 */
+    @Schema(description = "主键 id")
+    private Long id;
+
+    /** 资源名称。 */
+    @Schema(description = "资源名称")
+    private String name;
+
+    /** 资源编码。 */
+    @Schema(description = "资源编码")
+    private String code;
+
+    /** 上级资源 id，0 表示顶级/根节点。 */
+    @Schema(description = "上级资源 id，0 表示顶级")
+    private Long parentId;
+
+    /** 上级资源名称，供前端展示，0 表示顶级时为 null。 */
+    @Schema(description = "上级资源名称，顶级资源为 null")
+    private String parentName;
+
+    /** 资源类型：1=菜单，2=按钮，3=API。 */
+    @Schema(description = "资源类型：1=菜单，2=按钮，3=API")
+    private Integer resourceType;
+
+    /** 状态：2000=启用，3000=停用，-1000=已删除。 */
+    @Schema(description = "状态：2000=启用，3000=停用，-1000=已删除")
+    private Integer status;
+
+    /** 显示序号，值越大越靠前。 */
+    @Schema(description = "显示序号，值越大越靠前")
+    private Integer showOrder;
+
+    /** 备注。 */
+    @Schema(description = "备注")
+    private String remark;
+
+    /** 创建人。 */
+    @Schema(description = "创建人")
+    private String createBy;
+
+    /** 创建时间。 */
+    @Schema(description = "创建时间")
+    private LocalDateTime createTime;
+
+    /** 更新人。 */
+    @Schema(description = "更新人")
+    private String updateBy;
+
+    /** 更新时间。 */
+    @Schema(description = "更新时间")
+    private LocalDateTime updateTime;
+}

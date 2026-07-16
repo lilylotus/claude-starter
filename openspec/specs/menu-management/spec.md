@@ -1,0 +1,166 @@
+# menu-management Specification
+
+## Purpose
+TBD - created by archiving change 2026-07-16-add-menu-management. Update Purpose after archive.
+## Requirements
+### Requirement: 资源树查询
+系统 SHALL 提供资源树查询接口，返回按上下级关系（`parentId`）组装成的嵌套树形结构，且不包含已逻辑删除的资源。
+
+#### Scenario: 查询资源树
+- **WHEN** 客户端调用 `GET /api/menus/tree`
+- **THEN** 系统返回嵌套树形结构，每个节点包含 `id`、`name`、`code`、`parentId`、`resourceType`、`status`、`showOrder`、`children` 字段
+
+#### Scenario: 树形结构不包含已删除资源
+- **WHEN** 某资源的 `status` 为 `-1000`（已逻辑删除）
+- **THEN** 该资源不出现在 `GET /api/menus/tree` 的返回结果中（其未删除的子资源若能通过其他路径挂接则正常返回，本场景仅约束已删除节点本身不可见）
+
+#### Scenario: 同级节点按显示序号排序
+- **WHEN** 多个资源拥有相同的 `parentId`
+- **THEN** 返回结果中这些同级节点按 `showOrder` 降序排列（值越大越靠前），`showOrder` 相同时按 `id` 升序排列
+
+### Requirement: 资源树懒加载子节点查询
+系统 SHALL 提供一个不分页的直属子资源查询接口，专门供前端资源树逐层懒加载展开使用；仅返回下一层级，不包含更深层级的子孙资源，且不包含已逻辑删除的资源，排序规则与其他资源列表查询一致（`showOrder` 降序，相同时按 `id` 升序）。
+
+#### Scenario: 查询指定资源的直属子资源用于树展开
+- **WHEN** 客户端调用 `GET /api/menus/tree/children?parentId={id}`
+- **THEN** 系统返回 `parentId` 等于该 id 的全部未删除直属子资源列表（不分页），每个节点包含 `id`、`name`、`code`、`parentId`、`resourceType`、`status`、`showOrder`、`children` 字段，`children` 固定为空数组
+
+#### Scenario: 未指定 parentId 时查询顶级资源
+- **WHEN** 客户端调用 `GET /api/menus/tree/children` 且未携带 `parentId` 参数
+- **THEN** 系统按 `parentId = 0` 处理，返回全部未删除的顶级资源列表
+
+### Requirement: 直属子资源分页查询
+系统 SHALL 提供按上级资源 id 分页查询其直属子资源列表的接口，仅返回下一层级，不包含更深层级的子孙资源；分页参数 `page`（页码，默认 `1`）、`pageSize`（每页条数，默认 `10`）均为可选，响应中 SHALL 包含当前页数据、总条数、页码、每页条数。
+
+#### Scenario: 查询指定资源的直属子资源
+- **WHEN** 客户端调用 `GET /api/menus/children?parentId={id}&page={page}&pageSize={pageSize}`
+- **THEN** 系统返回 `parentId` 等于该 id 的未删除资源中第 `page` 页、每页 `pageSize` 条的分页结果，包含 `records`（当前页数据列表，不含孙子级资源）、`total`（未删除的直属子资源总数）、`page`、`pageSize`
+
+#### Scenario: 未指定 parentId 时查询顶级资源
+- **WHEN** 客户端调用 `GET /api/menus/children` 且未携带 `parentId` 参数
+- **THEN** 系统按 `parentId = 0` 处理，返回顶级资源的分页结果
+
+#### Scenario: 未指定分页参数时使用默认值
+- **WHEN** 客户端调用 `GET /api/menus/children` 且未携带 `page`、`pageSize` 参数
+- **THEN** 系统按 `page = 1`、`pageSize = 10` 处理
+
+### Requirement: 资源详情查询
+系统 SHALL 提供按 id 查询资源详情的接口，返回结果包含上级资源名称、资源类型、备注（`remark`）以及新增人、新增时间、更新人、更新时间等审计字段。
+
+#### Scenario: 查询存在的资源
+- **WHEN** 客户端调用 `GET /api/menus/{id}` 且该资源存在且未被逻辑删除
+- **THEN** 系统返回该资源的完整信息，包括根据 `parentId` 回填的 `parentName`、`resourceType`、`remark`，以及 `createBy`、`createTime`、`updateBy`、`updateTime`
+
+#### Scenario: 查询不存在的资源
+- **WHEN** 客户端调用 `GET /api/menus/{id}` 且该 id 不存在或已被逻辑删除
+- **THEN** 系统返回业务错误（非零 `code`），不返回 HTTP 500
+
+### Requirement: 新增资源
+系统 SHALL 支持创建资源，资源名称、资源编码、上级资源 id（`parentId`，`0` 表示顶级）、资源类型（`resourceType`）为必填项；备注可选；显示序号默认 `0`。新建资源默认状态为启用（`2000`）。资源编码在未被逻辑删除的资源范围内须保持唯一。资源类型的取值必须是菜单、按钮、API 三者之一，非法取值将被拒绝。
+
+#### Scenario: 成功创建资源
+- **WHEN** 客户端调用 `POST /api/menus`，携带合法的 `name`、`code`、`parentId`、`resourceType`、`showOrder`，且 `code` 在未删除资源中不重复
+- **THEN** 系统创建该资源，状态为 `2000`（启用），并返回创建后的资源信息
+
+#### Scenario: 编码重复时拒绝创建
+- **WHEN** 客户端调用 `POST /api/menus`，其 `code` 与某个未被逻辑删除的资源重复
+- **THEN** 系统拒绝创建，返回业务错误（非零 `code`）
+
+#### Scenario: 资源类型非法时拒绝创建
+- **WHEN** 客户端调用 `POST /api/menus`，其 `resourceType` 不是菜单、按钮、API 三者之一
+- **THEN** 系统拒绝创建，返回业务错误（非零 `code`）
+
+#### Scenario: 编码可在原资源删除后被复用
+- **WHEN** 某资源 A 的 `code` 为 `X`，A 被逻辑删除后，客户端创建新资源并使用相同的 `code` `X`
+- **THEN** 系统允许创建成功（唯一性校验仅针对未删除资源）
+
+### Requirement: 更新资源
+系统 SHALL 支持更新资源的名称、编码、上级资源、资源类型、显示序号、备注；编码唯一性校验范围为未被逻辑删除的资源，且排除被更新资源自身；更新接口不修改资源状态；资源类型的取值校验规则与创建时一致。
+
+#### Scenario: 成功更新资源
+- **WHEN** 客户端调用 `PUT /api/menus/{id}`，携带合法的 `name`、`code`、`parentId`、`resourceType`、`showOrder`
+- **THEN** 系统更新该资源信息并返回更新后的结果，`status` 保持不变
+
+#### Scenario: 编码与其他资源重复时拒绝更新
+- **WHEN** 客户端调用 `PUT /api/menus/{id}`，其 `code` 与另一个未删除资源重复（非自身）
+- **THEN** 系统拒绝更新，返回业务错误
+
+#### Scenario: 资源类型非法时拒绝更新
+- **WHEN** 客户端调用 `PUT /api/menus/{id}`，其 `resourceType` 不是菜单、按钮、API 三者之一
+- **THEN** 系统拒绝更新，返回业务错误（非零 `code`）
+
+### Requirement: 资源启用与停用
+系统 SHALL 提供独立的接口将资源状态切换为启用（`2000`）或停用（`3000`），与新增/更新接口分离。
+
+#### Scenario: 启用资源
+- **WHEN** 客户端调用 `PUT /api/menus/{id}/enable`
+- **THEN** 系统将该资源 `status` 置为 `2000` 并返回更新后的资源信息
+
+#### Scenario: 停用资源
+- **WHEN** 客户端调用 `PUT /api/menus/{id}/disable`
+- **THEN** 系统将该资源 `status` 置为 `3000` 并返回更新后的资源信息
+
+### Requirement: 资源逻辑删除
+系统 SHALL 支持对资源执行逻辑删除（将 `status` 置为 `-1000`），不做物理删除；当资源存在未被逻辑删除的直属子资源时，系统拒绝删除。
+
+#### Scenario: 成功删除无子资源的资源
+- **WHEN** 客户端调用 `DELETE /api/menus/{id}`，且该资源不存在任何未删除的直属子资源
+- **THEN** 系统将该资源 `status` 置为 `-1000`，该资源此后不再出现在树查询、子资源查询、详情查询的结果中
+
+#### Scenario: 存在未删除子资源时拒绝删除
+- **WHEN** 客户端调用 `DELETE /api/menus/{id}`，且该资源存在至少一个未被逻辑删除的直属子资源
+- **THEN** 系统拒绝删除，返回业务错误（非零 `code`），该资源状态不变
+
+### Requirement: 资源状态语义
+系统 SHALL 使用统一的整型状态码表达资源的启停用与删除语义：`2000` 表示启用，`3000` 表示停用，`-1000` 表示已逻辑删除；三者互斥，与组织、用户、角色、权限等模块的状态码含义保持一致。
+
+#### Scenario: 状态码含义一致
+- **WHEN** 系统返回任意资源的 `status` 字段
+- **THEN** 其值必为 `2000`、`3000`、`-1000` 三者之一，分别代表启用、停用、已删除
+
+### Requirement: 资源类型语义
+系统 SHALL 使用统一的整型编码表达资源类型：`1` 表示菜单，`2` 表示按钮，`3` 表示 API；三者互斥，且是固定的结构性类型，不通过通用字典管理模块维护或扩展。
+
+#### Scenario: 资源类型编码含义一致
+- **WHEN** 系统返回任意资源的 `resourceType` 字段
+- **THEN** 其值必为 `1`、`2`、`3` 三者之一，分别代表菜单、按钮、API
+
+### Requirement: 菜单管理前端界面
+系统 SHALL 提供菜单管理页面（路径 `/system/menus`，菜单文案"菜单管理"），左侧展示资源树，右侧以分页表格展示直属子资源数据；页面进入时无需用户先点击左侧树节点，右侧表格 SHALL 默认展示顶级资源的第一页数据（每页 10 条），右侧面板标题在用户尚未点击左侧树任何节点前 SHALL 保持空白，用户点击左侧树的具体节点后标题 SHALL 显示为"[该资源名称]下级资源"。左侧资源树 SHALL 默认全部收起，采用懒加载方式逐层展开。全量资源树查询（`GET /api/menus/tree`）SHALL 仅在用户打开新增或编辑弹窗时按需请求。新增/编辑弹窗内"上级资源"选择器行为（虚拟顶级根节点、防环、按场景收紧展开范围）SHALL 与组织管理页面的上级组织选择器一致。列表表格 SHALL 展示资源名称、资源编码、资源类型、显示序号、状态；不展示新增人/新增时间/更新人/更新时间，这些审计字段连同备注、上级资源名称 SHALL 通过独立的只读"资源详情"入口查看。页面 SHALL 支持新增、编辑、启用、停用、删除、详情。
+
+#### Scenario: 默认展示顶级资源分页列表
+- **WHEN** 用户打开菜单管理页面且尚未点击左侧树的任何节点
+- **THEN** 右侧表格自动展示顶级资源（`parentId = 0`）的第一页数据（每页 10 条），右侧面板标题保持空白
+
+#### Scenario: 左侧资源树默认全部收起
+- **WHEN** 用户打开菜单管理页面
+- **THEN** 左侧资源树的所有节点默认处于收起状态，不自动展开任何层级
+
+#### Scenario: 选中树节点后展示其直属子资源并更新标题
+- **WHEN** 用户点击左侧资源树中的某个节点
+- **THEN** 右侧表格展示该节点的直属子资源分页列表（重置为第一页），右侧面板标题变为"[该节点名称]下级资源"
+
+#### Scenario: 新增资源时选择资源类型
+- **WHEN** 用户点击"新增"打开弹窗，在资源类型单选组中选择"菜单"、"按钮"或"API"之一
+- **THEN** 新增表单记录对应的 `resourceType` 值
+
+#### Scenario: 必填字段缺失时阻止提交
+- **WHEN** 用户在新增/编辑弹窗中未填写资源名称、未填写资源编码、未选择上级资源或未选择资源类型就点击"确定"
+- **THEN** 表单校验失败，阻止提交，并在对应字段下提示必填
+
+#### Scenario: 资源编码冲突时提交被拒绝
+- **WHEN** 用户在新增/编辑弹窗中填写的资源编码与另一个未删除资源重复，并点击"确定"
+- **THEN** 前端表单校验通过后提交请求，后端返回业务错误，页面提示编码已存在类错误信息，弹窗保持打开
+
+#### Scenario: 列表操作触发的状态变更实时可见
+- **WHEN** 用户在列表中对某一行执行启用、停用或删除操作
+- **THEN** 操作成功后表格当前页数据与左侧树中受影响父节点的直属子节点均刷新以反映最新状态；若刷新后当前页码超出新的总页数，则自动回退到最后一页
+
+#### Scenario: 存在下级资源时删除操作被拒绝并提示
+- **WHEN** 用户对存在未删除下级资源的节点点击"删除"并确认
+- **THEN** 后端拒绝删除并返回业务错误，页面提示对应错误信息，该资源在列表中的状态不变
+
+#### Scenario: 查看资源详情
+- **WHEN** 用户在列表某一行点击"详情"
+- **THEN** 系统以只读方式展示该资源的完整信息：资源名称、资源编码、上级资源、资源类型、显示序号、备注、状态、创建人、创建时间、更新人、更新时间
+
