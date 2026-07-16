@@ -13,7 +13,6 @@ declare module 'vue-router' {
 
 const stubDescriptions: Record<string, string> = {
   '/application/secret': '查看和轮换应用的访问密钥，密钥仅在生成时完整显示一次。',
-  '/permission/roles': '定义角色并为角色勾选权限点，用户通过被赋予角色间接获得权限——这是 RBAC 的核心。',
   '/permission/points': '维护最细粒度的权限点（如 identity:user:edit），供角色勾选和接口鉴权引用。',
   '/system/menus': '配置侧边栏菜单与其绑定的权限点，控制不同角色登录后能看到哪些入口。',
   '/system/logs': '记录关键操作的审计日志：谁在什么时候对什么资源做了什么变更。',
@@ -25,6 +24,7 @@ const implementedComponents: Record<string, () => Promise<unknown>> = {
   '/identity/users': () => import('@/views/identity/user/UserManagementView.vue'),
   '/identity/positions': () => import('@/views/identity/position/PositionManagementView.vue'),
   '/application/list': () => import('@/views/application/app/AppManagementView.vue'),
+  '/permission/roles': () => import('@/views/permission/role/RoleManagementView.vue'),
   '/system/dicts': () => import('@/views/system/dict/DictManagementView.vue'),
 }
 
