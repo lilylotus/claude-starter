@@ -103,6 +103,7 @@ openspec instructions apply --change "<name>" --json    # 需要读取/同步的
 - 新增/修改接口时加上 springdoc-openapi 注解（`@Tag`、`@Operation`），让 Swagger UI
   和代码保持同步。
 - 修改 `build.gradle` 新增依赖前，先跟用户确认。
+- 所有表字段、数据层DTO类字段必须检查是否和各个类型数据库关键字冲突，防止SQL语法错误。字段命名规则：驼峰命名，数据库字段统一下划线分隔，避免使用数据库关键字。
 
 ### 前端约定（`.claude/agents/vue3-frontend-dev.md`）
 
@@ -123,6 +124,11 @@ openspec instructions apply --change "<name>" --json    # 需要读取/同步的
 注意：
 - 所有编码之前必须先创建 OpenSpec 规范的标准 `tasks.md` / `design.md` / `proposal.md` 过程文档
 - 编码完成后若有调整在更新 OpenSpec 规范的标准 `tasks.md` / `design.md` / `proposal.md` 过程文档
+
+1. 如果请求会新增、调整、支持、优化、改成某项能力，或改变页面、接口、流程、字段、权限、数据结构、验收标准或交付结果，必须先创建或更新 OpenSpec change。
+2. 进入实现、测试或 TDD 前，当前 change 至少必须具备 `proposal.md`、`tasks.md` 和 `specs/`；如果当前范围已经进入设计收敛，还必须补齐 `design.md`。
+3. 只要当前 change 存在 `proposal.md`、`design.md` 或 `specs/` 增量，必须先在当前对话中展示摘要并等待使用者确认；未确认前不得直接进入实现、测试或 TDD。
+4. 用户报告的问题默认是“可信线索”，不是“已证事实”。当用户以自然语言报告“发现、好像、不符合、这个有问题、应该改成”等疑似缺陷时，AI 必须先核验观察对象、版本、路径、命令来源和可复现性，并输出 `confirmed`、`not_reproduced` 或 `ambiguous` 的 triage verdict；未达到 `confirmed` 前，不得创建修复型 OpenSpec、任务 worktree、测试、实现 patch、commit、issue 或 MR，除非使用者明确授权按未验证假设推进。
 
 ### OpenSpec 文档同步（`.claude/agents/openspec-doc-sync.md`）
 

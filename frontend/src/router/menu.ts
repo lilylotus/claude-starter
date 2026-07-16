@@ -18,7 +18,7 @@ export const MENU_GROUPS: MenuGroup[] = [
     title: '应用管理',
     icon: Grid,
     children: [
-      { title: '应用列表', path: '/application/list', permissionKey: 'application:app:view' },
+      { title: '应用管理', path: '/application/list', permissionKey: 'application:app:view' },
       { title: '应用密钥', path: '/application/secret', permissionKey: 'application:secret:view' },
     ],
   },
