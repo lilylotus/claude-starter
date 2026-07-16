@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 任职管理的多表查询：tab_user_position 关联 tab_user、tab_org 回填所属用户姓名、
+     所属组织名称。若 tab_user/tab_org 的主键列名或表名变更，需要同步修改这里的 JOIN 条件。
+     LEFT JOIN（而非 INNER JOIN）是有意为之：关联的用户/组织即便已被删除或查不到，
+     任职记录本身仍应正常返回，只是对应的 user_name/org_name 为空。 -->
+<mapper namespace="cn.nihility.rbac.user.mapper.UserPositionMapper">
+
+    <sql id="positionJoinColumns">
+        up.id AS id,
+        up.user_id AS user_id,
+        u.name AS user_name,
+        up.org_id AS org_id,
+        o.name AS org_name,
+        up.position_type AS position_type,
+        up.position_address AS position_address,
+        up.position_phone AS position_phone,
+        up.show_order AS show_order,
+        up.remark AS remark,
+        up.status AS status,
+        up.create_by AS create_by,
+        up.create_time AS create_time,
+        up.update_by AS update_by,
+        up.update_time AS update_time
+    </sql>
+
+    <sql id="positionJoinFrom">
+        FROM tab_user_position up
+        LEFT JOIN tab_user u ON u.id = up.user_id
+        LEFT JOIN tab_org o ON o.id = up.org_id
+    </sql>
+
+    <select id="selectPositionPage" resultType="cn.nihility.rbac.user.dto.PositionVO">
+        SELECT
+        <include refid="positionJoinColumns"/>
+        <include refid="positionJoinFrom"/>
+        WHERE up.org_id = #{orgId}
+        AND up.status != #{deletedStatus}
+        ORDER BY up.show_order DESC, up.id ASC
+    </select>
+
+    <select id="selectPositionDetail" resultType="cn.nihility.rbac.user.dto.PositionVO">
+        SELECT
+        <include refid="positionJoinColumns"/>
+        <include refid="positionJoinFrom"/>
+        WHERE up.id = #{id}
+        AND up.status != #{deletedStatus}
+    </select>
+
+</mapper>
