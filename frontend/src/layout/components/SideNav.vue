@@ -83,8 +83,8 @@ const route = useRoute()
 // 子菜单里用一条竖线 + 小圆点把父子层级"连"起来，呼应登录页/概览页的链式视觉语言。
 .side-nav__menu :deep(.el-menu) {
   position: relative;
-  margin-left: 26px;
-  padding-left: 16px;
+  margin-left: 14px;
+  padding-left: 8px;
   border-left: 1px dashed var(--chain-line-color);
 }
 
@@ -97,7 +97,7 @@ const route = useRoute()
 .side-nav__menu :deep(.el-sub-menu .el-menu-item::before) {
   content: '';
   position: absolute;
-  left: -21px;
+  left: -9px;
   top: 50%;
   width: var(--chain-dot-size-sm);
   height: var(--chain-dot-size-sm);

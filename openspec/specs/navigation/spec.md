@@ -1,0 +1,16 @@
+# navigation Specification
+
+## Purpose
+TBD - created by archiving change compact-tree-and-menu-indent. Update Purpose after archive.
+## Requirements
+### Requirement: 侧边导航二级菜单
+系统 SHALL 在应用外壳（`AppLayout.vue`/`SideNav.vue`）的侧边导航中，以一级菜单分组（可展开/收起）+ 二级菜单项的两级结构展示各功能入口；二级菜单项 SHALL 用一条虚线 + 圆点的链式连接视觉语言与其所属的一级菜单分组关联，缩进 SHALL 保持紧凑，不应让二级菜单相对一级菜单标题的横向偏移占据侧边栏展开态宽度的过大比例，同时缩进仍需清晰地区分出二级菜单项从属于哪个一级菜单分组。
+
+#### Scenario: 展开一级菜单分组后二级菜单项紧凑缩进
+- **WHEN** 用户点击一级菜单分组标题将其展开
+- **THEN** 该分组下的二级菜单项显示为紧凑缩进（相较一级菜单标题的横向偏移明显小于分组标题本身的左内边距量级），菜单项文字不发生裁切，虚线与圆点清晰地将二级菜单项与所属分组连接起来
+
+#### Scenario: 二级菜单项高亮态圆点变化
+- **WHEN** 用户点击某个二级菜单项使其成为当前激活路由
+- **THEN** 该菜单项对应的圆点标记切换为高亮色，其余未激活菜单项的圆点保持默认色
+

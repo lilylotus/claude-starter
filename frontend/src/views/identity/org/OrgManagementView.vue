@@ -252,6 +252,7 @@ async function handleDelete(row: OrgRow) {
         :data="orgStore.navTreeTopLevel"
         :props="treeProps"
         node-key="id"
+        :indent="8"
         lazy
         :load="loadNode"
         highlight-current
@@ -418,8 +419,8 @@ async function handleDelete(row: OrgRow) {
 // 用一条虚线 + 圆点把父子层级"连"起来，呼应侧边栏子菜单的链式视觉语言
 .org-tree :deep(.el-tree-node__children) {
   position: relative;
-  margin-left: 8px;
-  padding-left: 14px;
+  margin-left: 4px;
+  padding-left: 6px;
   border-left: 1px dashed var(--chain-line-color);
 }
 
@@ -427,10 +428,12 @@ async function handleDelete(row: OrgRow) {
   position: relative;
 }
 
+// 圆点的 left 值须与上面 .el-tree-node__children 的 padding-left 保持一致（互为负值），
+// 否则圆点会偏离虚线
 .org-tree :deep(.el-tree-node__children > .el-tree-node::before) {
   content: '';
   position: absolute;
-  left: -14px;
+  left: -6px;
   top: 14px;
   width: var(--chain-dot-size-sm);
   height: var(--chain-dot-size-sm);
