@@ -91,6 +91,8 @@ TBD - created by archiving change 2026-07-16-add-application-management. Update 
 - 启用/停用/删除：与组织管理、用户管理、任职管理页面的交互模式一致（列表行内操作按钮 + 删除二次确认）。
 - 详情：只读展示应用完整信息（应用名称、应用编码、负责人、所属组织、显示序号、备注、状态、创建人、创建时间、更新人、更新时间）。
 
+新增/编辑弹窗"所属组织"选择器所需的全量组织树查询（`GET /api/orgs/tree`）SHALL 仅在用户打开新增或编辑弹窗时按需请求，页面进入时 SHALL NOT 主动触发该查询。
+
 #### Scenario: 应用列表按显示序号降序分页展示
 - **WHEN** 用户打开应用管理页面
 - **THEN** 系统调用 `GET /api/apps?page=1&pageSize=10`，按 `showOrder` 降序展示第一页应用，不携带任何筛选参数
@@ -98,6 +100,14 @@ TBD - created by archiving change 2026-07-16-add-application-management. Update 
 #### Scenario: 翻页查看更多应用
 - **WHEN** 用户在应用列表底部点击分页组件切换到其他页码
 - **THEN** 系统按新页码重新查询并展示对应页的应用数据
+
+#### Scenario: 页面进入时不预先请求全量组织树
+- **WHEN** 用户打开应用管理页面，且不打开新增或编辑弹窗
+- **THEN** 系统不请求全量组织树查询接口 `GET /api/orgs/tree`
+
+#### Scenario: 打开新增或编辑弹窗时按需加载全量组织树
+- **WHEN** 用户点击"新增"或某一行的"编辑"打开弹窗
+- **THEN** 系统此时才请求全量组织树查询接口 `GET /api/orgs/tree`，请求完成后再展示弹窗
 
 #### Scenario: 新增应用时按姓名或手机号搜索负责人
 - **WHEN** 用户点击"新增"打开弹窗，在负责人选择框中输入姓名或手机号关键字进行远程搜索并选中一个用户

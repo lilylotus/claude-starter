@@ -43,6 +43,12 @@ openspec instructions apply --change "<name>" --json    # 需要读取/同步的
 使用 `/opsx:*` 系列 slash 命令（propose、explore、apply、sync、archive）或对应的
 `openspec-*` skill 来推进一个 change 的生命周期。
 
+创建 change 时目录名（`openspec new change "<name>"` 的 `<name>`）采用纯 kebab-case 命名，
+**不要**在前面加日期前缀（如 `2026-07-17-xxx`）——`openspec status`/`instructions apply`
+等命令的 `--change` 参数在 change 名以数字开头时会报错（"Change name must start with a
+letter"）。日期前缀只在归档时由 `openspec-archive-change` 自动加到目标目录名
+（`archive/YYYY-MM-DD-<name>`），创建阶段不需要、也不应该手动加。
+
 ## 架构
 
 - `backend/` — Java 21 + Spring Boot 3.5.16，Gradle Wrapper，依赖解析会先走阿里云镜像

@@ -16,9 +16,10 @@ const positionStore = usePositionStore()
 
 onMounted(() => {
   // 左侧导航树在 lazy 模式下挂载时会自动对根节点调用一次 load（parentId = 0），
-  // 这里不需要主动拉取；只需要一次性加载弹窗“所属组织”选择器用的全量组织树，
-  // 以及任职类型下拉框的数据源
-  fetchOrgTree()
+  // 这里不需要主动拉取；任职类型下拉框的数据源在这里预加载。
+  // 全量组织树（orgTree，供新增/编辑弹窗内“所属组织”选择器用）不在这里预加载：
+  // 只有打开弹窗时才需要它，此处预加载会让绝大多数只浏览任职列表的页面访问都白白
+  // 发一次 GET /api/orgs/tree（见 openCreateDialog/openEditDialog）
   fetchPositionTypeOptions()
 })
 
@@ -133,9 +134,10 @@ const rules: FormRules<PositionForm> = {
 
 const dialogTitle = computed(() => (dialogMode.value === 'create' ? '新增任职' : '编辑任职'))
 
-function openCreateDialog() {
+async function openCreateDialog() {
   // 按钮在未选中左侧组织节点时禁用，理论上不会在 selectedOrgId 为 null 时被调用
   if (positionStore.selectedOrgId === null) return
+  await fetchOrgTree()
   dialogMode.value = 'create'
   editingId.value = null
   form.userId = null
@@ -155,6 +157,7 @@ async function openEditDialog(row: PositionRow) {
   dialogMode.value = 'edit'
   editingId.value = row.id
   const detail = await positionApi.getPositionById(row.id)
+  await fetchOrgTree()
   form.userId = detail.userId
   form.userName = detail.userName
   form.orgId = detail.orgId

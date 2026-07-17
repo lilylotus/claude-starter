@@ -13,7 +13,9 @@ const appStore = useAppStore()
 
 onMounted(() => {
   appStore.fetchPage()
-  fetchOrgTree()
+  // 全量组织树（orgTree，供新增/编辑弹窗内“所属组织”选择器用）不在这里预加载：
+  // 只有打开弹窗时才需要它，此处预加载会让绝大多数只浏览应用列表的页面访问都白白
+  // 发一次 GET /api/orgs/tree（见 openCreateDialog/openEditDialog）
 })
 
 function handlePageChange(targetPage: number) {
@@ -95,7 +97,8 @@ const rules: FormRules<AppForm> = {
 
 const dialogTitle = computed(() => (dialogMode.value === 'create' ? '新增应用' : '编辑应用'))
 
-function openCreateDialog() {
+async function openCreateDialog() {
+  await fetchOrgTree()
   dialogMode.value = 'create'
   editingId.value = null
   form.name = ''
@@ -112,6 +115,7 @@ async function openEditDialog(row: AppRow) {
   dialogMode.value = 'edit'
   editingId.value = row.id
   const detail = await appApi.getAppById(row.id)
+  await fetchOrgTree()
   form.name = detail.name
   form.code = detail.code
   form.ownerId = detail.ownerId
