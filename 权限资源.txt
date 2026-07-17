@@ -1,0 +1,119 @@
+权限资源编码清单
+====================
+
+格式：模块:资源:操作（三段式，冒号分隔）
+- 模块：对应前端管理页面组件名（PascalCase，去掉 View 后缀），如 UserManagement
+- 资源：该模块管理的实体，小写单数名词，如 user
+- 操作：view/add/edit/detail/enable/disable/delete 等具体动作，小写动词
+
+资源类型对应 tab_menu.resource_type：
+- :view 对应「菜单」（resource_type = 1）
+- 其余（add/edit/detail/enable/disable/delete 等）对应「按钮」（resource_type = 2）
+
+不纳入统计的情况：
+- 搜索、重置、取消、表单内"添加一行/删除一行"等纯前端交互按钮，不对应后端资源
+- 没有对应弹窗/接口的操作（如字典类型、字典项没有"详情"按钮）不生成 :detail
+
+维护约定：
+后续任何页面新增、删除菜单，或新增、删除按钮，都需要同步在本文件里增删对应条目，
+保持本文件与前端实际实现一致。
+
+
+身份管理
+--------
+
+OrgManagement（组织管理，/identity/orgs）
+- OrgManagement:org:view       组织管理页面访问（含左侧组织树浏览）
+- OrgManagement:org:add        新增组织
+- OrgManagement:org:edit       编辑组织
+- OrgManagement:org:detail     查看组织详情
+- OrgManagement:org:enable     启用组织
+- OrgManagement:org:disable    停用组织
+- OrgManagement:org:delete     删除组织
+
+UserManagement（用户管理，/identity/users）
+- UserManagement:user:view     用户管理页面访问
+- UserManagement:user:add      新增用户
+- UserManagement:user:edit     编辑用户
+- UserManagement:user:detail   查看用户详情
+- UserManagement:user:enable   启用用户
+- UserManagement:user:disable  停用用户
+- UserManagement:user:delete   删除用户
+
+PositionManagement（任职管理，/identity/positions）
+- PositionManagement:position:view     任职管理页面访问
+- PositionManagement:position:add      新增任职记录
+- PositionManagement:position:edit     编辑任职记录
+- PositionManagement:position:detail   查看任职详情
+- PositionManagement:position:enable   启用任职记录
+- PositionManagement:position:disable  停用任职记录
+- PositionManagement:position:delete   删除任职记录
+
+
+应用管理
+--------
+
+AppManagement（应用管理，/application/list）
+- AppManagement:app:view       应用管理页面访问
+- AppManagement:app:add        新增应用
+- AppManagement:app:edit       编辑应用
+- AppManagement:app:detail     查看应用详情
+- AppManagement:app:enable     启用应用
+- AppManagement:app:disable    停用应用
+- AppManagement:app:delete     删除应用
+
+
+权限管理
+--------
+
+RoleManagement（角色管理，/permission/roles）
+- RoleManagement:role:view     角色管理页面访问
+- RoleManagement:role:add      新增角色
+- RoleManagement:role:edit     编辑角色
+- RoleManagement:role:detail   查看角色详情
+- RoleManagement:role:enable   启用角色
+- RoleManagement:role:disable  停用角色
+- RoleManagement:role:delete   删除角色
+
+PermissionManagement（权限点管理，/permission/points）
+- PermissionManagement:permission:view     权限点管理页面访问
+- PermissionManagement:permission:add      新增权限点
+- PermissionManagement:permission:edit     编辑权限点
+- PermissionManagement:permission:detail   查看权限点详情
+- PermissionManagement:permission:enable   启用权限点
+- PermissionManagement:permission:disable  停用权限点
+- PermissionManagement:permission:delete   删除权限点
+
+
+系统管理
+--------
+
+MenuManagement（菜单管理，/system/menus）
+- MenuManagement:menu:view     菜单/资源管理页面访问
+- MenuManagement:menu:add      新增资源
+- MenuManagement:menu:edit     编辑资源
+- MenuManagement:menu:detail   查看资源详情
+- MenuManagement:menu:enable   启用资源
+- MenuManagement:menu:disable  停用资源
+- MenuManagement:menu:delete   删除资源
+
+DictManagement（字典管理，/system/dicts）
+- DictManagement:dictType:view      字典管理页面访问（含字典类型列表）
+- DictManagement:dictType:add       新增字典类型
+- DictManagement:dictType:edit      编辑字典类型
+- DictManagement:dictType:enable    启用字典类型
+- DictManagement:dictType:disable   停用字典类型
+- DictManagement:dictType:delete    删除字典类型
+- DictManagement:dictItem:add       新增字典项（需先选中左侧字典类型）
+- DictManagement:dictItem:edit      编辑字典项
+- DictManagement:dictItem:enable    启用字典项
+- DictManagement:dictItem:disable   停用字典项
+- DictManagement:dictItem:delete    删除字典项
+（字典项没有独立页面级 view，复用 DictManagement:dictType:view）
+
+
+尚未实现（不计入以上编码，实现后再补充）
+--------
+
+- 应用密钥（/application/secret）——仍是占位页面
+- 操作日志（/system/logs）——仍是占位页面

@@ -139,6 +139,12 @@ letter"）。日期前缀只在归档时由 `openspec-archive-change` 自动加�
 记忆去写。这是独立于把 spec delta 应用到 `openspec/specs/`（`openspec-sync-specs`
 负责）和归档该 change（`openspec-archive-change` 负责）的另一个步骤。
 
+## 权限资源编码
+
+仓库根目录 `权限资源.txt` 维护全量菜单/按钮资源编码清单（三段式格式：模块:资源:操作，
+如 `UserManagement:user:add`）。**任何新增/删除页面菜单、新增/删除按钮的改动，都必须
+同步更新这份文件**，保持它与前端实际实现一致，不要让它过期。
+
 ## 代码风格
 
 Java 代码遵循 `java-code-style` skill 的规范（4 空格缩进、K&R 大括号风格、UTF-8、
