@@ -2,8 +2,10 @@ package cn.nihility.rbac.role.service;
 
 import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.role.dto.RoleCreateRequest;
+import cn.nihility.rbac.role.dto.RoleOptionVO;
 import cn.nihility.rbac.role.dto.RoleUpdateRequest;
 import cn.nihility.rbac.role.dto.RoleVO;
+import java.util.List;
 
 /**
  * 角色管理业务逻辑接口，提供角色主数据的分页查询、维护、启停用、逻辑删除能力。
@@ -66,4 +68,12 @@ public interface RoleService {
      * @param id 角色 id
      */
     void delete(Long id);
+
+    /**
+     * 查询全部未被逻辑删除且状态为启用的角色精简选项列表，供其他模块的角色多选/单选
+     * 选择器一次性加载全量选项使用，不分页。
+     *
+     * @return 启用状态的角色精简选项列表，按显示序号降序、id 升序排列
+     */
+    List<RoleOptionVO> getEnabledOptions();
 }

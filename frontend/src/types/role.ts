@@ -27,6 +27,14 @@ export interface RoleFormRequest {
   remark: string
 }
 
+// 不分页的角色选项，来自 GET /api/roles/options，供其他模块（如管理员管理）的
+// 角色多选下拉框使用；仅含未删除且启用的角色
+export interface RoleOption {
+  id: number
+  name: string
+  code: string
+}
+
 // 通用分页响应结构，字段命名和后端 cn.nihility.rbac.common.PageResult 对齐
 export interface PageResult<T> {
   records: T[]

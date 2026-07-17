@@ -84,6 +84,15 @@ PermissionManagement（权限点管理，/permission/points）
 - PermissionManagement:permission:disable  停用权限点
 - PermissionManagement:permission:delete   删除权限点
 
+AdminManagement（管理员管理，/permission/admins）
+- AdminManagement:admin:view     管理员管理页面访问
+- AdminManagement:admin:add      新增管理员
+- AdminManagement:admin:edit     编辑管理员
+- AdminManagement:admin:detail   查看管理员详情
+- AdminManagement:admin:enable   启用管理员
+- AdminManagement:admin:disable  停用管理员
+- AdminManagement:admin:delete   删除管理员
+
 
 系统管理
 --------

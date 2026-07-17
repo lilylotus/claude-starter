@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 管理员管理的多表查询：tab_admin 关联 tab_user 回填关联用户姓名。若 tab_user 的
+     主键列名或表名变更，需要同步修改这里的 JOIN 条件。LEFT JOIN（而非 INNER JOIN）是
+     有意为之：关联的用户即便已被删除或查不到，管理员记录本身仍应正常返回，只是对应的
+     user_name 为空。 -->
+<mapper namespace="cn.nihility.rbac.admin.mapper.AdminMapper">
+
+    <sql id="adminJoinColumns">
+        a.id AS id,
+        a.name AS name,
+        a.code AS code,
+        a.user_id AS user_id,
+        u.name AS user_name,
+        a.show_order AS show_order,
+        a.remark AS remark,
+        a.status AS status,
+        a.create_by AS create_by,
+        a.create_time AS create_time,
+        a.update_by AS update_by,
+        a.update_time AS update_time
+    </sql>
+
+    <sql id="adminJoinFrom">
+        FROM tab_admin a
+        LEFT JOIN tab_user u ON u.id = a.user_id
+    </sql>
+
+    <select id="selectAdminPage" resultType="cn.nihility.rbac.admin.dto.AdminVO">
+        SELECT
+        <include refid="adminJoinColumns"/>
+        <include refid="adminJoinFrom"/>
+        WHERE a.status != #{deletedStatus}
+        ORDER BY a.show_order DESC, a.id ASC
+    </select>
+
+    <select id="selectAdminDetail" resultType="cn.nihility.rbac.admin.dto.AdminVO">
+        SELECT
+        <include refid="adminJoinColumns"/>
+        <include refid="adminJoinFrom"/>
+        WHERE a.id = #{id}
+        AND a.status != #{deletedStatus}
+    </select>
+
+</mapper>

@@ -1,6 +1,7 @@
 package cn.nihility.rbac.role.mapstruct;
 
 import cn.nihility.rbac.role.dto.RoleCreateRequest;
+import cn.nihility.rbac.role.dto.RoleOptionVO;
 import cn.nihility.rbac.role.dto.RoleUpdateRequest;
 import cn.nihility.rbac.role.dto.RoleVO;
 import cn.nihility.rbac.role.entity.RoleEntity;
@@ -63,4 +64,20 @@ public interface RoleConvert {
     @Mapping(target = "updateBy", ignore = true)
     @Mapping(target = "updateTime", ignore = true)
     void updateEntity(RoleUpdateRequest request, @MappingTarget RoleEntity entity);
+
+    /**
+     * 实体转精简选项视图对象。
+     *
+     * @param entity 角色实体
+     * @return 精简选项视图对象
+     */
+    RoleOptionVO toOptionVO(RoleEntity entity);
+
+    /**
+     * 实体列表批量转精简选项视图对象列表。
+     *
+     * @param entities 角色实体列表
+     * @return 精简选项视图对象列表
+     */
+    List<RoleOptionVO> toOptionVOList(List<RoleEntity> entities);
 }

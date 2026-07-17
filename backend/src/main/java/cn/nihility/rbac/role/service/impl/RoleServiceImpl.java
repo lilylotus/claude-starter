@@ -4,6 +4,7 @@ import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.role.constant.RoleStatus;
 import cn.nihility.rbac.role.dto.RoleCreateRequest;
+import cn.nihility.rbac.role.dto.RoleOptionVO;
 import cn.nihility.rbac.role.dto.RoleUpdateRequest;
 import cn.nihility.rbac.role.dto.RoleVO;
 import cn.nihility.rbac.role.entity.RoleEntity;
@@ -117,6 +118,18 @@ public class RoleServiceImpl implements RoleService {
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         roleMapper.updateById(entity);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public List<RoleOptionVO> getEnabledOptions() {
+        List<RoleEntity> entities = roleMapper.selectList(new LambdaQueryWrapper<RoleEntity>()
+                .eq(RoleEntity::getStatus, RoleStatus.ENABLED)
+                .orderByDesc(RoleEntity::getShowOrder)
+                .orderByAsc(RoleEntity::getId));
+        return RoleConvert.INSTANCE.toOptionVOList(entities);
     }
 
     /**

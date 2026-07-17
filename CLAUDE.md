@@ -131,6 +131,7 @@ letter"）。日期前缀只在归档时由 `openspec-archive-change` 自动加�
 注意：
 - 所有编码之前必须先创建 OpenSpec 规范的标准 `tasks.md` / `design.md` / `proposal.md` 过程文档
 - 编码完成后若有调整在更新 OpenSpec 规范的标准 `tasks.md` / `design.md` / `proposal.md` 过程文档
+- 在 OpenSpec 规范的标准 `tasks.md` / `design.md` / `proposal.md` 创建编写完成后需要手动确认是否继续执行实现工作。
 
 ### OpenSpec 文档同步（`.claude/agents/openspec-doc-sync.md`）
 

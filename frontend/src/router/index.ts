@@ -24,6 +24,7 @@ const implementedComponents: Record<string, () => Promise<unknown>> = {
   '/application/list': () => import('@/views/application/app/AppManagementView.vue'),
   '/permission/roles': () => import('@/views/permission/role/RoleManagementView.vue'),
   '/permission/points': () => import('@/views/permission/permission/PermissionManagementView.vue'),
+  '/permission/admins': () => import('@/views/permission/admin/AdminManagementView.vue'),
   '/system/dicts': () => import('@/views/system/dict/DictManagementView.vue'),
   '/system/menus': () => import('@/views/system/menu/MenuManagementView.vue'),
 }

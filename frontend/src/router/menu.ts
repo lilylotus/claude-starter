@@ -29,6 +29,7 @@ export const MENU_GROUPS: MenuGroup[] = [
     children: [
       { title: '角色管理', path: '/permission/roles', permissionKey: 'permission:role:view' },
       { title: '权限点管理', path: '/permission/points', permissionKey: 'permission:point:view' },
+      { title: '管理员管理', path: '/permission/admins', permissionKey: 'permission:admin:view' },
     ],
   },
   {

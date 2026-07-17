@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 管理员角色关联查询：tab_admin_role 关联 tab_role 回填角色名称。用 INNER JOIN
+     （而非 LEFT JOIN）是有意为之：角色若已被删除，对应的关联行没有展示价值，直接不返回，
+     不像 tab_user_position 关联用户/组织那样需要容忍关联目标缺失。 -->
+<mapper namespace="cn.nihility.rbac.admin.mapper.AdminRoleMapper">
+
+    <select id="selectRolesByAdminId" resultType="cn.nihility.rbac.admin.dto.AdminRoleVO">
+        SELECT
+        ar.role_id AS role_id,
+        r.name AS role_name
+        FROM tab_admin_role ar
+        INNER JOIN tab_role r ON r.id = ar.role_id
+        WHERE ar.admin_id = #{adminId}
+        ORDER BY r.show_order DESC, r.id ASC
+    </select>
+
+</mapper>

@@ -3,6 +3,7 @@ package cn.nihility.rbac.role.controller;
 import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.Result;
 import cn.nihility.rbac.role.dto.RoleCreateRequest;
+import cn.nihility.rbac.role.dto.RoleOptionVO;
 import cn.nihility.rbac.role.dto.RoleUpdateRequest;
 import cn.nihility.rbac.role.dto.RoleVO;
 import cn.nihility.rbac.role.service.RoleService;
@@ -10,6 +11,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -120,5 +122,18 @@ public class RoleController {
     public Result<Void> delete(@PathVariable Long id) {
         roleService.delete(id);
         return Result.success();
+    }
+
+    /**
+     * 查询全部启用状态的角色精简选项列表，供其他模块的角色多选/单选选择器一次性
+     * 加载全量选项使用，不分页。
+     *
+     * @return 启用状态的角色精简选项列表
+     */
+    @Operation(summary = "查询启用角色选项", description = "返回全部未被逻辑删除且状态为启用的角色列表，"
+            + "每项包含 id、name、code，按显示序号降序、id 升序排列，不分页")
+    @GetMapping("/api/roles/options")
+    public List<RoleOptionVO> options() {
+        return roleService.getEnabledOptions();
     }
 }

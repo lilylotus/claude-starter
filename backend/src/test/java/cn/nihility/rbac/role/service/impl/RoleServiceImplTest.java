@@ -219,6 +219,21 @@ class RoleServiceImplTest {
     }
 
     /**
+     * 查询启用角色选项时，只应返回状态为启用的角色，不包含已停用或已删除的角色。
+     */
+    @Test
+    void getEnabledOptions_shouldOnlyReturnEnabledRoles() {
+        RoleEntity enabled = buildEntity(10L, RoleStatus.ENABLED);
+        when(roleMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(enabled));
+
+        List<cn.nihility.rbac.role.dto.RoleOptionVO> options = roleService.getEnabledOptions();
+
+        assertThat(options).hasSize(1);
+        assertThat(options.get(0).getId()).isEqualTo(10L);
+        assertThat(options.get(0).getCode()).isEqualTo("role000");
+    }
+
+    /**
      * 构造一个测试用的角色实体。
      *
      * @param id     主键 id
