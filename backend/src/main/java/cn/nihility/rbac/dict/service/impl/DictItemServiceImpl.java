@@ -13,9 +13,12 @@ import cn.nihility.rbac.dict.mapper.DictItemMapper;
 import cn.nihility.rbac.dict.mapper.DictTypeMapper;
 import cn.nihility.rbac.dict.mapstruct.DictConvert;
 import cn.nihility.rbac.dict.service.DictItemService;
+import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
+import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -38,6 +41,9 @@ public class DictItemServiceImpl implements DictItemService {
 
     /** 字典类型数据访问接口，用于回填字典类型名称及按编码解析字典类型。 */
     private final DictTypeMapper dictTypeMapper;
+
+    /** 操作日志记录组件。 */
+    private final OperationLogRecorder operationLogRecorder;
 
     /**
      * {@inheritDoc}
@@ -81,6 +87,9 @@ public class DictItemServiceImpl implements DictItemService {
         entity.setUpdateTime(now);
         dictItemMapper.insert(entity);
 
+        operationLogRecorder.recordCreate(OperationLogResourceType.DICT_ITEM, entity.getId(), entity.getLabel(),
+                toLogSnapshot(entity));
+
         return getById(entity.getId());
     }
 
@@ -91,11 +100,15 @@ public class DictItemServiceImpl implements DictItemService {
     public DictItemVO update(Long id, DictItemUpdateRequest request) {
         DictItemEntity entity = getExistingEntity(id);
         checkCodeUnique(entity.getDictTypeId(), request.getCode(), id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         DictConvert.INSTANCE.updateItemEntity(request, entity);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         dictItemMapper.updateById(entity);
+
+        operationLogRecorder.recordUpdate(OperationLogResourceType.DICT_ITEM, id, entity.getLabel(),
+                beforeSnapshot, toLogSnapshot(entity));
 
         return getById(id);
     }
@@ -122,10 +135,14 @@ public class DictItemServiceImpl implements DictItemService {
     @Override
     public void delete(Long id) {
         DictItemEntity entity = getExistingEntity(id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+
         entity.setStatus(DictStatus.DELETED);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         dictItemMapper.updateById(entity);
+
+        operationLogRecorder.recordDelete(OperationLogResourceType.DICT_ITEM, id, entity.getLabel(), beforeSnapshot);
     }
 
     /**
@@ -157,10 +174,15 @@ public class DictItemServiceImpl implements DictItemService {
      */
     private DictItemVO changeStatus(Long id, int status) {
         DictItemEntity entity = getExistingEntity(id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+
         entity.setStatus(status);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         dictItemMapper.updateById(entity);
+
+        operationLogRecorder.recordStatusChange(OperationLogResourceType.DICT_ITEM, id, entity.getLabel(),
+                status == DictStatus.ENABLED, beforeSnapshot, toLogSnapshot(entity));
         return getById(id);
     }
 
@@ -221,5 +243,41 @@ public class DictItemServiceImpl implements DictItemService {
             vo.setDictTypeName(dictTypeNameMap.get(vo.getDictTypeId()));
         }
         return result;
+    }
+
+    /**
+     * 构造字典项实体的操作日志字段快照，key 为中文字段名，value 为人类可读的格式化值；
+     * 所属字典类型名称需按 {@code dictTypeId} 回查一次。
+     *
+     * @param entity 字典项实体
+     * @return 操作日志字段快照
+     */
+    private Map<String, Object> toLogSnapshot(DictItemEntity entity) {
+        DictTypeEntity dictType = dictTypeMapper.selectById(entity.getDictTypeId());
+
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("所属字典类型", dictType != null ? dictType.getName() : null);
+        snapshot.put("字典项标签", entity.getLabel());
+        snapshot.put("字典项编码", entity.getCode());
+        snapshot.put("显示序号", entity.getShowOrder());
+        snapshot.put("备注", entity.getRemark());
+        snapshot.put("状态", statusLabel(entity.getStatus()));
+        return snapshot;
+    }
+
+    /**
+     * 把字典项状态码值转换为中文文案，供操作日志快照使用。
+     *
+     * @param status 状态码值
+     * @return 中文文案
+     */
+    private String statusLabel(Integer status) {
+        if (Objects.equals(status, DictStatus.ENABLED)) {
+            return "启用";
+        }
+        if (Objects.equals(status, DictStatus.DISABLED)) {
+            return "停用";
+        }
+        return "已删除";
     }
 }

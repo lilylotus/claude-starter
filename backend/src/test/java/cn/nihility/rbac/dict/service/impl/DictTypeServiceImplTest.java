@@ -3,6 +3,7 @@ package cn.nihility.rbac.dict.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.common.exception.BusinessException;
@@ -12,7 +13,9 @@ import cn.nihility.rbac.dict.dto.DictTypeUpdateRequest;
 import cn.nihility.rbac.dict.entity.DictTypeEntity;
 import cn.nihility.rbac.dict.mapper.DictItemMapper;
 import cn.nihility.rbac.dict.mapper.DictTypeMapper;
+import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -20,7 +23,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * {@link DictTypeServiceImpl} 的单元测试，重点覆盖编码唯一性校验、删除前置校验等分支逻辑。
+ * {@link DictTypeServiceImpl} 的单元测试，重点覆盖编码唯一性校验、删除前置校验、
+ * 操作日志记录调用等分支逻辑。
  */
 @ExtendWith(MockitoExtension.class)
 class DictTypeServiceImplTest {
@@ -33,6 +37,10 @@ class DictTypeServiceImplTest {
     @Mock
     private DictItemMapper dictItemMapper;
 
+    /** 被测服务的操作日志记录组件依赖，使用 Mockito 打桩。 */
+    @Mock
+    private OperationLogRecorder operationLogRecorder;
+
     /** 被测服务实例。 */
     private DictTypeServiceImpl dictTypeService;
 
@@ -42,7 +50,7 @@ class DictTypeServiceImplTest {
      */
     @BeforeEach
     void setUp() {
-        dictTypeService = new DictTypeServiceImpl(dictTypeMapper, dictItemMapper);
+        dictTypeService = new DictTypeServiceImpl(dictTypeMapper, dictItemMapper, operationLogRecorder);
     }
 
     /**
@@ -107,6 +115,8 @@ class DictTypeServiceImplTest {
         dictTypeService.delete(1L);
 
         assertThat(entity.getStatus()).isEqualTo(DictStatus.DELETED);
+        verify(operationLogRecorder).recordDelete(org.mockito.ArgumentMatchers.eq("dictType"),
+                org.mockito.ArgumentMatchers.eq(1L), any(), any(Map.class));
     }
 
     /**

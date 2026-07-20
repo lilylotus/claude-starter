@@ -16,12 +16,14 @@ import cn.nihility.rbac.app.entity.AppEntity;
 import cn.nihility.rbac.app.mapper.AppMapper;
 import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,7 +33,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
  * {@link AppServiceImpl} 的单元测试，重点覆盖分页查询、新增默认启用、更新不改状态、
- * 启停用、逻辑删除等分支逻辑。
+ * 启停用、逻辑删除、操作日志记录调用等分支逻辑。
  */
 @ExtendWith(MockitoExtension.class)
 class AppServiceImplTest {
@@ -48,6 +50,10 @@ class AppServiceImplTest {
     @Mock
     private OrgMapper orgMapper;
 
+    /** 被测服务的操作日志记录组件依赖，使用 Mockito 打桩。 */
+    @Mock
+    private OperationLogRecorder operationLogRecorder;
+
     /** 被测服务实例。 */
     private AppServiceImpl appService;
 
@@ -57,7 +63,7 @@ class AppServiceImplTest {
      */
     @BeforeEach
     void setUp() {
-        appService = new AppServiceImpl(appMapper, userMapper, orgMapper);
+        appService = new AppServiceImpl(appMapper, userMapper, orgMapper, operationLogRecorder);
         lenient().when(userMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
     }
@@ -108,6 +114,8 @@ class AppServiceImplTest {
         assertThat(captured.getOrgId()).isEqualTo(100L);
         assertThat(captured.getCreateBy()).isNotNull();
         assertThat(captured.getCreateTime()).isNotNull();
+        verify(operationLogRecorder).recordCreate(org.mockito.ArgumentMatchers.eq("app"), any(),
+                org.mockito.ArgumentMatchers.eq("测试应用"), any(Map.class));
     }
 
     /**
@@ -218,6 +226,8 @@ class AppServiceImplTest {
         assertThat(entity.getStatus()).isEqualTo(AppStatus.DELETED);
         verify(appMapper).updateById(entity);
         verify(appMapper, never()).deleteById(any(Long.class));
+        verify(operationLogRecorder).recordDelete(org.mockito.ArgumentMatchers.eq("app"),
+                org.mockito.ArgumentMatchers.eq(10L), any(), any(Map.class));
     }
 
     /**

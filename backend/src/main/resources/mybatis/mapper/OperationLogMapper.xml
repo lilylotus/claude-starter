@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 操作日志的动态条件分页查询：单表查询，筛选条件（模块/资源类型/操作类型/操作人/
+     操作时间范围）均可选，按需拼接，按操作发起时间（create_time）降序排列。 -->
+<mapper namespace="cn.nihility.rbac.operationlog.mapper.OperationLogMapper">
+
+    <select id="selectOperationLogPage" resultType="cn.nihility.rbac.operationlog.entity.OperationLogEntity">
+        SELECT *
+        FROM tab_operation_log
+        <where>
+            <if test="query.module != null and query.module != ''">
+                AND module = #{query.module}
+            </if>
+            <if test="query.resourceType != null and query.resourceType != ''">
+                AND resource_type = #{query.resourceType}
+            </if>
+            <if test="query.operationType != null">
+                AND operation_type = #{query.operationType}
+            </if>
+            <if test="query.createBy != null and query.createBy != ''">
+                AND create_by = #{query.createBy}
+            </if>
+            <if test="query.startTime != null">
+                AND create_time &gt;= #{query.startTime}
+            </if>
+            <if test="query.endTime != null">
+                AND create_time &lt;= #{query.endTime}
+            </if>
+        </where>
+        ORDER BY create_time DESC, id DESC
+    </select>
+
+</mapper>

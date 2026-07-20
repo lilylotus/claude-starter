@@ -2,17 +2,25 @@ package cn.nihility.rbac.user.service.impl;
 
 import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
+import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.org.entity.OrgEntity;
+import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.user.constant.PositionStatus;
 import cn.nihility.rbac.user.dto.PositionCreateRequest;
 import cn.nihility.rbac.user.dto.PositionUpdateRequest;
 import cn.nihility.rbac.user.dto.PositionVO;
+import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.entity.UserPositionEntity;
+import cn.nihility.rbac.user.mapper.UserMapper;
 import cn.nihility.rbac.user.mapper.UserPositionMapper;
 import cn.nihility.rbac.user.mapstruct.PositionConvert;
 import cn.nihility.rbac.user.service.PositionService;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -30,6 +38,15 @@ public class PositionServiceImpl implements PositionService {
 
     /** 用户任职记录数据访问接口。 */
     private final UserPositionMapper userPositionMapper;
+
+    /** 用户数据访问接口，仅用于回填所属用户姓名。 */
+    private final UserMapper userMapper;
+
+    /** 组织数据访问接口，仅用于回填所属组织名称。 */
+    private final OrgMapper orgMapper;
+
+    /** 操作日志记录组件。 */
+    private final OperationLogRecorder operationLogRecorder;
 
     /**
      * {@inheritDoc}
@@ -71,6 +88,9 @@ public class PositionServiceImpl implements PositionService {
         entity.setUpdateTime(now);
         userPositionMapper.insert(entity);
 
+        operationLogRecorder.recordCreate(OperationLogResourceType.POSITION, entity.getId(),
+                targetName(entity), toLogSnapshot(entity));
+
         return getById(entity.getId());
     }
 
@@ -80,11 +100,15 @@ public class PositionServiceImpl implements PositionService {
     @Override
     public PositionVO update(Long id, PositionUpdateRequest request) {
         UserPositionEntity entity = getExistingEntity(id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         PositionConvert.INSTANCE.updateEntity(request, entity);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         userPositionMapper.updateById(entity);
+
+        operationLogRecorder.recordUpdate(OperationLogResourceType.POSITION, id, targetName(entity),
+                beforeSnapshot, toLogSnapshot(entity));
 
         return getById(id);
     }
@@ -111,10 +135,14 @@ public class PositionServiceImpl implements PositionService {
     @Override
     public void delete(Long id) {
         UserPositionEntity entity = getExistingEntity(id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+
         entity.setStatus(PositionStatus.DELETED);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         userPositionMapper.updateById(entity);
+
+        operationLogRecorder.recordDelete(OperationLogResourceType.POSITION, id, targetName(entity), beforeSnapshot);
     }
 
     /**
@@ -126,10 +154,15 @@ public class PositionServiceImpl implements PositionService {
      */
     private PositionVO changeStatus(Long id, int status) {
         UserPositionEntity entity = getExistingEntity(id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+
         entity.setStatus(status);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         userPositionMapper.updateById(entity);
+
+        operationLogRecorder.recordStatusChange(OperationLogResourceType.POSITION, id, targetName(entity),
+                status == PositionStatus.ENABLED, beforeSnapshot, toLogSnapshot(entity));
         return getById(id);
     }
 
@@ -145,5 +178,59 @@ public class PositionServiceImpl implements PositionService {
             throw new BusinessException("任职记录不存在");
         }
         return entity;
+    }
+
+    /**
+     * 构造任职记录的操作日志被操作对象名称快照："所属用户姓名-所属组织名称"，
+     * 任职记录本身没有独立的名称字段。
+     *
+     * @param entity 任职记录实体
+     * @return 被操作对象名称快照
+     */
+    private String targetName(UserPositionEntity entity) {
+        UserEntity user = entity.getUserId() != null ? userMapper.selectById(entity.getUserId()) : null;
+        OrgEntity org = entity.getOrgId() != null ? orgMapper.selectById(entity.getOrgId()) : null;
+        String userName = user != null ? user.getName() : "未知用户";
+        String orgName = org != null ? org.getName() : "未知组织";
+        return userName + "-" + orgName;
+    }
+
+    /**
+     * 构造任职记录实体的操作日志字段快照，key 为中文字段名，value 为人类可读的格式化值；
+     * 所属用户姓名、所属组织名称需分别按 {@code userId}/{@code orgId} 回查一次。
+     *
+     * @param entity 任职记录实体
+     * @return 操作日志字段快照
+     */
+    private Map<String, Object> toLogSnapshot(UserPositionEntity entity) {
+        UserEntity user = entity.getUserId() != null ? userMapper.selectById(entity.getUserId()) : null;
+        OrgEntity org = entity.getOrgId() != null ? orgMapper.selectById(entity.getOrgId()) : null;
+
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("所属用户", user != null ? user.getName() : null);
+        snapshot.put("所属组织", org != null ? org.getName() : null);
+        snapshot.put("任职类型", entity.getPositionType());
+        snapshot.put("任职地址", entity.getPositionAddress());
+        snapshot.put("任职电话", entity.getPositionPhone());
+        snapshot.put("显示序号", entity.getShowOrder());
+        snapshot.put("备注", entity.getRemark());
+        snapshot.put("状态", statusLabel(entity.getStatus()));
+        return snapshot;
+    }
+
+    /**
+     * 把任职记录状态码值转换为中文文案，供操作日志快照使用。
+     *
+     * @param status 状态码值
+     * @return 中文文案
+     */
+    private String statusLabel(Integer status) {
+        if (Objects.equals(status, PositionStatus.ENABLED)) {
+            return "启用";
+        }
+        if (Objects.equals(status, PositionStatus.DISABLED)) {
+            return "停用";
+        }
+        return "已删除";
     }
 }

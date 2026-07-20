@@ -3,6 +3,8 @@ package cn.nihility.rbac.menu.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.common.PageResult;
@@ -14,9 +16,11 @@ import cn.nihility.rbac.menu.dto.MenuTreeNodeVO;
 import cn.nihility.rbac.menu.dto.MenuVO;
 import cn.nihility.rbac.menu.entity.MenuEntity;
 import cn.nihility.rbac.menu.mapper.MenuMapper;
+import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -25,7 +29,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
  * {@link MenuServiceImpl} 的单元测试，重点覆盖树形组装、编码唯一性校验、
- * 资源类型合法性校验、删除前置校验等分支逻辑。
+ * 资源类型合法性校验、删除前置校验、操作日志记录调用等分支逻辑。
  */
 @ExtendWith(MockitoExtension.class)
 class MenuServiceImplTest {
@@ -33,6 +37,10 @@ class MenuServiceImplTest {
     /** 被测服务的数据访问依赖，使用 Mockito 打桩。 */
     @Mock
     private MenuMapper menuMapper;
+
+    /** 被测服务的操作日志记录组件依赖，使用 Mockito 打桩。 */
+    @Mock
+    private OperationLogRecorder operationLogRecorder;
 
     /** 被测服务实例。 */
     private MenuServiceImpl menuService;
@@ -43,7 +51,7 @@ class MenuServiceImplTest {
      */
     @BeforeEach
     void setUp() {
-        menuService = new MenuServiceImpl(menuMapper);
+        menuService = new MenuServiceImpl(menuMapper, operationLogRecorder);
     }
 
     /**
@@ -174,6 +182,9 @@ class MenuServiceImplTest {
         menuService.delete(1L);
 
         assertThat(entity.getStatus()).isEqualTo(MenuStatus.DELETED);
+        verify(operationLogRecorder, times(1))
+                .recordDelete(org.mockito.ArgumentMatchers.eq("menu"), org.mockito.ArgumentMatchers.eq(1L),
+                        org.mockito.ArgumentMatchers.eq("系统管理"), any(Map.class));
     }
 
     /**

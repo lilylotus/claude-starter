@@ -2,6 +2,8 @@ package cn.nihility.rbac.role.service.impl;
 
 import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
+import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.role.constant.RoleStatus;
 import cn.nihility.rbac.role.dto.RoleCreateRequest;
 import cn.nihility.rbac.role.dto.RoleOptionVO;
@@ -14,7 +16,9 @@ import cn.nihility.rbac.role.service.RoleService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -31,6 +35,9 @@ public class RoleServiceImpl implements RoleService {
 
     /** 角色数据访问接口。 */
     private final RoleMapper roleMapper;
+
+    /** 操作日志记录组件。 */
+    private final OperationLogRecorder operationLogRecorder;
 
     /**
      * {@inheritDoc}
@@ -73,6 +80,9 @@ public class RoleServiceImpl implements RoleService {
         entity.setUpdateTime(now);
         roleMapper.insert(entity);
 
+        operationLogRecorder.recordCreate(OperationLogResourceType.ROLE, entity.getId(), entity.getName(),
+                toLogSnapshot(entity));
+
         return getById(entity.getId());
     }
 
@@ -83,11 +93,15 @@ public class RoleServiceImpl implements RoleService {
     public RoleVO update(Long id, RoleUpdateRequest request) {
         RoleEntity entity = getExistingEntity(id);
         checkCodeUnique(request.getCode(), id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         RoleConvert.INSTANCE.updateEntity(request, entity);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         roleMapper.updateById(entity);
+
+        operationLogRecorder.recordUpdate(OperationLogResourceType.ROLE, id, entity.getName(),
+                beforeSnapshot, toLogSnapshot(entity));
 
         return getById(id);
     }
@@ -114,10 +128,14 @@ public class RoleServiceImpl implements RoleService {
     @Override
     public void delete(Long id) {
         RoleEntity entity = getExistingEntity(id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+
         entity.setStatus(RoleStatus.DELETED);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         roleMapper.updateById(entity);
+
+        operationLogRecorder.recordDelete(OperationLogResourceType.ROLE, id, entity.getName(), beforeSnapshot);
     }
 
     /**
@@ -141,10 +159,15 @@ public class RoleServiceImpl implements RoleService {
      */
     private RoleVO changeStatus(Long id, int status) {
         RoleEntity entity = getExistingEntity(id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+
         entity.setStatus(status);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         roleMapper.updateById(entity);
+
+        operationLogRecorder.recordStatusChange(OperationLogResourceType.ROLE, id, entity.getName(),
+                status == RoleStatus.ENABLED, beforeSnapshot, toLogSnapshot(entity));
         return getById(id);
     }
 
@@ -179,5 +202,37 @@ public class RoleServiceImpl implements RoleService {
         if (count != null && count > 0) {
             throw new BusinessException("角色编码[" + code + "]已存在");
         }
+    }
+
+    /**
+     * 构造角色实体的操作日志字段快照，key 为中文字段名，value 为人类可读的格式化值。
+     *
+     * @param entity 角色实体
+     * @return 操作日志字段快照
+     */
+    private Map<String, Object> toLogSnapshot(RoleEntity entity) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("角色名称", entity.getName());
+        snapshot.put("角色编码", entity.getCode());
+        snapshot.put("显示序号", entity.getShowOrder());
+        snapshot.put("备注", entity.getRemark());
+        snapshot.put("状态", statusLabel(entity.getStatus()));
+        return snapshot;
+    }
+
+    /**
+     * 把角色状态码值转换为中文文案，供操作日志快照使用。
+     *
+     * @param status 状态码值
+     * @return 中文文案
+     */
+    private String statusLabel(Integer status) {
+        if (Objects.equals(status, RoleStatus.ENABLED)) {
+            return "启用";
+        }
+        if (Objects.equals(status, RoleStatus.DISABLED)) {
+            return "停用";
+        }
+        return "已删除";
     }
 }

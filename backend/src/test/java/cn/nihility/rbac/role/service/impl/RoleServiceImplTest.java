@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.role.constant.RoleStatus;
 import cn.nihility.rbac.role.dto.RoleCreateRequest;
 import cn.nihility.rbac.role.dto.RoleUpdateRequest;
@@ -19,6 +20,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,7 +30,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
  * {@link RoleServiceImpl} 的单元测试，重点覆盖分页查询、新增默认启用、编码唯一性校验、
- * 更新不改状态、启停用、逻辑删除等分支逻辑。
+ * 更新不改状态、启停用、逻辑删除、操作日志记录调用等分支逻辑。
  */
 @ExtendWith(MockitoExtension.class)
 class RoleServiceImplTest {
@@ -36,6 +38,10 @@ class RoleServiceImplTest {
     /** 被测服务的角色数据访问依赖，使用 Mockito 打桩。 */
     @Mock
     private RoleMapper roleMapper;
+
+    /** 被测服务的操作日志记录组件依赖，使用 Mockito 打桩。 */
+    @Mock
+    private OperationLogRecorder operationLogRecorder;
 
     /** 被测服务实例。 */
     private RoleServiceImpl roleService;
@@ -46,7 +52,7 @@ class RoleServiceImplTest {
      */
     @BeforeEach
     void setUp() {
-        roleService = new RoleServiceImpl(roleMapper);
+        roleService = new RoleServiceImpl(roleMapper, operationLogRecorder);
     }
 
     /**
@@ -91,6 +97,8 @@ class RoleServiceImplTest {
         assertThat(captured.getCode()).isEqualTo("role001");
         assertThat(captured.getCreateBy()).isNotNull();
         assertThat(captured.getCreateTime()).isNotNull();
+        verify(operationLogRecorder).recordCreate(org.mockito.ArgumentMatchers.eq("role"), any(),
+                org.mockito.ArgumentMatchers.eq("测试角色"), any(Map.class));
     }
 
     /**
@@ -193,6 +201,8 @@ class RoleServiceImplTest {
         assertThat(entity.getStatus()).isEqualTo(RoleStatus.DELETED);
         verify(roleMapper).updateById(entity);
         verify(roleMapper, never()).deleteById(any(Long.class));
+        verify(operationLogRecorder).recordDelete(org.mockito.ArgumentMatchers.eq("role"),
+                org.mockito.ArgumentMatchers.eq(10L), any(), any(Map.class));
     }
 
     /**

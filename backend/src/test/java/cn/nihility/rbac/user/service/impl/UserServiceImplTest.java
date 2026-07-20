@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.user.constant.UserStatus;
 import cn.nihility.rbac.user.dto.UserCreateRequest;
@@ -23,6 +24,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -32,7 +34,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
  * {@link UserServiceImpl} 的单元测试，重点覆盖编号/身份证号唯一性校验范围、
- * 任职记录整体更新的增量 diff（更新保留创建审计/新增/删除/清空/拒绝他人记录）等分支逻辑。
+ * 任职记录整体更新的增量 diff（更新保留创建审计/新增/删除/清空/拒绝他人记录）、
+ * 操作日志记录调用等分支逻辑。
  */
 @ExtendWith(MockitoExtension.class)
 class UserServiceImplTest {
@@ -49,6 +52,10 @@ class UserServiceImplTest {
     @Mock
     private OrgMapper orgMapper;
 
+    /** 被测服务的操作日志记录组件依赖，使用 Mockito 打桩。 */
+    @Mock
+    private OperationLogRecorder operationLogRecorder;
+
     /** 被测服务实例。 */
     private UserServiceImpl userService;
 
@@ -58,7 +65,7 @@ class UserServiceImplTest {
      */
     @BeforeEach
     void setUp() {
-        userService = new UserServiceImpl(userMapper, userPositionMapper, orgMapper);
+        userService = new UserServiceImpl(userMapper, userPositionMapper, orgMapper, operationLogRecorder);
         lenient().when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
     }
 
@@ -171,6 +178,8 @@ class UserServiceImplTest {
         assertThat(updated.getUpdateTime()).isNotEqualTo(originalCreateTime);
         verify(userPositionMapper, never()).insert(any(UserPositionEntity.class));
         verify(userPositionMapper, never()).deleteByIds(anyList());
+        verify(operationLogRecorder).recordUpdate(org.mockito.ArgumentMatchers.eq("user"), any(), any(),
+                any(Map.class), any(Map.class));
     }
 
     /**

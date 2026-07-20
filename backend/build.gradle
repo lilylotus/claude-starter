@@ -36,6 +36,11 @@ dependencies {
     implementation 'com.baomidou:mybatis-plus-jsqlparser:3.5.16'
     implementation 'com.baomidou:mybatis-plus-spring-boot3-starter:3.5.16'
 
+    /* excel 操作 */
+    implementation 'org.apache.poi:poi:5.4.1'
+    implementation 'org.apache.poi:poi-ooxml:5.4.1'
+    implementation 'org.apache.xmlbeans:xmlbeans:5.3.0'
+
 	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'
     annotationProcessor "org.mapstruct:mapstruct-processor:1.6.3"

@@ -12,10 +12,14 @@ import cn.nihility.rbac.dict.mapper.DictItemMapper;
 import cn.nihility.rbac.dict.mapper.DictTypeMapper;
 import cn.nihility.rbac.dict.mapstruct.DictConvert;
 import cn.nihility.rbac.dict.service.DictTypeService;
+import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
+import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -36,6 +40,9 @@ public class DictTypeServiceImpl implements DictTypeService {
 
     /** 字典项数据访问接口，用于删除前校验是否存在未删除的字典项。 */
     private final DictItemMapper dictItemMapper;
+
+    /** 操作日志记录组件。 */
+    private final OperationLogRecorder operationLogRecorder;
 
     /**
      * {@inheritDoc}
@@ -82,6 +89,9 @@ public class DictTypeServiceImpl implements DictTypeService {
         entity.setUpdateTime(now);
         dictTypeMapper.insert(entity);
 
+        operationLogRecorder.recordCreate(OperationLogResourceType.DICT_TYPE, entity.getId(), entity.getName(),
+                toLogSnapshot(entity));
+
         return getById(entity.getId());
     }
 
@@ -92,11 +102,15 @@ public class DictTypeServiceImpl implements DictTypeService {
     public DictTypeVO update(Long id, DictTypeUpdateRequest request) {
         DictTypeEntity entity = getExistingEntity(id);
         checkCodeUnique(request.getCode(), id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         DictConvert.INSTANCE.updateTypeEntity(request, entity);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         dictTypeMapper.updateById(entity);
+
+        operationLogRecorder.recordUpdate(OperationLogResourceType.DICT_TYPE, id, entity.getName(),
+                beforeSnapshot, toLogSnapshot(entity));
 
         return getById(id);
     }
@@ -131,10 +145,13 @@ public class DictTypeServiceImpl implements DictTypeService {
             throw new BusinessException("该字典类型下存在未删除的字典项，无法删除");
         }
 
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
         entity.setStatus(DictStatus.DELETED);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         dictTypeMapper.updateById(entity);
+
+        operationLogRecorder.recordDelete(OperationLogResourceType.DICT_TYPE, id, entity.getName(), beforeSnapshot);
     }
 
     /**
@@ -146,10 +163,15 @@ public class DictTypeServiceImpl implements DictTypeService {
      */
     private DictTypeVO changeStatus(Long id, int status) {
         DictTypeEntity entity = getExistingEntity(id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+
         entity.setStatus(status);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         dictTypeMapper.updateById(entity);
+
+        operationLogRecorder.recordStatusChange(OperationLogResourceType.DICT_TYPE, id, entity.getName(),
+                status == DictStatus.ENABLED, beforeSnapshot, toLogSnapshot(entity));
         return getById(id);
     }
 
@@ -184,5 +206,37 @@ public class DictTypeServiceImpl implements DictTypeService {
         if (count != null && count > 0) {
             throw new BusinessException("字典类型编码[" + code + "]已存在");
         }
+    }
+
+    /**
+     * 构造字典类型实体的操作日志字段快照，key 为中文字段名，value 为人类可读的格式化值。
+     *
+     * @param entity 字典类型实体
+     * @return 操作日志字段快照
+     */
+    private Map<String, Object> toLogSnapshot(DictTypeEntity entity) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("类型名称", entity.getName());
+        snapshot.put("类型编码", entity.getCode());
+        snapshot.put("显示序号", entity.getShowOrder());
+        snapshot.put("备注", entity.getRemark());
+        snapshot.put("状态", statusLabel(entity.getStatus()));
+        return snapshot;
+    }
+
+    /**
+     * 把字典类型状态码值转换为中文文案，供操作日志快照使用。
+     *
+     * @param status 状态码值
+     * @return 中文文案
+     */
+    private String statusLabel(Integer status) {
+        if (Objects.equals(status, DictStatus.ENABLED)) {
+            return "启用";
+        }
+        if (Objects.equals(status, DictStatus.DISABLED)) {
+            return "停用";
+        }
+        return "已删除";
     }
 }

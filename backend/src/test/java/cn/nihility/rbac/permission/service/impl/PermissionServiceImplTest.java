@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.permission.constant.PermissionStatus;
 import cn.nihility.rbac.permission.dto.PermissionCreateRequest;
 import cn.nihility.rbac.permission.dto.PermissionUpdateRequest;
@@ -19,6 +20,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,7 +30,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
  * {@link PermissionServiceImpl} 的单元测试，重点覆盖分页查询、新增默认启用、编码唯一性校验、
- * 更新不改状态、启停用、逻辑删除等分支逻辑。
+ * 更新不改状态、启停用、逻辑删除、操作日志记录调用等分支逻辑。
  */
 @ExtendWith(MockitoExtension.class)
 class PermissionServiceImplTest {
@@ -36,6 +38,10 @@ class PermissionServiceImplTest {
     /** 被测服务的权限点数据访问依赖，使用 Mockito 打桩。 */
     @Mock
     private PermissionMapper permissionMapper;
+
+    /** 被测服务的操作日志记录组件依赖，使用 Mockito 打桩。 */
+    @Mock
+    private OperationLogRecorder operationLogRecorder;
 
     /** 被测服务实例。 */
     private PermissionServiceImpl permissionService;
@@ -46,7 +52,7 @@ class PermissionServiceImplTest {
      */
     @BeforeEach
     void setUp() {
-        permissionService = new PermissionServiceImpl(permissionMapper);
+        permissionService = new PermissionServiceImpl(permissionMapper, operationLogRecorder);
     }
 
     /**
@@ -91,6 +97,8 @@ class PermissionServiceImplTest {
         assertThat(captured.getCode()).isEqualTo("permission001");
         assertThat(captured.getCreateBy()).isNotNull();
         assertThat(captured.getCreateTime()).isNotNull();
+        verify(operationLogRecorder).recordCreate(org.mockito.ArgumentMatchers.eq("permission"), any(),
+                org.mockito.ArgumentMatchers.eq("测试权限"), any(Map.class));
     }
 
     /**
@@ -193,6 +201,8 @@ class PermissionServiceImplTest {
         assertThat(entity.getStatus()).isEqualTo(PermissionStatus.DELETED);
         verify(permissionMapper).updateById(entity);
         verify(permissionMapper, never()).deleteById(any(Long.class));
+        verify(operationLogRecorder).recordDelete(org.mockito.ArgumentMatchers.eq("permission"),
+                org.mockito.ArgumentMatchers.eq(10L), any(), any(Map.class));
     }
 
     /**

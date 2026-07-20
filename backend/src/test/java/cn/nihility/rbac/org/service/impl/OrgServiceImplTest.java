@@ -3,10 +3,13 @@ package cn.nihility.rbac.org.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.constant.OrgStatus;
 import cn.nihility.rbac.org.dto.OrgCreateRequest;
 import cn.nihility.rbac.org.dto.OrgTreeNodeVO;
@@ -16,6 +19,7 @@ import cn.nihility.rbac.org.mapper.OrgMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -24,7 +28,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
  * {@link OrgServiceImpl} 的单元测试，重点覆盖树形组装、编码唯一性校验、
- * 删除前置校验等分支逻辑。
+ * 删除前置校验、操作日志记录调用等分支逻辑。
  */
 @ExtendWith(MockitoExtension.class)
 class OrgServiceImplTest {
@@ -32,6 +36,10 @@ class OrgServiceImplTest {
     /** 被测服务的数据访问依赖，使用 Mockito 打桩。 */
     @Mock
     private OrgMapper orgMapper;
+
+    /** 被测服务的操作日志记录组件依赖，使用 Mockito 打桩。 */
+    @Mock
+    private OperationLogRecorder operationLogRecorder;
 
     /** 被测服务实例。 */
     private OrgServiceImpl orgService;
@@ -42,7 +50,7 @@ class OrgServiceImplTest {
      */
     @BeforeEach
     void setUp() {
-        orgService = new OrgServiceImpl(orgMapper);
+        orgService = new OrgServiceImpl(orgMapper, operationLogRecorder);
     }
 
     /**
@@ -155,6 +163,9 @@ class OrgServiceImplTest {
         orgService.delete(1L);
 
         assertThat(entity.getStatus()).isEqualTo(OrgStatus.DELETED);
+        verify(operationLogRecorder, times(1))
+                .recordDelete(org.mockito.ArgumentMatchers.eq("org"), org.mockito.ArgumentMatchers.eq(1L),
+                        org.mockito.ArgumentMatchers.eq("总公司"), any(Map.class));
     }
 
     /**

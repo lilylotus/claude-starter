@@ -3,6 +3,7 @@ package cn.nihility.rbac.dict.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.common.exception.BusinessException;
@@ -14,8 +15,10 @@ import cn.nihility.rbac.dict.entity.DictItemEntity;
 import cn.nihility.rbac.dict.entity.DictTypeEntity;
 import cn.nihility.rbac.dict.mapper.DictItemMapper;
 import cn.nihility.rbac.dict.mapper.DictTypeMapper;
+import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -24,7 +27,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
  * {@link DictItemServiceImpl} 的单元测试，重点覆盖编码唯一性校验范围、
- * 按字典类型编码查询启用项的降级行为等分支逻辑。
+ * 按字典类型编码查询启用项的降级行为、操作日志记录调用等分支逻辑。
  */
 @ExtendWith(MockitoExtension.class)
 class DictItemServiceImplTest {
@@ -37,6 +40,10 @@ class DictItemServiceImplTest {
     @Mock
     private DictTypeMapper dictTypeMapper;
 
+    /** 被测服务的操作日志记录组件依赖，使用 Mockito 打桩。 */
+    @Mock
+    private OperationLogRecorder operationLogRecorder;
+
     /** 被测服务实例。 */
     private DictItemServiceImpl dictItemService;
 
@@ -46,7 +53,7 @@ class DictItemServiceImplTest {
      */
     @BeforeEach
     void setUp() {
-        dictItemService = new DictItemServiceImpl(dictItemMapper, dictTypeMapper);
+        dictItemService = new DictItemServiceImpl(dictItemMapper, dictTypeMapper, operationLogRecorder);
     }
 
     /**
@@ -85,6 +92,9 @@ class DictItemServiceImplTest {
         request.setShowOrder(0);
 
         dictItemService.create(request);
+
+        verify(operationLogRecorder).recordCreate(org.mockito.ArgumentMatchers.eq("dictItem"), any(),
+                org.mockito.ArgumentMatchers.eq("主职"), any(Map.class));
     }
 
     /**

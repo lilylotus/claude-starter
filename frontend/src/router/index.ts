@@ -27,6 +27,7 @@ const implementedComponents: Record<string, () => Promise<unknown>> = {
   '/permission/admins': () => import('@/views/permission/admin/AdminManagementView.vue'),
   '/system/dicts': () => import('@/views/system/dict/DictManagementView.vue'),
   '/system/menus': () => import('@/views/system/menu/MenuManagementView.vue'),
+  '/system/logs': () => import('@/views/system/log/OperationLogManagementView.vue'),
 }
 
 const menuRoutes = MENU_GROUPS.flatMap((group) =>

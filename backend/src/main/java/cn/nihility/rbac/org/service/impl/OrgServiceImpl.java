@@ -2,6 +2,8 @@ package cn.nihility.rbac.org.service.impl;
 
 import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
+import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.constant.OrgStatus;
 import cn.nihility.rbac.org.dto.OrgCreateRequest;
 import cn.nihility.rbac.org.dto.OrgTreeNodeVO;
@@ -39,6 +41,9 @@ public class OrgServiceImpl implements OrgService {
 
     /** 组织数据访问接口。 */
     private final OrgMapper orgMapper;
+
+    /** 操作日志记录组件。 */
+    private final OperationLogRecorder operationLogRecorder;
 
     /**
      * {@inheritDoc}
@@ -119,6 +124,9 @@ public class OrgServiceImpl implements OrgService {
         entity.setUpdateTime(now);
         orgMapper.insert(entity);
 
+        operationLogRecorder.recordCreate(OperationLogResourceType.ORG, entity.getId(), entity.getName(),
+                toLogSnapshot(entity));
+
         return getById(entity.getId());
     }
 
@@ -129,11 +137,15 @@ public class OrgServiceImpl implements OrgService {
     public OrgVO update(Long id, OrgUpdateRequest request) {
         OrgEntity entity = getExistingEntity(id);
         checkCodeUnique(request.getCode(), id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         OrgConvert.INSTANCE.updateEntity(request, entity);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         orgMapper.updateById(entity);
+
+        operationLogRecorder.recordUpdate(OperationLogResourceType.ORG, id, entity.getName(),
+                beforeSnapshot, toLogSnapshot(entity));
 
         return getById(id);
     }
@@ -168,10 +180,13 @@ public class OrgServiceImpl implements OrgService {
             throw new BusinessException("该组织下存在未删除的下级组织，无法删除");
         }
 
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
         entity.setStatus(OrgStatus.DELETED);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         orgMapper.updateById(entity);
+
+        operationLogRecorder.recordDelete(OperationLogResourceType.ORG, id, entity.getName(), beforeSnapshot);
     }
 
     /**
@@ -183,10 +198,15 @@ public class OrgServiceImpl implements OrgService {
      */
     private OrgVO changeStatus(Long id, int status) {
         OrgEntity entity = getExistingEntity(id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+
         entity.setStatus(status);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         orgMapper.updateById(entity);
+
+        operationLogRecorder.recordStatusChange(OperationLogResourceType.ORG, id, entity.getName(),
+                status == OrgStatus.ENABLED, beforeSnapshot, toLogSnapshot(entity));
         return getById(id);
     }
 
@@ -277,5 +297,45 @@ public class OrgServiceImpl implements OrgService {
             vo.setParentName(parentNameMap.get(vo.getParentId()));
         }
         return result;
+    }
+
+    /**
+     * 构造组织实体的操作日志字段快照，key 为中文字段名，value 为人类可读的格式化值；
+     * 上级组织名称需按 {@code parentId} 回查一次。
+     *
+     * @param entity 组织实体
+     * @return 操作日志字段快照
+     */
+    private Map<String, Object> toLogSnapshot(OrgEntity entity) {
+        String parentName = null;
+        if (entity.getParentId() != null && entity.getParentId() != ROOT_PARENT_ID) {
+            OrgEntity parent = orgMapper.selectById(entity.getParentId());
+            parentName = parent != null ? parent.getName() : null;
+        }
+
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("组织名称", entity.getName());
+        snapshot.put("组织编码", entity.getCode());
+        snapshot.put("上级组织", parentName);
+        snapshot.put("显示序号", entity.getShowOrder());
+        snapshot.put("备注", entity.getRemark());
+        snapshot.put("状态", statusLabel(entity.getStatus()));
+        return snapshot;
+    }
+
+    /**
+     * 把组织状态码值转换为中文文案，供操作日志快照使用。
+     *
+     * @param status 状态码值
+     * @return 中文文案
+     */
+    private String statusLabel(Integer status) {
+        if (Objects.equals(status, OrgStatus.ENABLED)) {
+            return "启用";
+        }
+        if (Objects.equals(status, OrgStatus.DISABLED)) {
+            return "停用";
+        }
+        return "已删除";
     }
 }

@@ -10,6 +10,8 @@ import cn.nihility.rbac.app.mapstruct.AppConvert;
 import cn.nihility.rbac.app.service.AppService;
 import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
+import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.entity.OrgEntity;
 import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.user.entity.UserEntity;
@@ -17,6 +19,7 @@ import cn.nihility.rbac.user.mapper.UserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -42,6 +45,9 @@ public class AppServiceImpl implements AppService {
 
     /** 组织数据访问接口，仅用于回填所属组织名称。 */
     private final OrgMapper orgMapper;
+
+    /** 操作日志记录组件。 */
+    private final OperationLogRecorder operationLogRecorder;
 
     /**
      * {@inheritDoc}
@@ -84,6 +90,9 @@ public class AppServiceImpl implements AppService {
         entity.setUpdateTime(now);
         appMapper.insert(entity);
 
+        operationLogRecorder.recordCreate(OperationLogResourceType.APP, entity.getId(), entity.getName(),
+                toLogSnapshot(entity));
+
         return getById(entity.getId());
     }
 
@@ -94,11 +103,15 @@ public class AppServiceImpl implements AppService {
     public AppVO update(Long id, AppUpdateRequest request) {
         AppEntity entity = getExistingEntity(id);
         checkCodeUnique(request.getCode(), id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         AppConvert.INSTANCE.updateEntity(request, entity);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         appMapper.updateById(entity);
+
+        operationLogRecorder.recordUpdate(OperationLogResourceType.APP, id, entity.getName(),
+                beforeSnapshot, toLogSnapshot(entity));
 
         return getById(id);
     }
@@ -125,10 +138,14 @@ public class AppServiceImpl implements AppService {
     @Override
     public void delete(Long id) {
         AppEntity entity = getExistingEntity(id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+
         entity.setStatus(AppStatus.DELETED);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         appMapper.updateById(entity);
+
+        operationLogRecorder.recordDelete(OperationLogResourceType.APP, id, entity.getName(), beforeSnapshot);
     }
 
     /**
@@ -140,10 +157,15 @@ public class AppServiceImpl implements AppService {
      */
     private AppVO changeStatus(Long id, int status) {
         AppEntity entity = getExistingEntity(id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+
         entity.setStatus(status);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         appMapper.updateById(entity);
+
+        operationLogRecorder.recordStatusChange(OperationLogResourceType.APP, id, entity.getName(),
+                status == AppStatus.ENABLED, beforeSnapshot, toLogSnapshot(entity));
         return getById(id);
     }
 
@@ -220,5 +242,43 @@ public class AppServiceImpl implements AppService {
             vo.setOrgName(orgNameMap.get(vo.getOrgId()));
         }
         return result;
+    }
+
+    /**
+     * 构造应用实体的操作日志字段快照，key 为中文字段名，value 为人类可读的格式化值；
+     * 负责人姓名、所属组织名称需分别按 {@code ownerId}/{@code orgId} 回查一次。
+     *
+     * @param entity 应用实体
+     * @return 操作日志字段快照
+     */
+    private Map<String, Object> toLogSnapshot(AppEntity entity) {
+        UserEntity owner = entity.getOwnerId() != null ? userMapper.selectById(entity.getOwnerId()) : null;
+        OrgEntity org = entity.getOrgId() != null ? orgMapper.selectById(entity.getOrgId()) : null;
+
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("应用名称", entity.getName());
+        snapshot.put("应用编码", entity.getCode());
+        snapshot.put("负责人", owner != null ? owner.getName() : null);
+        snapshot.put("所属组织", org != null ? org.getName() : null);
+        snapshot.put("显示序号", entity.getShowOrder());
+        snapshot.put("备注", entity.getRemark());
+        snapshot.put("状态", statusLabel(entity.getStatus()));
+        return snapshot;
+    }
+
+    /**
+     * 把应用状态码值转换为中文文案，供操作日志快照使用。
+     *
+     * @param status 状态码值
+     * @return 中文文案
+     */
+    private String statusLabel(Integer status) {
+        if (Objects.equals(status, AppStatus.ENABLED)) {
+            return "启用";
+        }
+        if (Objects.equals(status, AppStatus.DISABLED)) {
+            return "停用";
+        }
+        return "已删除";
     }
 }

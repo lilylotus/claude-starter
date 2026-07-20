@@ -2,6 +2,8 @@ package cn.nihility.rbac.permission.service.impl;
 
 import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
+import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.permission.constant.PermissionStatus;
 import cn.nihility.rbac.permission.dto.PermissionCreateRequest;
 import cn.nihility.rbac.permission.dto.PermissionUpdateRequest;
@@ -13,7 +15,9 @@ import cn.nihility.rbac.permission.service.PermissionService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -30,6 +34,9 @@ public class PermissionServiceImpl implements PermissionService {
 
     /** 权限点数据访问接口。 */
     private final PermissionMapper permissionMapper;
+
+    /** 操作日志记录组件。 */
+    private final OperationLogRecorder operationLogRecorder;
 
     /**
      * {@inheritDoc}
@@ -72,6 +79,9 @@ public class PermissionServiceImpl implements PermissionService {
         entity.setUpdateTime(now);
         permissionMapper.insert(entity);
 
+        operationLogRecorder.recordCreate(OperationLogResourceType.PERMISSION, entity.getId(), entity.getName(),
+                toLogSnapshot(entity));
+
         return getById(entity.getId());
     }
 
@@ -82,11 +92,15 @@ public class PermissionServiceImpl implements PermissionService {
     public PermissionVO update(Long id, PermissionUpdateRequest request) {
         PermissionEntity entity = getExistingEntity(id);
         checkCodeUnique(request.getCode(), id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         PermissionConvert.INSTANCE.updateEntity(request, entity);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         permissionMapper.updateById(entity);
+
+        operationLogRecorder.recordUpdate(OperationLogResourceType.PERMISSION, id, entity.getName(),
+                beforeSnapshot, toLogSnapshot(entity));
 
         return getById(id);
     }
@@ -113,10 +127,14 @@ public class PermissionServiceImpl implements PermissionService {
     @Override
     public void delete(Long id) {
         PermissionEntity entity = getExistingEntity(id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+
         entity.setStatus(PermissionStatus.DELETED);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         permissionMapper.updateById(entity);
+
+        operationLogRecorder.recordDelete(OperationLogResourceType.PERMISSION, id, entity.getName(), beforeSnapshot);
     }
 
     /**
@@ -128,10 +146,15 @@ public class PermissionServiceImpl implements PermissionService {
      */
     private PermissionVO changeStatus(Long id, int status) {
         PermissionEntity entity = getExistingEntity(id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+
         entity.setStatus(status);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         permissionMapper.updateById(entity);
+
+        operationLogRecorder.recordStatusChange(OperationLogResourceType.PERMISSION, id, entity.getName(),
+                status == PermissionStatus.ENABLED, beforeSnapshot, toLogSnapshot(entity));
         return getById(id);
     }
 
@@ -166,5 +189,37 @@ public class PermissionServiceImpl implements PermissionService {
         if (count != null && count > 0) {
             throw new BusinessException("权限编码[" + code + "]已存在");
         }
+    }
+
+    /**
+     * 构造权限点实体的操作日志字段快照，key 为中文字段名，value 为人类可读的格式化值。
+     *
+     * @param entity 权限点实体
+     * @return 操作日志字段快照
+     */
+    private Map<String, Object> toLogSnapshot(PermissionEntity entity) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("权限点名称", entity.getName());
+        snapshot.put("权限点编码", entity.getCode());
+        snapshot.put("显示序号", entity.getShowOrder());
+        snapshot.put("备注", entity.getRemark());
+        snapshot.put("状态", statusLabel(entity.getStatus()));
+        return snapshot;
+    }
+
+    /**
+     * 把权限点状态码值转换为中文文案，供操作日志快照使用。
+     *
+     * @param status 状态码值
+     * @return 中文文案
+     */
+    private String statusLabel(Integer status) {
+        if (Objects.equals(status, PermissionStatus.ENABLED)) {
+            return "启用";
+        }
+        if (Objects.equals(status, PermissionStatus.DISABLED)) {
+            return "停用";
+        }
+        return "已删除";
     }
 }

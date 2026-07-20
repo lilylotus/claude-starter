@@ -23,10 +23,13 @@ import cn.nihility.rbac.admin.mapper.AdminMapper;
 import cn.nihility.rbac.admin.mapper.AdminOrgScopeMapper;
 import cn.nihility.rbac.admin.mapper.AdminRoleMapper;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.user.mapper.UserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,7 +40,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 /**
  * {@link AdminServiceImpl} 的单元测试，重点覆盖编码/关联用户唯一性校验范围、
  * 创建/更新时角色关联与组织管辖范围"先删后插"的整体同步行为、启停用不影响关联数据、
- * 逻辑删除、详情回填等分支逻辑。
+ * 逻辑删除、详情回填、操作日志记录调用等分支逻辑。
  */
 @ExtendWith(MockitoExtension.class)
 class AdminServiceImplTest {
@@ -54,6 +57,14 @@ class AdminServiceImplTest {
     @Mock
     private AdminOrgScopeMapper adminOrgScopeMapper;
 
+    /** 被测服务的用户数据访问依赖，用于回填关联用户姓名，使用 Mockito 打桩。 */
+    @Mock
+    private UserMapper userMapper;
+
+    /** 被测服务的操作日志记录组件依赖，使用 Mockito 打桩。 */
+    @Mock
+    private OperationLogRecorder operationLogRecorder;
+
     /** 被测服务实例。 */
     private AdminServiceImpl adminService;
 
@@ -63,7 +74,8 @@ class AdminServiceImplTest {
      */
     @BeforeEach
     void setUp() {
-        adminService = new AdminServiceImpl(adminMapper, adminRoleMapper, adminOrgScopeMapper);
+        adminService = new AdminServiceImpl(adminMapper, adminRoleMapper, adminOrgScopeMapper, userMapper,
+                operationLogRecorder);
         lenient().when(adminRoleMapper.selectRolesByAdminId(anyLong())).thenReturn(List.of());
         lenient().when(adminOrgScopeMapper.selectOrgScopesByAdminId(anyLong())).thenReturn(List.of());
     }
@@ -146,6 +158,9 @@ class AdminServiceImplTest {
         ArgumentCaptor<AdminRoleEntity> roleCaptor = ArgumentCaptor.forClass(AdminRoleEntity.class);
         verify(adminRoleMapper, times(2)).insert(roleCaptor.capture());
         assertThat(roleCaptor.getAllValues()).extracting(AdminRoleEntity::getRoleId).containsExactly(1L, 2L);
+
+        verify(operationLogRecorder).recordCreate(org.mockito.ArgumentMatchers.eq("admin"), any(),
+                org.mockito.ArgumentMatchers.eq("测试管理员"), any(Map.class));
     }
 
     /**
@@ -293,6 +308,8 @@ class AdminServiceImplTest {
         verify(adminMapper, never()).deleteById(any(Long.class));
         verify(adminRoleMapper, never()).delete(any(LambdaQueryWrapper.class));
         verify(adminOrgScopeMapper, never()).delete(any(LambdaQueryWrapper.class));
+        verify(operationLogRecorder).recordDelete(org.mockito.ArgumentMatchers.eq("admin"),
+                org.mockito.ArgumentMatchers.eq(10L), any(), any(Map.class));
     }
 
     /**

@@ -120,9 +120,12 @@ DictManagement（字典管理，/system/dicts）
 - DictManagement:dictItem:delete    删除字典项
 （字典项没有独立页面级 view，复用 DictManagement:dictType:view）
 
+OperationLogManagement（操作日志管理，/system/logs）
+- OperationLogManagement:log:view      操作日志管理页面访问
+（只读页面，仅支持分页查询与详情，没有 add/edit/enable/disable/delete）
+
 
 尚未实现（不计入以上编码，实现后再补充）
 --------
 
 - 应用密钥（/application/secret）——仍是占位页面
-- 操作日志（/system/logs）——仍是占位页面

@@ -12,6 +12,8 @@ import cn.nihility.rbac.menu.entity.MenuEntity;
 import cn.nihility.rbac.menu.mapper.MenuMapper;
 import cn.nihility.rbac.menu.mapstruct.MenuConvert;
 import cn.nihility.rbac.menu.service.MenuService;
+import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
+import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
@@ -40,6 +42,9 @@ public class MenuServiceImpl implements MenuService {
 
     /** 资源数据访问接口。 */
     private final MenuMapper menuMapper;
+
+    /** 操作日志记录组件。 */
+    private final OperationLogRecorder operationLogRecorder;
 
     /**
      * {@inheritDoc}
@@ -121,6 +126,9 @@ public class MenuServiceImpl implements MenuService {
         entity.setUpdateTime(now);
         menuMapper.insert(entity);
 
+        operationLogRecorder.recordCreate(OperationLogResourceType.MENU, entity.getId(), entity.getName(),
+                toLogSnapshot(entity));
+
         return getById(entity.getId());
     }
 
@@ -132,11 +140,15 @@ public class MenuServiceImpl implements MenuService {
         checkResourceTypeValid(request.getResourceType());
         MenuEntity entity = getExistingEntity(id);
         checkCodeUnique(request.getCode(), id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         MenuConvert.INSTANCE.updateEntity(request, entity);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         menuMapper.updateById(entity);
+
+        operationLogRecorder.recordUpdate(OperationLogResourceType.MENU, id, entity.getName(),
+                beforeSnapshot, toLogSnapshot(entity));
 
         return getById(id);
     }
@@ -171,10 +183,13 @@ public class MenuServiceImpl implements MenuService {
             throw new BusinessException("该资源下存在未删除的下级资源，无法删除");
         }
 
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
         entity.setStatus(MenuStatus.DELETED);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         menuMapper.updateById(entity);
+
+        operationLogRecorder.recordDelete(OperationLogResourceType.MENU, id, entity.getName(), beforeSnapshot);
     }
 
     /**
@@ -186,10 +201,15 @@ public class MenuServiceImpl implements MenuService {
      */
     private MenuVO changeStatus(Long id, int status) {
         MenuEntity entity = getExistingEntity(id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+
         entity.setStatus(status);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         menuMapper.updateById(entity);
+
+        operationLogRecorder.recordStatusChange(OperationLogResourceType.MENU, id, entity.getName(),
+                status == MenuStatus.ENABLED, beforeSnapshot, toLogSnapshot(entity));
         return getById(id);
     }
 
@@ -291,5 +311,64 @@ public class MenuServiceImpl implements MenuService {
             vo.setParentName(parentNameMap.get(vo.getParentId()));
         }
         return result;
+    }
+
+    /**
+     * 构造资源实体的操作日志字段快照，key 为中文字段名，value 为人类可读的格式化值；
+     * 上级资源名称需按 {@code parentId} 回查一次。
+     *
+     * @param entity 资源实体
+     * @return 操作日志字段快照
+     */
+    private Map<String, Object> toLogSnapshot(MenuEntity entity) {
+        String parentName = null;
+        if (entity.getParentId() != null && entity.getParentId() != ROOT_PARENT_ID) {
+            MenuEntity parent = menuMapper.selectById(entity.getParentId());
+            parentName = parent != null ? parent.getName() : null;
+        }
+
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("资源名称", entity.getName());
+        snapshot.put("资源编码", entity.getCode());
+        snapshot.put("上级资源", parentName);
+        snapshot.put("资源类型", resourceTypeLabel(entity.getResourceType()));
+        snapshot.put("显示序号", entity.getShowOrder());
+        snapshot.put("备注", entity.getRemark());
+        snapshot.put("状态", statusLabel(entity.getStatus()));
+        return snapshot;
+    }
+
+    /**
+     * 把资源类型码值转换为中文文案，供操作日志快照使用。
+     *
+     * @param resourceType 资源类型码值
+     * @return 中文文案
+     */
+    private String resourceTypeLabel(Integer resourceType) {
+        if (resourceType == null) {
+            return null;
+        }
+        return switch (resourceType) {
+            case MenuResourceType.MENU -> "菜单";
+            case MenuResourceType.BUTTON -> "按钮";
+            case MenuResourceType.API -> "API";
+            default -> null;
+        };
+    }
+
+    /**
+     * 把资源状态码值转换为中文文案，供操作日志快照使用。
+     *
+     * @param status 状态码值
+     * @return 中文文案
+     */
+    private String statusLabel(Integer status) {
+        if (Objects.equals(status, MenuStatus.ENABLED)) {
+            return "启用";
+        }
+        if (Objects.equals(status, MenuStatus.DISABLED)) {
+            return "停用";
+        }
+        return "已删除";
     }
 }

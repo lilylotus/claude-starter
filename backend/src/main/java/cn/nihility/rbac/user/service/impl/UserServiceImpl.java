@@ -2,9 +2,12 @@ package cn.nihility.rbac.user.service.impl;
 
 import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
+import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.entity.OrgEntity;
 import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.user.constant.PositionStatus;
+import cn.nihility.rbac.user.constant.UserGender;
 import cn.nihility.rbac.user.constant.UserStatus;
 import cn.nihility.rbac.user.dto.UserCreateRequest;
 import cn.nihility.rbac.user.dto.UserPositionRequest;
@@ -21,6 +24,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -48,6 +52,9 @@ public class UserServiceImpl implements UserService {
 
     /** 组织数据访问接口，仅用于回填任职记录的所属组织名称。 */
     private final OrgMapper orgMapper;
+
+    /** 操作日志记录组件。 */
+    private final OperationLogRecorder operationLogRecorder;
 
     /**
      * {@inheritDoc}
@@ -98,6 +105,9 @@ public class UserServiceImpl implements UserService {
 
         syncPositions(entity.getId(), request.getPositions());
 
+        operationLogRecorder.recordCreate(OperationLogResourceType.USER, entity.getId(), entity.getName(),
+                toLogSnapshot(entity));
+
         return getById(entity.getId());
     }
 
@@ -109,6 +119,7 @@ public class UserServiceImpl implements UserService {
         UserEntity entity = getExistingEntity(id);
         checkCodeUnique(request.getCode(), id);
         checkIdCardUnique(request.getIdCard(), id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         UserConvert.INSTANCE.updateEntity(request, entity);
         entity.setUpdateBy(DEFAULT_OPERATOR);
@@ -116,6 +127,9 @@ public class UserServiceImpl implements UserService {
         userMapper.updateById(entity);
 
         syncPositions(id, request.getPositions());
+
+        operationLogRecorder.recordUpdate(OperationLogResourceType.USER, id, entity.getName(),
+                beforeSnapshot, toLogSnapshot(entity));
 
         return getById(id);
     }
@@ -142,10 +156,14 @@ public class UserServiceImpl implements UserService {
     @Override
     public void delete(Long id) {
         UserEntity entity = getExistingEntity(id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+
         entity.setStatus(UserStatus.DELETED);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         userMapper.updateById(entity);
+
+        operationLogRecorder.recordDelete(OperationLogResourceType.USER, id, entity.getName(), beforeSnapshot);
     }
 
     /**
@@ -157,10 +175,15 @@ public class UserServiceImpl implements UserService {
      */
     private UserVO changeStatus(Long id, int status) {
         UserEntity entity = getExistingEntity(id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+
         entity.setStatus(status);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         userMapper.updateById(entity);
+
+        operationLogRecorder.recordStatusChange(OperationLogResourceType.USER, id, entity.getName(),
+                status == UserStatus.ENABLED, beforeSnapshot, toLogSnapshot(entity));
         return getById(id);
     }
 
@@ -264,7 +287,8 @@ public class UserServiceImpl implements UserService {
      * 刷新更新审计信息，不修改其 {@code status}）；不携带 {@code id} 的作为新记录插入，
      * {@code status} 显式置为 {@link PositionStatus#ENABLED}；当前用户未被逻辑删除的既有
      * 记录中未出现在本次请求列表中的物理删除；请求携带不属于当前用户的任职记录 id 时拒绝
-     * 整个更新。已被逻辑删除的既有记录不参与本次 diff。
+     * 整个更新。已被逻辑删除的既有记录不参与本次 diff。任职记录本身的操作日志由独立的
+     * 任职管理入口（{@code PositionServiceImpl}）记录，这里不重复记录。
      *
      * @param userId    用户 id
      * @param positions 请求中的任职记录列表，可为空（视为清空全部既有任职记录）
@@ -314,5 +338,56 @@ public class UserServiceImpl implements UserService {
         if (!idsToDelete.isEmpty()) {
             userPositionMapper.deleteByIds(idsToDelete);
         }
+    }
+
+    /**
+     * 构造用户实体的操作日志字段快照，key 为中文字段名，value 为人类可读的格式化值。
+     *
+     * @param entity 用户实体
+     * @return 操作日志字段快照
+     */
+    private Map<String, Object> toLogSnapshot(UserEntity entity) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("姓名", entity.getName());
+        snapshot.put("编码", entity.getCode());
+        snapshot.put("性别", genderLabel(entity.getGender()));
+        snapshot.put("手机号", entity.getMobile());
+        snapshot.put("身份证号", entity.getIdCard());
+        snapshot.put("显示序号", entity.getShowOrder());
+        snapshot.put("备注", entity.getRemark());
+        snapshot.put("状态", statusLabel(entity.getStatus()));
+        return snapshot;
+    }
+
+    /**
+     * 把性别码值转换为中文文案，供操作日志快照使用。
+     *
+     * @param gender 性别码值
+     * @return 中文文案
+     */
+    private String genderLabel(Integer gender) {
+        if (Objects.equals(gender, UserGender.MALE)) {
+            return "男";
+        }
+        if (Objects.equals(gender, UserGender.FEMALE)) {
+            return "女";
+        }
+        return "未知";
+    }
+
+    /**
+     * 把用户状态码值转换为中文文案，供操作日志快照使用。
+     *
+     * @param status 状态码值
+     * @return 中文文案
+     */
+    private String statusLabel(Integer status) {
+        if (Objects.equals(status, UserStatus.ENABLED)) {
+            return "启用";
+        }
+        if (Objects.equals(status, UserStatus.DISABLED)) {
+            return "停用";
+        }
+        return "已删除";
     }
 }

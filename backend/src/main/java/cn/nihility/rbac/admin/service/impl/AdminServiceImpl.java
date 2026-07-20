@@ -3,6 +3,8 @@ package cn.nihility.rbac.admin.service.impl;
 import cn.nihility.rbac.admin.constant.AdminStatus;
 import cn.nihility.rbac.admin.dto.AdminCreateRequest;
 import cn.nihility.rbac.admin.dto.AdminOrgScopeRequest;
+import cn.nihility.rbac.admin.dto.AdminOrgScopeVO;
+import cn.nihility.rbac.admin.dto.AdminRoleVO;
 import cn.nihility.rbac.admin.dto.AdminUpdateRequest;
 import cn.nihility.rbac.admin.dto.AdminVO;
 import cn.nihility.rbac.admin.entity.AdminEntity;
@@ -15,12 +17,19 @@ import cn.nihility.rbac.admin.mapstruct.AdminConvert;
 import cn.nihility.rbac.admin.service.AdminService;
 import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
+import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.user.entity.UserEntity;
+import cn.nihility.rbac.user.mapper.UserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -44,6 +53,12 @@ public class AdminServiceImpl implements AdminService {
 
     /** 管理员组织管辖范围数据访问接口。 */
     private final AdminOrgScopeMapper adminOrgScopeMapper;
+
+    /** 用户数据访问接口，仅用于回填关联用户姓名。 */
+    private final UserMapper userMapper;
+
+    /** 操作日志记录组件。 */
+    private final OperationLogRecorder operationLogRecorder;
 
     /**
      * {@inheritDoc}
@@ -82,6 +97,9 @@ public class AdminServiceImpl implements AdminService {
         syncRoles(entity.getId(), request.getRoleIds());
         syncOrgScopes(entity.getId(), request.getOrgScopes());
 
+        operationLogRecorder.recordCreate(OperationLogResourceType.ADMIN, entity.getId(), entity.getName(),
+                toLogSnapshot(entity));
+
         return getById(entity.getId());
     }
 
@@ -93,6 +111,7 @@ public class AdminServiceImpl implements AdminService {
         AdminEntity entity = getExistingEntity(id);
         checkCodeUnique(request.getCode(), id);
         checkUserIdUnique(request.getUserId(), id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         AdminConvert.INSTANCE.updateEntity(request, entity);
         entity.setUpdateBy(DEFAULT_OPERATOR);
@@ -101,6 +120,9 @@ public class AdminServiceImpl implements AdminService {
 
         syncRoles(id, request.getRoleIds());
         syncOrgScopes(id, request.getOrgScopes());
+
+        operationLogRecorder.recordUpdate(OperationLogResourceType.ADMIN, id, entity.getName(),
+                beforeSnapshot, toLogSnapshot(entity));
 
         return getById(id);
     }
@@ -127,10 +149,14 @@ public class AdminServiceImpl implements AdminService {
     @Override
     public void delete(Long id) {
         AdminEntity entity = getExistingEntity(id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+
         entity.setStatus(AdminStatus.DELETED);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         adminMapper.updateById(entity);
+
+        operationLogRecorder.recordDelete(OperationLogResourceType.ADMIN, id, entity.getName(), beforeSnapshot);
     }
 
     /**
@@ -142,10 +168,15 @@ public class AdminServiceImpl implements AdminService {
      */
     private AdminVO changeStatus(Long id, int status) {
         AdminEntity entity = getExistingEntity(id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+
         entity.setStatus(status);
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         adminMapper.updateById(entity);
+
+        operationLogRecorder.recordStatusChange(OperationLogResourceType.ADMIN, id, entity.getName(),
+                status == AdminStatus.ENABLED, beforeSnapshot, toLogSnapshot(entity));
         return getById(id);
     }
 
@@ -274,5 +305,75 @@ public class AdminServiceImpl implements AdminService {
                     .build();
             adminOrgScopeMapper.insert(entity);
         }
+    }
+
+    /**
+     * 构造管理员实体的操作日志字段快照，key 为中文字段名，value 为人类可读的格式化值；
+     * 关联用户姓名需按 {@code userId} 回查一次，管辖角色/管辖组织范围各按
+     * {@code adminId} 查询当前关联行，并汇总成一个可读字符串字段，不逐行 diff。
+     *
+     * @param entity 管理员实体
+     * @return 操作日志字段快照
+     */
+    private Map<String, Object> toLogSnapshot(AdminEntity entity) {
+        UserEntity user = entity.getUserId() != null ? userMapper.selectById(entity.getUserId()) : null;
+        List<AdminRoleVO> roles = adminRoleMapper.selectRolesByAdminId(entity.getId());
+        List<AdminOrgScopeVO> orgScopes = adminOrgScopeMapper.selectOrgScopesByAdminId(entity.getId());
+
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("管理员名称", entity.getName());
+        snapshot.put("管理员编码", entity.getCode());
+        snapshot.put("关联用户", user != null ? user.getName() : null);
+        snapshot.put("显示序号", entity.getShowOrder());
+        snapshot.put("备注", entity.getRemark());
+        snapshot.put("状态", statusLabel(entity.getStatus()));
+        snapshot.put("管辖角色", joinRoleNames(roles));
+        snapshot.put("管辖组织范围", joinOrgScopeNames(orgScopes));
+        return snapshot;
+    }
+
+    /**
+     * 把管辖角色列表汇总成一个以顿号分隔的可读字符串。
+     *
+     * @param roles 管辖角色列表
+     * @return 汇总字符串，列表为空时返回 {@code null}
+     */
+    private String joinRoleNames(List<AdminRoleVO> roles) {
+        if (roles == null || roles.isEmpty()) {
+            return null;
+        }
+        return roles.stream().map(AdminRoleVO::getRoleName).collect(Collectors.joining("、"));
+    }
+
+    /**
+     * 把管辖组织范围列表汇总成一个以顿号分隔的可读字符串，包含递归子组织的条目
+     * 附加"(含子组织)"后缀。
+     *
+     * @param orgScopes 管辖组织范围列表
+     * @return 汇总字符串，列表为空时返回 {@code null}
+     */
+    private String joinOrgScopeNames(List<AdminOrgScopeVO> orgScopes) {
+        if (orgScopes == null || orgScopes.isEmpty()) {
+            return null;
+        }
+        return orgScopes.stream()
+                .map(scope -> scope.getOrgName() + (Boolean.TRUE.equals(scope.getIncludeChildren()) ? "(含子组织)" : ""))
+                .collect(Collectors.joining("、"));
+    }
+
+    /**
+     * 把管理员状态码值转换为中文文案，供操作日志快照使用。
+     *
+     * @param status 状态码值
+     * @return 中文文案
+     */
+    private String statusLabel(Integer status) {
+        if (Objects.equals(status, AdminStatus.ENABLED)) {
+            return "启用";
+        }
+        if (Objects.equals(status, AdminStatus.DISABLED)) {
+            return "停用";
+        }
+        return "已删除";
     }
 }

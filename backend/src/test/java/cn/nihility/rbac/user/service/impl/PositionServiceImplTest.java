@@ -11,16 +11,20 @@ import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.user.constant.PositionStatus;
 import cn.nihility.rbac.user.dto.PositionCreateRequest;
 import cn.nihility.rbac.user.dto.PositionUpdateRequest;
 import cn.nihility.rbac.user.dto.PositionVO;
 import cn.nihility.rbac.user.entity.UserPositionEntity;
+import cn.nihility.rbac.user.mapper.UserMapper;
 import cn.nihility.rbac.user.mapper.UserPositionMapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,7 +35,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 /**
  * {@link PositionServiceImpl} 的单元测试，重点覆盖 orgId 必填校验、分页查询（走
  * {@code UserPositionMapper.selectPositionPage} 的 XML 多表 JOIN）、新增默认启用、
- * 启停用、逻辑删除等分支逻辑。
+ * 启停用、逻辑删除、操作日志记录调用等分支逻辑。
  */
 @ExtendWith(MockitoExtension.class)
 class PositionServiceImplTest {
@@ -39,6 +43,18 @@ class PositionServiceImplTest {
     /** 被测服务的用户任职记录数据访问依赖，使用 Mockito 打桩。 */
     @Mock
     private UserPositionMapper userPositionMapper;
+
+    /** 被测服务的用户数据访问依赖，用于回填所属用户姓名，使用 Mockito 打桩。 */
+    @Mock
+    private UserMapper userMapper;
+
+    /** 被测服务的组织数据访问依赖，用于回填所属组织名称，使用 Mockito 打桩。 */
+    @Mock
+    private OrgMapper orgMapper;
+
+    /** 被测服务的操作日志记录组件依赖，使用 Mockito 打桩。 */
+    @Mock
+    private OperationLogRecorder operationLogRecorder;
 
     /** 被测服务实例。 */
     private PositionServiceImpl positionService;
@@ -49,7 +65,7 @@ class PositionServiceImplTest {
      */
     @BeforeEach
     void setUp() {
-        positionService = new PositionServiceImpl(userPositionMapper);
+        positionService = new PositionServiceImpl(userPositionMapper, userMapper, orgMapper, operationLogRecorder);
     }
 
     /**
@@ -110,6 +126,7 @@ class PositionServiceImplTest {
         assertThat(captured.getOrgId()).isEqualTo(100L);
         assertThat(captured.getCreateBy()).isNotNull();
         assertThat(captured.getCreateTime()).isNotNull();
+        verify(operationLogRecorder).recordCreate(eq("position"), any(), any(), any(Map.class));
     }
 
     /**
@@ -183,6 +200,7 @@ class PositionServiceImplTest {
         assertThat(entity.getStatus()).isEqualTo(PositionStatus.DELETED);
         verify(userPositionMapper).updateById(entity);
         verify(userPositionMapper, never()).deleteById(any(Long.class));
+        verify(operationLogRecorder).recordDelete(eq("position"), eq(10L), any(), any(Map.class));
     }
 
     /**
