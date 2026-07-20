@@ -34,6 +34,7 @@ public class OperationLogController {
      *
      * @param module        业务模块中文名，精确匹配，可选
      * @param resourceType  资源类型编码，精确匹配，可选
+     * @param targetId      被操作对象主键 id，精确匹配，可选，通常与 resourceType 组合使用
      * @param operationType 操作类型，可选
      * @param createBy      操作人，精确匹配，可选
      * @param startTime     操作发起时间范围起点（含），可选
@@ -43,13 +44,16 @@ public class OperationLogController {
      * @return 操作日志的分页结果
      */
     @Operation(summary = "分页查询操作日志",
-            description = "支持按模块/资源类型/操作类型/操作人/操作时间范围筛选，均可选，按操作发起时间降序排列")
+            description = "支持按模块/资源类型/被操作对象id/操作类型/操作人/操作时间范围筛选，均可选，按操作发起时间降序排列；"
+                    + "resourceType + targetId 组合可查询单个资源实例的操作历史")
     @GetMapping("/api/operation-logs")
     public PageResult<OperationLogVO> page(
             @Parameter(description = "业务模块中文名，精确匹配")
             @RequestParam(required = false) String module,
             @Parameter(description = "资源类型编码，精确匹配")
             @RequestParam(required = false) String resourceType,
+            @Parameter(description = "被操作对象主键 id，精确匹配，通常与 resourceType 组合使用")
+            @RequestParam(required = false) Long targetId,
             @Parameter(description = "操作类型：1=新增，2=编辑，3=启用，4=停用，5=删除")
             @RequestParam(required = false) Integer operationType,
             @Parameter(description = "操作人，精确匹配")
@@ -65,6 +69,7 @@ public class OperationLogController {
         OperationLogQueryRequest request = new OperationLogQueryRequest();
         request.setModule(module);
         request.setResourceType(resourceType);
+        request.setTargetId(targetId);
         request.setOperationType(operationType);
         request.setCreateBy(createBy);
         request.setStartTime(startTime);

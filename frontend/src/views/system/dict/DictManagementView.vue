@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import { useDictStore } from '@/stores/dict'
+import OperationHistoryPanel from '@/components/OperationHistoryPanel.vue'
 import * as dictApi from '@/api/dict'
 import {
   DICT_STATUS_ENABLED,
@@ -100,6 +101,22 @@ async function openEditTypeDialog(row: DictTypeRow) {
 function closeTypeDialog() {
   typeDialogVisible.value = false
   typeFormRef.value?.clearValidate()
+}
+
+// ---- 字典类型：只读详情弹窗 ----
+
+const typeDetailVisible = ref(false)
+const typeDetailLoading = ref(false)
+const typeDetailData = ref<DictTypeRow | null>(null)
+
+async function openTypeDetailDialog(row: DictTypeRow) {
+  typeDetailVisible.value = true
+  typeDetailLoading.value = true
+  try {
+    typeDetailData.value = await dictApi.getDictTypeById(row.id)
+  } finally {
+    typeDetailLoading.value = false
+  }
 }
 
 async function submitTypeForm() {
@@ -199,6 +216,22 @@ function closeItemDialog() {
   itemFormRef.value?.clearValidate()
 }
 
+// ---- 字典项：只读详情弹窗 ----
+
+const itemDetailVisible = ref(false)
+const itemDetailLoading = ref(false)
+const itemDetailData = ref<DictItemRow | null>(null)
+
+async function openItemDetailDialog(row: DictItemRow) {
+  itemDetailVisible.value = true
+  itemDetailLoading.value = true
+  try {
+    itemDetailData.value = await dictApi.getDictItemById(row.id)
+  } finally {
+    itemDetailLoading.value = false
+  }
+}
+
 async function submitItemForm() {
   const valid = await itemFormRef.value?.validate().catch(() => false)
   if (!valid) return
@@ -283,8 +316,9 @@ async function handleDeleteItem(row: DictItemRow) {
             <el-tag v-else type="warning">停用</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
+            <el-button link type="primary" @click.stop="openTypeDetailDialog(row as DictTypeRow)">详情</el-button>
             <el-button link type="primary" @click.stop="openEditTypeDialog(row as DictTypeRow)">编辑</el-button>
             <el-button
               link
@@ -328,8 +362,9 @@ async function handleDeleteItem(row: DictItemRow) {
           </template>
         </el-table-column>
         <el-table-column prop="showOrder" label="显示序号" width="90" />
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
+            <el-button link type="primary" @click="openItemDetailDialog(row as DictItemRow)">详情</el-button>
             <el-button link type="primary" @click="openEditItemDialog(row as DictItemRow)">编辑</el-button>
             <el-button
               link
@@ -398,6 +433,53 @@ async function handleDeleteItem(row: DictItemRow) {
       <template #footer>
         <el-button @click="itemDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="itemSubmitting" @click="submitItemForm">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="typeDetailVisible" title="字典类型详情" width="480px">
+      <el-descriptions v-loading="typeDetailLoading" :column="1" border>
+        <el-descriptions-item label="类型名称">{{ typeDetailData?.name }}</el-descriptions-item>
+        <el-descriptions-item label="编码">{{ typeDetailData?.code }}</el-descriptions-item>
+        <el-descriptions-item label="显示序号">{{ typeDetailData?.showOrder }}</el-descriptions-item>
+        <el-descriptions-item label="备注">{{ typeDetailData?.remark || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="状态">
+          <el-tag v-if="typeDetailData?.status === DICT_STATUS_ENABLED" type="success">启用</el-tag>
+          <el-tag v-else type="warning">停用</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="创建人">{{ typeDetailData?.createBy }}</el-descriptions-item>
+        <el-descriptions-item label="创建时间">{{ typeDetailData?.createTime }}</el-descriptions-item>
+        <el-descriptions-item label="更新人">{{ typeDetailData?.updateBy }}</el-descriptions-item>
+        <el-descriptions-item label="更新时间">{{ typeDetailData?.updateTime }}</el-descriptions-item>
+      </el-descriptions>
+
+      <OperationHistoryPanel resource-type="dictType" :target-id="typeDetailData?.id ?? null" />
+
+      <template #footer>
+        <el-button type="primary" @click="typeDetailVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="itemDetailVisible" title="字典项详情" width="480px">
+      <el-descriptions v-loading="itemDetailLoading" :column="1" border>
+        <el-descriptions-item label="所属字典类型">{{ itemDetailData?.dictTypeName }}</el-descriptions-item>
+        <el-descriptions-item label="标签">{{ itemDetailData?.label }}</el-descriptions-item>
+        <el-descriptions-item label="编码">{{ itemDetailData?.code }}</el-descriptions-item>
+        <el-descriptions-item label="显示序号">{{ itemDetailData?.showOrder }}</el-descriptions-item>
+        <el-descriptions-item label="备注">{{ itemDetailData?.remark || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="状态">
+          <el-tag v-if="itemDetailData?.status === DICT_STATUS_ENABLED" type="success">启用</el-tag>
+          <el-tag v-else type="warning">停用</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="创建人">{{ itemDetailData?.createBy }}</el-descriptions-item>
+        <el-descriptions-item label="创建时间">{{ itemDetailData?.createTime }}</el-descriptions-item>
+        <el-descriptions-item label="更新人">{{ itemDetailData?.updateBy }}</el-descriptions-item>
+        <el-descriptions-item label="更新时间">{{ itemDetailData?.updateTime }}</el-descriptions-item>
+      </el-descriptions>
+
+      <OperationHistoryPanel resource-type="dictItem" :target-id="itemDetailData?.id ?? null" />
+
+      <template #footer>
+        <el-button type="primary" @click="itemDetailVisible = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>

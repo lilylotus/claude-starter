@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
+import OperationHistoryPanel from '@/components/OperationHistoryPanel.vue'
 import * as userApi from '@/api/user'
 import * as orgApi from '@/api/org'
 import * as dictApi from '@/api/dict'
@@ -468,6 +469,8 @@ async function handleDelete(row: UserRow) {
           <el-table-column prop="updateTime" label="更新时间" min-width="160" />
         </el-table>
       </div>
+
+      <OperationHistoryPanel resource-type="user" :target-id="detailData?.id ?? null" />
 
       <template #footer>
         <el-button type="primary" @click="detailVisible = false">关闭</el-button>

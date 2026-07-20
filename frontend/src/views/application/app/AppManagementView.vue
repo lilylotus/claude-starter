@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useAppStore } from '@/stores/app'
+import OperationHistoryPanel from '@/components/OperationHistoryPanel.vue'
 import * as appApi from '@/api/app'
 import * as orgApi from '@/api/org'
 import * as userApi from '@/api/user'
@@ -318,6 +319,9 @@ async function handleDelete(row: AppRow) {
         <el-descriptions-item label="更新人">{{ detailData?.updateBy }}</el-descriptions-item>
         <el-descriptions-item label="更新时间">{{ detailData?.updateTime }}</el-descriptions-item>
       </el-descriptions>
+
+      <OperationHistoryPanel resource-type="app" :target-id="detailData?.id ?? null" />
+
       <template #footer>
         <el-button type="primary" @click="detailVisible = false">关闭</el-button>
       </template>

@@ -56,6 +56,7 @@ export const RESOURCE_TYPE_OPTIONS: { value: string; label: string }[] = [
 export interface OperationLogQueryParams {
   module?: string
   resourceType?: string
+  targetId?: number
   operationType?: number
   createBy?: string
   startTime?: string

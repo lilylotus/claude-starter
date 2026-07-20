@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useRoleStore } from '@/stores/role'
+import OperationHistoryPanel from '@/components/OperationHistoryPanel.vue'
 import * as roleApi from '@/api/role'
 import { ROLE_STATUS_ENABLED, type RoleFormRequest, type RoleRow } from '@/types/role'
 
@@ -214,6 +215,9 @@ async function handleDelete(row: RoleRow) {
         <el-descriptions-item label="更新人">{{ detailData?.updateBy }}</el-descriptions-item>
         <el-descriptions-item label="更新时间">{{ detailData?.updateTime }}</el-descriptions-item>
       </el-descriptions>
+
+      <OperationHistoryPanel resource-type="role" :target-id="detailData?.id ?? null" />
+
       <template #footer>
         <el-button type="primary" @click="detailVisible = false">关闭</el-button>
       </template>

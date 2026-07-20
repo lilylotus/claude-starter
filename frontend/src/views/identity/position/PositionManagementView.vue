@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import type Node from 'element-plus/es/components/tree/src/model/node'
 import { usePositionStore } from '@/stores/position'
+import OperationHistoryPanel from '@/components/OperationHistoryPanel.vue'
 import * as positionApi from '@/api/position'
 import * as orgApi from '@/api/org'
 import * as userApi from '@/api/user'
@@ -406,6 +407,9 @@ async function handleDelete(row: PositionRow) {
         <el-descriptions-item label="更新人">{{ detailData?.updateBy }}</el-descriptions-item>
         <el-descriptions-item label="更新时间">{{ detailData?.updateTime }}</el-descriptions-item>
       </el-descriptions>
+
+      <OperationHistoryPanel resource-type="position" :target-id="detailData?.id ?? null" />
+
       <template #footer>
         <el-button type="primary" @click="detailVisible = false">关闭</el-button>
       </template>

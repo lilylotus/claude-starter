@@ -1,0 +1,105 @@
+package cn.nihility.rbac.operationlog.service.impl;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import cn.nihility.rbac.operationlog.dto.OperationLogQueryRequest;
+import cn.nihility.rbac.operationlog.entity.OperationLogEntity;
+import cn.nihility.rbac.operationlog.mapper.OperationLogMapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+/**
+ * {@link OperationLogQueryServiceImpl} 的单元测试，重点覆盖 {@code targetId} 筛选参数
+ * 透传给 {@link OperationLogMapper#selectOperationLogPage} 的行为（与 resourceType 组合、
+ * 单独出现两种场景），SQL 层的实际过滤效果由 XML 里与其他筛选字段一致的 {@code <if>}
+ * 结构决定，不在本单元测试范围内。
+ */
+@ExtendWith(MockitoExtension.class)
+class OperationLogQueryServiceImplTest {
+
+    /** 被测服务的操作日志数据访问依赖，使用 Mockito 打桩。 */
+    @Mock
+    private OperationLogMapper operationLogMapper;
+
+    /** 被测服务实例，序列化组件使用真实的 {@link ObjectMapper}，不做打桩。 */
+    private OperationLogQueryServiceImpl operationLogQueryService;
+
+    /**
+     * 每个用例执行前重新构造被测服务。
+     */
+    @BeforeEach
+    void setUp() {
+        operationLogQueryService = new OperationLogQueryServiceImpl(operationLogMapper, new ObjectMapper());
+    }
+
+    /**
+     * {@code resourceType} + {@code targetId} 组合筛选时，两个字段均应原样透传给 mapper。
+     */
+    @Test
+    void getPage_shouldPassResourceTypeAndTargetIdToMapper() {
+        when(operationLogMapper.selectOperationLogPage(any(), any())).thenReturn(new Page<OperationLogEntity>());
+
+        OperationLogQueryRequest request = new OperationLogQueryRequest();
+        request.setResourceType("org");
+        request.setTargetId(5L);
+        request.setPage(1);
+        request.setPageSize(10);
+
+        operationLogQueryService.getPage(request);
+
+        ArgumentCaptor<OperationLogQueryRequest> captor = ArgumentCaptor.forClass(OperationLogQueryRequest.class);
+        verify(operationLogMapper).selectOperationLogPage(any(), captor.capture());
+        assertThat(captor.getValue().getResourceType()).isEqualTo("org");
+        assertThat(captor.getValue().getTargetId()).isEqualTo(5L);
+    }
+
+    /**
+     * {@code targetId} 单独出现（不携带 {@code resourceType}）时同样原样透传给 mapper，
+     * 不做强制关联校验。
+     */
+    @Test
+    void getPage_shouldPassTargetIdAlone_whenResourceTypeAbsent() {
+        when(operationLogMapper.selectOperationLogPage(any(), any())).thenReturn(new Page<OperationLogEntity>());
+
+        OperationLogQueryRequest request = new OperationLogQueryRequest();
+        request.setTargetId(5L);
+        request.setPage(1);
+        request.setPageSize(10);
+
+        operationLogQueryService.getPage(request);
+
+        ArgumentCaptor<OperationLogQueryRequest> captor = ArgumentCaptor.forClass(OperationLogQueryRequest.class);
+        verify(operationLogMapper).selectOperationLogPage(any(), captor.capture());
+        assertThat(captor.getValue().getResourceType()).isNull();
+        assertThat(captor.getValue().getTargetId()).isEqualTo(5L);
+    }
+
+    /**
+     * 未携带 {@code targetId} 时该字段保持为 {@code null} 透传，不影响其余筛选条件。
+     */
+    @Test
+    void getPage_shouldLeaveTargetIdNull_whenNotProvided() {
+        when(operationLogMapper.selectOperationLogPage(any(), any())).thenReturn(new Page<OperationLogEntity>());
+
+        OperationLogQueryRequest request = new OperationLogQueryRequest();
+        request.setModule("组织管理");
+        request.setPage(1);
+        request.setPageSize(10);
+
+        operationLogQueryService.getPage(request);
+
+        ArgumentCaptor<OperationLogQueryRequest> captor = ArgumentCaptor.forClass(OperationLogQueryRequest.class);
+        verify(operationLogMapper).selectOperationLogPage(any(), captor.capture());
+        assertThat(captor.getValue().getModule()).isEqualTo("组织管理");
+        assertThat(captor.getValue().getTargetId()).isNull();
+    }
+}

@@ -110,11 +110,13 @@ DictManagement（字典管理，/system/dicts）
 - DictManagement:dictType:view      字典管理页面访问（含字典类型列表）
 - DictManagement:dictType:add       新增字典类型
 - DictManagement:dictType:edit      编辑字典类型
+- DictManagement:dictType:detail    查看字典类型详情
 - DictManagement:dictType:enable    启用字典类型
 - DictManagement:dictType:disable   停用字典类型
 - DictManagement:dictType:delete    删除字典类型
 - DictManagement:dictItem:add       新增字典项（需先选中左侧字典类型）
 - DictManagement:dictItem:edit      编辑字典项
+- DictManagement:dictItem:detail    查看字典项详情
 - DictManagement:dictItem:enable    启用字典项
 - DictManagement:dictItem:disable   停用字典项
 - DictManagement:dictItem:delete    删除字典项

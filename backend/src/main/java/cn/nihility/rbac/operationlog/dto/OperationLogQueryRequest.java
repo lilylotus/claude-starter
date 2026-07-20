@@ -21,6 +21,10 @@ public class OperationLogQueryRequest {
     @Schema(description = "资源类型编码，精确匹配")
     private String resourceType;
 
+    /** 被操作对象主键 id，精确匹配，可选；与 resourceType 组合使用可查询单个资源实例的操作历史。 */
+    @Schema(description = "被操作对象主键 id，精确匹配，通常与 resourceType 组合使用")
+    private Long targetId;
+
     /** 操作类型，精确匹配，可选。 */
     @Schema(description = "操作类型：1=新增，2=编辑，3=启用，4=停用，5=删除")
     private Integer operationType;

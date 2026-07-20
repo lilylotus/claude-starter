@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import * as operationLogApi from '@/api/operationLog'
+import OperationLogDetailDialog from '@/components/OperationLogDetailDialog.vue'
 import {
   MODULE_OPTIONS,
   OPERATION_TYPE_CREATE,
@@ -10,7 +11,6 @@ import {
   OPERATION_TYPE_OPTIONS,
   OPERATION_TYPE_UPDATE,
   RESOURCE_TYPE_OPTIONS,
-  type OperationLogDetail,
   type OperationLogRow,
 } from '@/types/operationLog'
 
@@ -103,17 +103,11 @@ function displayValue(value: string | null | undefined): string {
 // ---- 只读详情弹窗 ----
 
 const detailVisible = ref(false)
-const detailLoading = ref(false)
-const detailData = ref<OperationLogDetail | null>(null)
+const selectedLogId = ref<number | null>(null)
 
-async function openDetailDialog(row: OperationLogRow) {
+function openDetailDialog(row: OperationLogRow) {
+  selectedLogId.value = row.id
   detailVisible.value = true
-  detailLoading.value = true
-  try {
-    detailData.value = await operationLogApi.getOperationLogById(row.id)
-  } finally {
-    detailLoading.value = false
-  }
 }
 </script>
 
@@ -193,40 +187,7 @@ async function openDetailDialog(row: OperationLogRow) {
       />
     </section>
 
-    <el-dialog v-model="detailVisible" title="操作日志详情" width="680px">
-      <el-descriptions v-loading="detailLoading" :column="2" border>
-        <el-descriptions-item label="操作模块">{{ detailData?.module }}</el-descriptions-item>
-        <el-descriptions-item label="资源类型">{{ detailData?.resourceName }}</el-descriptions-item>
-        <el-descriptions-item label="操作类型">{{ detailData?.operationTypeLabel }}</el-descriptions-item>
-        <el-descriptions-item label="被操作对象">{{ detailData?.targetName }}</el-descriptions-item>
-        <el-descriptions-item label="操作人">{{ detailData?.createBy }}</el-descriptions-item>
-        <el-descriptions-item label="操作发起时间">{{ detailData?.createTime }}</el-descriptions-item>
-        <el-descriptions-item label="操作发起 IP">{{ displayValue(detailData?.operateIp) }}</el-descriptions-item>
-        <el-descriptions-item label="操作终端">{{ displayValue(detailData?.operateTerminal) }}</el-descriptions-item>
-        <el-descriptions-item label="操作系统">{{ displayValue(detailData?.operateOs) }}</el-descriptions-item>
-        <el-descriptions-item label="操作浏览器">{{ displayValue(detailData?.operateBrowser) }}</el-descriptions-item>
-        <el-descriptions-item label="原始 User-Agent" :span="2">
-          {{ displayValue(detailData?.operateUserAgent) }}
-        </el-descriptions-item>
-      </el-descriptions>
-
-      <div class="log-detail-changes">
-        <h3 class="log-detail-changes__title">字段变更</h3>
-        <el-table :data="detailData?.changeDetail ?? []" empty-text="无字段变更">
-          <el-table-column prop="field" label="字段名" width="140" />
-          <el-table-column label="旧值" min-width="160">
-            <template #default="{ row }">{{ displayValue(row.oldValue) }}</template>
-          </el-table-column>
-          <el-table-column label="新值" min-width="160">
-            <template #default="{ row }">{{ displayValue(row.newValue) }}</template>
-          </el-table-column>
-        </el-table>
-      </div>
-
-      <template #footer>
-        <el-button type="primary" @click="detailVisible = false">关闭</el-button>
-      </template>
-    </el-dialog>
+    <OperationLogDetailDialog v-model="detailVisible" :log-id="selectedLogId" />
   </div>
 </template>
 
@@ -264,16 +225,6 @@ async function openDetailDialog(row: OperationLogRow) {
   display: flex;
   justify-content: flex-end;
   margin-top: 16px;
-}
-
-.log-detail-changes {
-  margin-top: 20px;
-}
-
-.log-detail-changes__title {
-  font-size: 14px;
-  color: var(--color-ink);
-  margin: 0 0 8px;
 }
 
 // 操作列按钮间距收紧，与其他管理页面保持一致
