@@ -200,7 +200,7 @@ async function handleDelete(row: RoleRow) {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="detailVisible" title="角色详情" width="560px">
+    <el-dialog v-model="detailVisible" title="角色详情" width="560px" destroy-on-close>
       <el-descriptions v-loading="detailLoading" :column="1" border>
         <el-descriptions-item label="角色名称">{{ detailData?.name }}</el-descriptions-item>
         <el-descriptions-item label="角色编码">{{ detailData?.code }}</el-descriptions-item>

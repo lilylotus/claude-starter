@@ -433,7 +433,7 @@ async function handleDelete(row: UserRow) {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="detailVisible" title="用户详情" width="760px">
+    <el-dialog v-model="detailVisible" title="用户详情" width="760px" destroy-on-close>
       <el-descriptions v-loading="detailLoading" :column="2" border>
         <el-descriptions-item label="姓名">{{ detailData?.name }}</el-descriptions-item>
         <el-descriptions-item label="编号">{{ detailData?.code }}</el-descriptions-item>

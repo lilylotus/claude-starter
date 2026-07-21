@@ -387,7 +387,7 @@ async function handleDelete(row: PositionRow) {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="detailVisible" title="任职详情" width="560px">
+    <el-dialog v-model="detailVisible" title="任职详情" width="560px" destroy-on-close>
       <el-descriptions v-loading="detailLoading" :column="1" border>
         <el-descriptions-item label="所属用户">{{ detailData?.userName }}</el-descriptions-item>
         <el-descriptions-item label="所属组织">{{ detailData?.orgName }}</el-descriptions-item>

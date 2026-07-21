@@ -383,7 +383,7 @@ async function handleDelete(row: AdminRow) {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="detailVisible" title="管理员详情" width="680px">
+    <el-dialog v-model="detailVisible" title="管理员详情" width="680px" destroy-on-close>
       <el-descriptions v-loading="detailLoading" :column="1" border>
         <el-descriptions-item label="管理员名称">{{ detailData?.name }}</el-descriptions-item>
         <el-descriptions-item label="管理员编码">{{ detailData?.code }}</el-descriptions-item>

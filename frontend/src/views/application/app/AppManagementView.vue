@@ -302,7 +302,7 @@ async function handleDelete(row: AppRow) {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="detailVisible" title="应用详情" width="560px">
+    <el-dialog v-model="detailVisible" title="应用详情" width="560px" destroy-on-close>
       <el-descriptions v-loading="detailLoading" :column="1" border>
         <el-descriptions-item label="应用名称">{{ detailData?.name }}</el-descriptions-item>
         <el-descriptions-item label="应用编码">{{ detailData?.code }}</el-descriptions-item>

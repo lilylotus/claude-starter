@@ -351,7 +351,7 @@ async function handleDelete(row: OrgRow) {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="detailVisible" title="组织详情" width="480px">
+    <el-dialog v-model="detailVisible" title="组织详情" width="480px" destroy-on-close>
       <el-descriptions v-loading="detailLoading" :column="1" border>
         <el-descriptions-item label="组织名称">{{ detailData?.name }}</el-descriptions-item>
         <el-descriptions-item label="编码">{{ detailData?.code }}</el-descriptions-item>

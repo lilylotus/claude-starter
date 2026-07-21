@@ -436,7 +436,7 @@ async function handleDeleteItem(row: DictItemRow) {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="typeDetailVisible" title="字典类型详情" width="480px">
+    <el-dialog v-model="typeDetailVisible" title="字典类型详情" width="480px" destroy-on-close>
       <el-descriptions v-loading="typeDetailLoading" :column="1" border>
         <el-descriptions-item label="类型名称">{{ typeDetailData?.name }}</el-descriptions-item>
         <el-descriptions-item label="编码">{{ typeDetailData?.code }}</el-descriptions-item>
@@ -459,7 +459,7 @@ async function handleDeleteItem(row: DictItemRow) {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="itemDetailVisible" title="字典项详情" width="480px">
+    <el-dialog v-model="itemDetailVisible" title="字典项详情" width="480px" destroy-on-close>
       <el-descriptions v-loading="itemDetailLoading" :column="1" border>
         <el-descriptions-item label="所属字典类型">{{ itemDetailData?.dictTypeName }}</el-descriptions-item>
         <el-descriptions-item label="标签">{{ itemDetailData?.label }}</el-descriptions-item>
