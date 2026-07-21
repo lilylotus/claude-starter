@@ -41,8 +41,10 @@ public class OperationLogQueryServiceImpl implements OperationLogQueryService {
         var resultPage = operationLogMapper.selectOperationLogPage(queryPage, request);
 
         List<OperationLogVO> records = OperationLogConvert.INSTANCE.toVOList(resultPage.getRecords());
-        for (OperationLogVO vo : records) {
+        for (int i = 0; i < records.size(); i++) {
+            OperationLogVO vo = records.get(i);
             vo.setOperationTypeLabel(OperationType.label(vo.getOperationType()));
+            vo.setChangeDetail(parseChangeDetail(resultPage.getRecords().get(i).getChangeDetail()));
         }
         return PageResult.of(records, resultPage);
     }

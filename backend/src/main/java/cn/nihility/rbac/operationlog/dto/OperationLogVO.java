@@ -2,6 +2,7 @@ package cn.nihility.rbac.operationlog.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
+import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -9,7 +10,8 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 /**
- * 操作日志列表行视图对象，不含字段变更详情与原始 User-Agent，避免列表响应体过大。
+ * 操作日志列表行视图对象，含字段级变更详情（用于详情页历史面板默认展开展示），
+ * 不含原始 User-Agent，避免列表响应体过大。
  */
 @Getter
 @Setter
@@ -74,4 +76,8 @@ public class OperationLogVO {
     /** 操作发起时间。 */
     @Schema(description = "操作发起时间")
     private LocalDateTime createTime;
+
+    /** 字段级变更详情，新增/删除操作时对应记录的 {@code oldValue}/{@code newValue} 可为空。 */
+    @Schema(description = "字段级变更详情")
+    private List<OperationLogFieldChangeVO> changeDetail;
 }

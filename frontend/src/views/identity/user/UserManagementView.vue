@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
-import OperationHistoryPanel from '@/components/OperationHistoryPanel.vue'
 import * as userApi from '@/api/user'
 import * as orgApi from '@/api/org'
 import * as dictApi from '@/api/dict'
@@ -19,6 +19,7 @@ import type { OrgTreeNode } from '@/types/org'
 import type { DictItemOption } from '@/types/dict'
 
 const userStore = useUserStore()
+const router = useRouter()
 
 onMounted(() => {
   userStore.fetchPage()
@@ -71,10 +72,6 @@ const positionTypeOptions = ref<DictItemOption[]>([])
 
 async function fetchPositionTypeOptions() {
   positionTypeOptions.value = await dictApi.getDictItemOptions('position_type')
-}
-
-function positionTypeLabel(code: string): string {
-  return positionTypeOptions.value.find((opt) => opt.code === code)?.label ?? code
 }
 
 // ---- 新增/编辑弹窗 ----
@@ -222,20 +219,10 @@ async function submitForm() {
   }
 }
 
-// ---- 只读详情弹窗 ----
+// ---- 只读详情：跳转独立详情页 ----
 
-const detailVisible = ref(false)
-const detailLoading = ref(false)
-const detailData = ref<UserRow | null>(null)
-
-async function openDetailDialog(row: UserRow) {
-  detailVisible.value = true
-  detailLoading.value = true
-  try {
-    detailData.value = await userApi.getUserById(row.id)
-  } finally {
-    detailLoading.value = false
-  }
+function goToDetail(row: UserRow) {
+  router.push({ name: 'identity-users-detail', params: { id: row.id } })
 }
 
 // ---- 行操作：启用/停用、删除 ----
@@ -317,7 +304,7 @@ async function handleDelete(row: UserRow) {
         <el-table-column prop="showOrder" label="显示序号" width="90" />
         <el-table-column label="操作" width="280" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openDetailDialog(row as UserRow)">详情</el-button>
+            <el-button link type="primary" @click="goToDetail(row as UserRow)">详情</el-button>
             <el-button link type="primary" @click="openEditDialog(row as UserRow)">编辑</el-button>
             <el-button
               link
@@ -430,50 +417,6 @@ async function handleDelete(row: UserRow) {
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitForm">确定</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="detailVisible" title="用户详情" width="760px" destroy-on-close>
-      <el-descriptions v-loading="detailLoading" :column="2" border>
-        <el-descriptions-item label="姓名">{{ detailData?.name }}</el-descriptions-item>
-        <el-descriptions-item label="编号">{{ detailData?.code }}</el-descriptions-item>
-        <el-descriptions-item label="性别">{{ genderLabel(detailData?.gender ?? 0) }}</el-descriptions-item>
-        <el-descriptions-item label="手机号">{{ detailData?.mobile || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="身份证号">{{ detailData?.idCard || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="状态">
-          <el-tag v-if="detailData?.status === USER_STATUS_ENABLED" type="success">启用</el-tag>
-          <el-tag v-else type="warning">停用</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="显示序号">{{ detailData?.showOrder }}</el-descriptions-item>
-        <el-descriptions-item label="备注" :span="2">{{ detailData?.remark || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="创建人">{{ detailData?.createBy }}</el-descriptions-item>
-        <el-descriptions-item label="创建时间">{{ detailData?.createTime }}</el-descriptions-item>
-        <el-descriptions-item label="更新人">{{ detailData?.updateBy }}</el-descriptions-item>
-        <el-descriptions-item label="更新时间">{{ detailData?.updateTime }}</el-descriptions-item>
-      </el-descriptions>
-
-      <div class="user-detail-positions">
-        <h3 class="user-detail-positions__title">任职记录</h3>
-        <el-table :data="detailData?.positions ?? []" empty-text="暂无任职记录">
-          <el-table-column prop="orgName" label="所属组织" min-width="120" />
-          <el-table-column label="任职类型" min-width="100">
-            <template #default="{ row }">{{ positionTypeLabel(row.positionType) }}</template>
-          </el-table-column>
-          <el-table-column prop="positionAddress" label="任职地址" min-width="140" />
-          <el-table-column prop="positionPhone" label="任职电话" min-width="120" />
-          <el-table-column prop="showOrder" label="显示序号" width="90" />
-          <el-table-column prop="remark" label="备注" min-width="120" />
-          <el-table-column prop="createBy" label="创建人" min-width="100" />
-          <el-table-column prop="createTime" label="创建时间" min-width="160" />
-          <el-table-column prop="updateBy" label="更新人" min-width="100" />
-          <el-table-column prop="updateTime" label="更新时间" min-width="160" />
-        </el-table>
-      </div>
-
-      <OperationHistoryPanel resource-type="user" :target-id="detailData?.id ?? null" />
-
-      <template #footer>
-        <el-button type="primary" @click="detailVisible = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>
@@ -596,16 +539,6 @@ async function handleDelete(row: UserRow) {
 .user-position-row__remove {
   margin-top: 6px;
   flex-shrink: 0;
-}
-
-.user-detail-positions {
-  margin-top: 20px;
-}
-
-.user-detail-positions__title {
-  font-size: 14px;
-  color: var(--color-ink);
-  margin: 0 0 8px;
 }
 
 // 操作列相邻按钮间距收紧，比 Element Plus 默认更紧凑

@@ -6,10 +6,13 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.operationlog.dto.OperationLogQueryRequest;
+import cn.nihility.rbac.operationlog.dto.OperationLogVO;
 import cn.nihility.rbac.operationlog.entity.OperationLogEntity;
 import cn.nihility.rbac.operationlog.mapper.OperationLogMapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.LocalDateTime;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -101,5 +104,69 @@ class OperationLogQueryServiceImplTest {
         verify(operationLogMapper).selectOperationLogPage(any(), captor.capture());
         assertThat(captor.getValue().getModule()).isEqualTo("组织管理");
         assertThat(captor.getValue().getTargetId()).isNull();
+    }
+
+    /**
+     * 分页记录里持久化的 {@code changeDetail} JSON 字符串应被反序列化为结构化列表，
+     * 设置到对应行的 {@link OperationLogVO#getChangeDetail()} 上。
+     */
+    @Test
+    void getPage_shouldParseChangeDetailForEachRecord() {
+        OperationLogEntity entity = OperationLogEntity.builder()
+                .id(1L)
+                .module("组织管理")
+                .resourceType("org")
+                .operationType(2)
+                .targetId(5L)
+                .createBy("admin")
+                .createTime(LocalDateTime.now())
+                .changeDetail("[{\"field\":\"组织名称\",\"oldValue\":\"旧名称\",\"newValue\":\"新名称\"}]")
+                .build();
+        Page<OperationLogEntity> page = new Page<>();
+        page.setRecords(List.of(entity));
+        when(operationLogMapper.selectOperationLogPage(any(), any())).thenReturn(page);
+
+        OperationLogQueryRequest request = new OperationLogQueryRequest();
+        request.setPage(1);
+        request.setPageSize(10);
+
+        var result = operationLogQueryService.getPage(request);
+
+        assertThat(result.getRecords()).hasSize(1);
+        OperationLogVO vo = result.getRecords().get(0);
+        assertThat(vo.getChangeDetail()).hasSize(1);
+        assertThat(vo.getChangeDetail().get(0).getField()).isEqualTo("组织名称");
+        assertThat(vo.getChangeDetail().get(0).getOldValue()).isEqualTo("旧名称");
+        assertThat(vo.getChangeDetail().get(0).getNewValue()).isEqualTo("新名称");
+    }
+
+    /**
+     * 未持久化字段变更详情（{@code changeDetail} 为空字符串）时，反序列化结果应为空列表，
+     * 而非 {@code null}，方便前端直接渲染。
+     */
+    @Test
+    void getPage_shouldReturnEmptyChangeDetail_whenBlank() {
+        OperationLogEntity entity = OperationLogEntity.builder()
+                .id(1L)
+                .module("组织管理")
+                .resourceType("org")
+                .operationType(1)
+                .targetId(5L)
+                .createBy("admin")
+                .createTime(LocalDateTime.now())
+                .changeDetail("")
+                .build();
+        Page<OperationLogEntity> page = new Page<>();
+        page.setRecords(List.of(entity));
+        when(operationLogMapper.selectOperationLogPage(any(), any())).thenReturn(page);
+
+        OperationLogQueryRequest request = new OperationLogQueryRequest();
+        request.setPage(1);
+        request.setPageSize(10);
+
+        var result = operationLogQueryService.getPage(request);
+
+        assertThat(result.getRecords()).hasSize(1);
+        assertThat(result.getRecords().get(0).getChangeDetail()).isEmpty();
     }
 }

@@ -21,12 +21,13 @@ public interface OperationLogConvert {
     OperationLogConvert INSTANCE = Mappers.getMapper(OperationLogConvert.class);
 
     /**
-     * 实体转列表行视图对象。
+     * 实体转列表行视图对象，{@code operationTypeLabel}/{@code changeDetail} 由调用方另行赋值。
      *
      * @param entity 操作日志实体
      * @return 列表行视图对象
      */
     @Mapping(target = "operationTypeLabel", ignore = true)
+    @Mapping(target = "changeDetail", ignore = true)
     OperationLogVO toVO(OperationLogEntity entity);
 
     /**

@@ -65,7 +65,15 @@ export interface OperationLogQueryParams {
   pageSize?: number
 }
 
-// 操作日志列表行，来自 GET /api/operation-logs 分页接口
+// 字段级变更详情，field 为中文字段名；新增操作 oldValue 为空、删除操作 newValue 为空
+export interface OperationLogFieldChange {
+  field: string
+  oldValue: string | null
+  newValue: string | null
+}
+
+// 操作日志列表行，来自 GET /api/operation-logs 分页接口；changeDetail 为该次操作的
+// 字段级变更明细，随分页响应一并返回（详情接口 GET /api/operation-logs/{id} 也有同名字段）
 export interface OperationLogRow {
   id: number
   module: string
@@ -81,13 +89,7 @@ export interface OperationLogRow {
   operateBrowser: string | null
   createBy: string
   createTime: string
-}
-
-// 字段级变更详情，field 为中文字段名；新增操作 oldValue 为空、删除操作 newValue 为空
-export interface OperationLogFieldChange {
-  field: string
-  oldValue: string | null
-  newValue: string | null
+  changeDetail?: OperationLogFieldChange[]
 }
 
 // 操作日志详情，来自 GET /api/operation-logs/{id}，在列表行字段基础上追加原始

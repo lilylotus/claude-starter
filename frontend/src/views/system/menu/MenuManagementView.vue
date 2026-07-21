@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules, TreeInstance } from 'element-plus'
 import type Node from 'element-plus/es/components/tree/src/model/node'
 import { useMenuStore } from '@/stores/menu'
-import OperationHistoryPanel from '@/components/OperationHistoryPanel.vue'
 import * as menuApi from '@/api/menu'
 import {
   MENU_RESOURCE_TYPE_LABELS,
@@ -17,6 +17,7 @@ import {
 } from '@/types/menuResource'
 
 const menuStore = useMenuStore()
+const router = useRouter()
 
 onMounted(() => {
   // 交互模式照抄 OrgManagementView：不在这里主动触发左侧懒加载树的顶级请求
@@ -169,20 +170,10 @@ function closeDialog() {
   formRef.value?.clearValidate()
 }
 
-// ---- 只读详情弹窗 ----
+// ---- 只读详情：跳转独立详情页 ----
 
-const detailVisible = ref(false)
-const detailLoading = ref(false)
-const detailData = ref<MenuResourceRow | null>(null)
-
-async function openDetailDialog(row: MenuResourceRow) {
-  detailVisible.value = true
-  detailLoading.value = true
-  try {
-    detailData.value = await menuApi.getMenuById(row.id)
-  } finally {
-    detailLoading.value = false
-  }
+function goToDetail(row: MenuResourceRow) {
+  router.push({ name: 'system-menus-detail', params: { id: row.id } })
 }
 
 async function submitForm() {
@@ -284,7 +275,7 @@ async function handleDelete(row: MenuResourceRow) {
         </el-table-column>
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openDetailDialog(row as MenuResourceRow)">详情</el-button>
+            <el-button link type="primary" @click="goToDetail(row as MenuResourceRow)">详情</el-button>
             <el-button link type="primary" @click="openEditDialog(row as MenuResourceRow)">编辑</el-button>
             <el-button
               link
@@ -348,33 +339,6 @@ async function handleDelete(row: MenuResourceRow) {
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitForm">确定</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="detailVisible" title="资源详情" width="480px" destroy-on-close>
-      <el-descriptions v-loading="detailLoading" :column="1" border>
-        <el-descriptions-item label="资源名称">{{ detailData?.name }}</el-descriptions-item>
-        <el-descriptions-item label="资源编码">{{ detailData?.code }}</el-descriptions-item>
-        <el-descriptions-item label="上级资源">{{ detailData?.parentName ?? '顶级资源' }}</el-descriptions-item>
-        <el-descriptions-item label="资源类型">
-          {{ detailData ? resourceTypeLabel(detailData.resourceType) : '' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="状态">
-          <el-tag v-if="detailData?.status === MENU_STATUS_ENABLED" type="success">启用</el-tag>
-          <el-tag v-else type="warning">停用</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="显示序号">{{ detailData?.showOrder }}</el-descriptions-item>
-        <el-descriptions-item label="备注">{{ detailData?.remark || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="新增人">{{ detailData?.createBy }}</el-descriptions-item>
-        <el-descriptions-item label="新增时间">{{ detailData?.createTime }}</el-descriptions-item>
-        <el-descriptions-item label="更新人">{{ detailData?.updateBy }}</el-descriptions-item>
-        <el-descriptions-item label="更新时间">{{ detailData?.updateTime }}</el-descriptions-item>
-      </el-descriptions>
-
-      <OperationHistoryPanel resource-type="menu" :target-id="detailData?.id ?? null" />
-
-      <template #footer>
-        <el-button type="primary" @click="detailVisible = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>

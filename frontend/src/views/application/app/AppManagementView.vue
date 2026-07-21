@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useAppStore } from '@/stores/app'
-import OperationHistoryPanel from '@/components/OperationHistoryPanel.vue'
 import * as appApi from '@/api/app'
 import * as orgApi from '@/api/org'
 import * as userApi from '@/api/user'
@@ -11,6 +11,7 @@ import { APP_STATUS_ENABLED, type AppFormRequest, type AppRow } from '@/types/ap
 import type { OrgTreeNode } from '@/types/org'
 
 const appStore = useAppStore()
+const router = useRouter()
 
 onMounted(() => {
   appStore.fetchPage()
@@ -162,20 +163,10 @@ async function submitForm() {
   }
 }
 
-// ---- 只读详情弹窗 ----
+// ---- 只读详情：跳转独立详情页 ----
 
-const detailVisible = ref(false)
-const detailLoading = ref(false)
-const detailData = ref<AppRow | null>(null)
-
-async function openDetailDialog(row: AppRow) {
-  detailVisible.value = true
-  detailLoading.value = true
-  try {
-    detailData.value = await appApi.getAppById(row.id)
-  } finally {
-    detailLoading.value = false
-  }
+function goToDetail(row: AppRow) {
+  router.push({ name: 'application-list-detail', params: { id: row.id } })
 }
 
 // ---- 行操作：启用/停用、删除 ----
@@ -225,7 +216,7 @@ async function handleDelete(row: AppRow) {
         <el-table-column prop="showOrder" label="显示序号" width="90" />
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openDetailDialog(row as AppRow)">详情</el-button>
+            <el-button link type="primary" @click="goToDetail(row as AppRow)">详情</el-button>
             <el-button link type="primary" @click="openEditDialog(row as AppRow)">编辑</el-button>
             <el-button
               link
@@ -299,31 +290,6 @@ async function handleDelete(row: AppRow) {
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitForm">确定</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="detailVisible" title="应用详情" width="560px" destroy-on-close>
-      <el-descriptions v-loading="detailLoading" :column="1" border>
-        <el-descriptions-item label="应用名称">{{ detailData?.name }}</el-descriptions-item>
-        <el-descriptions-item label="应用编码">{{ detailData?.code }}</el-descriptions-item>
-        <el-descriptions-item label="负责人">{{ detailData?.ownerName }}</el-descriptions-item>
-        <el-descriptions-item label="所属组织">{{ detailData?.orgName }}</el-descriptions-item>
-        <el-descriptions-item label="显示序号">{{ detailData?.showOrder }}</el-descriptions-item>
-        <el-descriptions-item label="备注">{{ detailData?.remark || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="状态">
-          <el-tag v-if="detailData?.status === APP_STATUS_ENABLED" type="success">启用</el-tag>
-          <el-tag v-else type="warning">停用</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="创建人">{{ detailData?.createBy }}</el-descriptions-item>
-        <el-descriptions-item label="创建时间">{{ detailData?.createTime }}</el-descriptions-item>
-        <el-descriptions-item label="更新人">{{ detailData?.updateBy }}</el-descriptions-item>
-        <el-descriptions-item label="更新时间">{{ detailData?.updateTime }}</el-descriptions-item>
-      </el-descriptions>
-
-      <OperationHistoryPanel resource-type="app" :target-id="detailData?.id ?? null" />
-
-      <template #footer>
-        <el-button type="primary" @click="detailVisible = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>

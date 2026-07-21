@@ -43,6 +43,73 @@ const menuRoutes = MENU_GROUPS.flatMap((group) =>
   })),
 )
 
+// 9 个业务模块（字典拆成类型/项两个）的"详情"路由：不加入 menu.ts，因此不出现在侧边栏，
+// 只能通过列表页"详情"按钮跳转或直接访问带 id 的 URL 进入。尚未由本轮完成的模块先指向
+// PlaceholderView 占位，待各自的详情组件落地后再替换 component，避免这个共享文件被
+// 多个 agent 反复冲突修改。命名规则沿用菜单路由：path.slice(1).replace(/\//g, '-')。
+const detailRoutes = [
+  {
+    path: 'identity/orgs/:id',
+    name: 'identity-orgs-detail',
+    component: () => import('@/views/identity/org/OrgDetailView.vue'),
+    meta: { title: '组织详情', requiresAuth: true },
+  },
+  {
+    path: 'identity/users/:id',
+    name: 'identity-users-detail',
+    component: () => import('@/views/identity/user/UserDetailView.vue'),
+    meta: { title: '用户详情', requiresAuth: true },
+  },
+  {
+    path: 'identity/positions/:id',
+    name: 'identity-positions-detail',
+    component: () => import('@/views/identity/position/PositionDetailView.vue'),
+    meta: { title: '任职详情', requiresAuth: true },
+  },
+  {
+    path: 'application/list/:id',
+    name: 'application-list-detail',
+    component: () => import('@/views/application/app/AppDetailView.vue'),
+    meta: { title: '应用详情', requiresAuth: true },
+  },
+  {
+    path: 'permission/roles/:id',
+    name: 'permission-roles-detail',
+    component: () => import('@/views/permission/role/RoleDetailView.vue'),
+    meta: { title: '角色详情', requiresAuth: true },
+  },
+  {
+    path: 'permission/points/:id',
+    name: 'permission-points-detail',
+    component: () => import('@/views/permission/permission/PermissionDetailView.vue'),
+    meta: { title: '权限点详情', requiresAuth: true },
+  },
+  {
+    path: 'permission/admins/:id',
+    name: 'permission-admins-detail',
+    component: () => import('@/views/permission/admin/AdminDetailView.vue'),
+    meta: { title: '管理员详情', requiresAuth: true },
+  },
+  {
+    path: 'system/menus/:id',
+    name: 'system-menus-detail',
+    component: () => import('@/views/system/menu/MenuDetailView.vue'),
+    meta: { title: '菜单详情', requiresAuth: true },
+  },
+  {
+    path: 'system/dicts/type/:id',
+    name: 'system-dicts-type-detail',
+    component: () => import('@/views/system/dict/DictTypeDetailView.vue'),
+    meta: { title: '字典类型详情', requiresAuth: true },
+  },
+  {
+    path: 'system/dicts/item/:id',
+    name: 'system-dicts-item-detail',
+    component: () => import('@/views/system/dict/DictItemDetailView.vue'),
+    meta: { title: '字典项详情', requiresAuth: true },
+  },
+]
+
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -65,6 +132,7 @@ const router = createRouter({
           meta: { title: '概览' },
         },
         ...menuRoutes,
+        ...detailRoutes,
       ],
     },
   ],

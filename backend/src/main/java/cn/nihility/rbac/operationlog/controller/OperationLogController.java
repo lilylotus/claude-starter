@@ -45,7 +45,7 @@ public class OperationLogController {
      */
     @Operation(summary = "分页查询操作日志",
             description = "支持按模块/资源类型/被操作对象id/操作类型/操作人/操作时间范围筛选，均可选，按操作发起时间降序排列；"
-                    + "resourceType + targetId 组合可查询单个资源实例的操作历史")
+                    + "resourceType + targetId 组合可查询单个资源实例的操作历史；每条记录含结构化的字段级变更详情 changeDetail")
     @GetMapping("/api/operation-logs")
     public PageResult<OperationLogVO> page(
             @Parameter(description = "业务模块中文名，精确匹配")

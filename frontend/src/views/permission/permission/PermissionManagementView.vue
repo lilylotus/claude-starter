@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { usePermissionStore } from '@/stores/permission'
-import OperationHistoryPanel from '@/components/OperationHistoryPanel.vue'
 import * as permissionApi from '@/api/permission'
 import { PERMISSION_STATUS_ENABLED, type PermissionFormRequest, type PermissionRow } from '@/types/permission'
 
 const permissionStore = usePermissionStore()
+const router = useRouter()
 
 onMounted(() => {
   permissionStore.fetchPage()
@@ -91,20 +92,10 @@ async function submitForm() {
   }
 }
 
-// ---- 只读详情弹窗 ----
+// ---- 只读详情：跳转独立详情页 ----
 
-const detailVisible = ref(false)
-const detailLoading = ref(false)
-const detailData = ref<PermissionRow | null>(null)
-
-async function openDetailDialog(row: PermissionRow) {
-  detailVisible.value = true
-  detailLoading.value = true
-  try {
-    detailData.value = await permissionApi.getPermissionById(row.id)
-  } finally {
-    detailLoading.value = false
-  }
+function goToDetail(row: PermissionRow) {
+  router.push({ name: 'permission-points-detail', params: { id: row.id } })
 }
 
 // ---- 行操作：启用/停用、删除 ----
@@ -153,7 +144,7 @@ async function handleDelete(row: PermissionRow) {
         <el-table-column prop="showOrder" label="显示序号" width="90" />
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openDetailDialog(row as PermissionRow)">详情</el-button>
+            <el-button link type="primary" @click="goToDetail(row as PermissionRow)">详情</el-button>
             <el-button link type="primary" @click="openEditDialog(row as PermissionRow)">编辑</el-button>
             <el-button
               link
@@ -200,28 +191,6 @@ async function handleDelete(row: PermissionRow) {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="detailVisible" title="权限详情" width="560px" destroy-on-close>
-      <el-descriptions v-loading="detailLoading" :column="1" border>
-        <el-descriptions-item label="权限名称">{{ detailData?.name }}</el-descriptions-item>
-        <el-descriptions-item label="权限编码">{{ detailData?.code }}</el-descriptions-item>
-        <el-descriptions-item label="显示序号">{{ detailData?.showOrder }}</el-descriptions-item>
-        <el-descriptions-item label="备注">{{ detailData?.remark || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="状态">
-          <el-tag v-if="detailData?.status === PERMISSION_STATUS_ENABLED" type="success">启用</el-tag>
-          <el-tag v-else type="warning">停用</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="创建人">{{ detailData?.createBy }}</el-descriptions-item>
-        <el-descriptions-item label="创建时间">{{ detailData?.createTime }}</el-descriptions-item>
-        <el-descriptions-item label="更新人">{{ detailData?.updateBy }}</el-descriptions-item>
-        <el-descriptions-item label="更新时间">{{ detailData?.updateTime }}</el-descriptions-item>
-      </el-descriptions>
-
-      <OperationHistoryPanel resource-type="permission" :target-id="detailData?.id ?? null" />
-
-      <template #footer>
-        <el-button type="primary" @click="detailVisible = false">关闭</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 

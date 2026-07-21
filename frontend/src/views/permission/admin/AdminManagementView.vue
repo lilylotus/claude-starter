@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useAdminStore } from '@/stores/admin'
-import OperationHistoryPanel from '@/components/OperationHistoryPanel.vue'
 import * as adminApi from '@/api/admin'
 import * as orgApi from '@/api/org'
 import * as userApi from '@/api/user'
@@ -18,6 +18,7 @@ import type { OrgTreeNode } from '@/types/org'
 import type { RoleOption } from '@/types/role'
 
 const adminStore = useAdminStore()
+const router = useRouter()
 
 onMounted(() => {
   adminStore.fetchPage()
@@ -212,20 +213,10 @@ async function submitForm() {
   }
 }
 
-// ---- 只读详情弹窗 ----
+// ---- 只读详情：跳转独立详情页 ----
 
-const detailVisible = ref(false)
-const detailLoading = ref(false)
-const detailData = ref<AdminRow | null>(null)
-
-async function openDetailDialog(row: AdminRow) {
-  detailVisible.value = true
-  detailLoading.value = true
-  try {
-    detailData.value = await adminApi.getAdminById(row.id)
-  } finally {
-    detailLoading.value = false
-  }
+function goToDetail(row: AdminRow) {
+  router.push({ name: 'permission-admins-detail', params: { id: row.id } })
 }
 
 // ---- 行操作：启用/停用、删除 ----
@@ -274,7 +265,7 @@ async function handleDelete(row: AdminRow) {
         </el-table-column>
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="openDetailDialog(row as AdminRow)">详情</el-button>
+            <el-button link type="primary" @click="goToDetail(row as AdminRow)">详情</el-button>
             <el-button link type="primary" @click="openEditDialog(row as AdminRow)">编辑</el-button>
             <el-button
               link
@@ -383,47 +374,6 @@ async function handleDelete(row: AdminRow) {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="detailVisible" title="管理员详情" width="680px" destroy-on-close>
-      <el-descriptions v-loading="detailLoading" :column="1" border>
-        <el-descriptions-item label="管理员名称">{{ detailData?.name }}</el-descriptions-item>
-        <el-descriptions-item label="管理员编码">{{ detailData?.code }}</el-descriptions-item>
-        <el-descriptions-item label="关联用户">{{ detailData?.userName }}</el-descriptions-item>
-        <el-descriptions-item label="管理员角色">
-          <template v-if="detailData?.roles.length">
-            <el-tag v-for="role in detailData.roles" :key="role.roleId" class="admin-detail-role-tag">
-              {{ role.roleName }}
-            </el-tag>
-          </template>
-          <span v-else>-</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="显示序号">{{ detailData?.showOrder }}</el-descriptions-item>
-        <el-descriptions-item label="备注">{{ detailData?.remark || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="状态">
-          <el-tag v-if="detailData?.status === ADMIN_STATUS_ENABLED" type="success">启用</el-tag>
-          <el-tag v-else type="warning">停用</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="创建人">{{ detailData?.createBy }}</el-descriptions-item>
-        <el-descriptions-item label="创建时间">{{ detailData?.createTime }}</el-descriptions-item>
-        <el-descriptions-item label="更新人">{{ detailData?.updateBy }}</el-descriptions-item>
-        <el-descriptions-item label="更新时间">{{ detailData?.updateTime }}</el-descriptions-item>
-      </el-descriptions>
-
-      <div class="admin-detail-org-scopes">
-        <h3 class="admin-detail-org-scopes__title">管辖组织范围</h3>
-        <el-table :data="detailData?.orgScopes ?? []" empty-text="暂无管辖组织范围">
-          <el-table-column prop="orgName" label="组织名称" min-width="160" />
-          <el-table-column label="含子组织" width="100">
-            <template #default="{ row }">{{ row.includeChildren ? '是' : '否' }}</template>
-          </el-table-column>
-        </el-table>
-      </div>
-
-      <OperationHistoryPanel resource-type="admin" :target-id="detailData?.id ?? null" />
-
-      <template #footer>
-        <el-button type="primary" @click="detailVisible = false">关闭</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -528,20 +478,6 @@ async function handleDelete(row: AdminRow) {
 .admin-org-scope-row__remove {
   margin-top: 6px;
   flex-shrink: 0;
-}
-
-.admin-detail-org-scopes {
-  margin-top: 20px;
-}
-
-.admin-detail-org-scopes__title {
-  font-size: 14px;
-  color: var(--color-ink);
-  margin: 0 0 8px;
-}
-
-.admin-detail-role-tag {
-  margin-right: 6px;
 }
 
 // 操作列（详情/编辑/启用停用/删除）相邻按钮间距收紧，比 Element Plus 默认更紧凑
