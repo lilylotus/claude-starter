@@ -16,7 +16,6 @@ import cn.nihility.rbac.formfield.dto.FormFieldDictOptionVO;
 import cn.nihility.rbac.formfield.dto.FormFieldRenderItemVO;
 import cn.nihility.rbac.formfield.entity.FormFieldDefinitionEntity;
 import cn.nihility.rbac.formfield.exception.DictTypeRequiredException;
-import cn.nihility.rbac.formfield.exception.FieldCodeDuplicateException;
 import cn.nihility.rbac.formfield.exception.LockedFormFieldException;
 import cn.nihility.rbac.formfield.exception.MetadataFieldAlreadyBoundException;
 import cn.nihility.rbac.formfield.exception.MetadataFieldUnavailableException;
@@ -104,11 +103,11 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
         if (formFieldDefinitionMapper.existsActiveByMetadataFieldId(metadata.getId())) {
             throw new MetadataFieldAlreadyBoundException("该元数据字段已被其他表单字段定义绑定");
         }
-        checkFieldCodeUnique(metadata.getBizType(), request.getFieldCode(), null);
         validateDictType(request.getControlType(), request.getDictTypeId());
 
         FormFieldDefinitionEntity entity = FormFieldDefinitionConvert.INSTANCE.toEntity(request);
         entity.setBizType(metadata.getBizType());
+        entity.setFieldCode(metadata.getFieldCode());
         if (!Objects.equals(entity.getControlType(), FormFieldControlType.DICT)) {
             entity.setDictTypeId(null);
         }
@@ -144,14 +143,26 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
                 throw new LockedFormFieldException("承重字段的表单定义不允许在编辑表单中隐藏");
             }
         }
-        if (!Objects.equals(request.getFieldCode(), entity.getFieldCode())) {
-            checkFieldCodeUnique(entity.getBizType(), request.getFieldCode(), id);
+
+        boolean rebind = request.getMetadataFieldId() != null
+                && !Objects.equals(request.getMetadataFieldId(), entity.getMetadataFieldId());
+        if (rebind && locked) {
+            throw new LockedFormFieldException("承重字段的表单定义不允许改绑元数据字段");
         }
+        MetadataFieldEntity rebindTarget = null;
+        if (rebind) {
+            rebindTarget = validateRebindTarget(entity, request.getMetadataFieldId());
+        }
+
         validateDictType(request.getControlType(), request.getDictTypeId());
 
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         FormFieldDefinitionConvert.INSTANCE.updateEntity(request, entity);
+        if (rebind) {
+            entity.setMetadataFieldId(request.getMetadataFieldId());
+            entity.setFieldCode(rebindTarget.getFieldCode());
+        }
         if (!Objects.equals(entity.getControlType(), FormFieldControlType.DICT)) {
             entity.setDictTypeId(null);
         }
@@ -294,24 +305,25 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
     }
 
     /**
-     * 校验 fieldCode 在同一业务对象类型下、未被逻辑删除的定义范围内是否唯一。
+     * 校验非锁定定义编辑改绑的目标元数据字段：必须存在、状态为启用、{@code bizType}
+     * 与当前定义一致，且未被其他有效定义占用（排除定义自身）。
      *
-     * @param bizType   业务对象类型
-     * @param fieldCode 待校验的字段标识
-     * @param excludeId 更新场景下需要排除的自身 id，创建场景传 null
+     * @param entity             待改绑的表单字段定义实体（改绑前状态）
+     * @param newMetadataFieldId 改绑目标的元数据字段 id
+     * @return 校验通过的改绑目标元数据字段实体，供调用方同步刷新 {@code fieldCode}
      */
-    private void checkFieldCodeUnique(String bizType, String fieldCode, Long excludeId) {
-        LambdaQueryWrapper<FormFieldDefinitionEntity> wrapper = new LambdaQueryWrapper<FormFieldDefinitionEntity>()
-                .eq(FormFieldDefinitionEntity::getBizType, bizType)
-                .eq(FormFieldDefinitionEntity::getFieldCode, fieldCode)
-                .ne(FormFieldDefinitionEntity::getStatus, FormFieldStatus.DELETED);
-        if (excludeId != null) {
-            wrapper.ne(FormFieldDefinitionEntity::getId, excludeId);
+    private MetadataFieldEntity validateRebindTarget(FormFieldDefinitionEntity entity, Long newMetadataFieldId) {
+        MetadataFieldEntity metadata = metadataFieldMapper.selectById(newMetadataFieldId);
+        if (metadata == null || !Objects.equals(metadata.getStatus(), MetadataFieldStatus.ENABLED)) {
+            throw new MetadataFieldUnavailableException("改绑的元数据字段不存在或未启用");
         }
-        Long count = formFieldDefinitionMapper.selectCount(wrapper);
-        if (count != null && count > 0) {
-            throw new FieldCodeDuplicateException("字段标识[" + fieldCode + "]在该业务对象类型下已存在");
+        if (!Objects.equals(metadata.getBizType(), entity.getBizType())) {
+            throw new MetadataFieldUnavailableException("改绑的元数据字段业务对象类型与当前定义不一致");
         }
+        if (formFieldDefinitionMapper.existsActiveByMetadataFieldIdExcluding(newMetadataFieldId, entity.getId())) {
+            throw new MetadataFieldAlreadyBoundException("该元数据字段已被其他表单字段定义绑定");
+        }
+        return metadata;
     }
 
     /**
@@ -365,6 +377,7 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
             String columnName = metadata != null ? metadata.getColumnName() : null;
             vo.setColumnName(columnName);
             vo.setLocked(LockedFormFields.isLocked(entity.getBizType(), columnName));
+            vo.setFieldCode(metadata != null ? metadata.getFieldCode() : entity.getFieldCode());
             if (entity.getDictTypeId() != null) {
                 vo.setDictTypeName(dictTypeNameMap.get(entity.getDictTypeId()));
             }

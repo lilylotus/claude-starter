@@ -78,10 +78,10 @@ export interface FormFieldRenderItem {
   dictOptions: FormFieldDictOption[]
 }
 
-// 新增/编辑表单字段定义弹窗共用的表单字段
+// 新增/编辑表单字段定义弹窗共用的表单字段；fieldCode 不在此列——它完全由服务端从绑定的
+// 元数据字段派生，创建/编辑请求都不携带，前端仅在展示层（禁用输入框）读取响应值
 export interface FormFieldDefinitionFormFields {
   fieldName: string
-  fieldCode: string
   controlType: number
   dictTypeId: number | null
   isUnique: boolean
@@ -95,13 +95,18 @@ export interface FormFieldDefinitionFormFields {
   showOrder: number
 }
 
-// 新增字段定义请求体：在编辑表单字段基础上附加绑定的元数据字段 id，一经创建不可再改绑
+// 新增字段定义请求体：在编辑表单字段基础上附加绑定的元数据字段 id；fieldCode 由服务端
+// 从该元数据字段派生，不由客户端提交
 export interface FormFieldDefinitionCreateRequest extends FormFieldDefinitionFormFields {
   metadataFieldId: number
 }
 
-// 编辑字段定义请求体：不含 metadataFieldId/bizType，绑定关系不可修改
-export type FormFieldDefinitionUpdateRequest = FormFieldDefinitionFormFields
+// 编辑字段定义请求体：不含 bizType（绑定关系所属业务对象类型不可跨越）；metadataFieldId
+// 可选，省略或等于当前值表示不改绑，传入不同值触发服务端改绑校验（锁定定义禁止改绑）；
+// 改绑成功后 fieldCode 会随之刷新为新绑定元数据字段的当前值（服务端派生，不由客户端提交）
+export interface FormFieldDefinitionUpdateRequest extends FormFieldDefinitionFormFields {
+  metadataFieldId?: number
+}
 
 // 通用分页响应结构，字段命名和后端 cn.nihility.rbac.common.PageResult 对齐
 export interface PageResult<T> {

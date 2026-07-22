@@ -2,11 +2,14 @@ package cn.nihility.rbac.metadata.service.impl;
 
 import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.formfield.constant.FormFieldStatus;
+import cn.nihility.rbac.formfield.entity.FormFieldDefinitionEntity;
 import cn.nihility.rbac.formfield.mapper.FormFieldDefinitionMapper;
 import cn.nihility.rbac.metadata.constant.MetadataFieldStatus;
 import cn.nihility.rbac.metadata.dto.MetadataFieldUpdateRequest;
 import cn.nihility.rbac.metadata.dto.MetadataFieldVO;
 import cn.nihility.rbac.metadata.entity.MetadataFieldEntity;
+import cn.nihility.rbac.metadata.exception.MetadataFieldCodeDuplicateException;
 import cn.nihility.rbac.metadata.exception.MetadataFieldInUseException;
 import cn.nihility.rbac.metadata.mapper.MetadataFieldMapper;
 import cn.nihility.rbac.metadata.mapstruct.MetadataFieldConvert;
@@ -16,6 +19,7 @@ import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -72,6 +76,9 @@ public class MetadataFieldServiceImpl implements MetadataFieldService {
     @Override
     public MetadataFieldVO update(Long id, MetadataFieldUpdateRequest request) {
         MetadataFieldEntity entity = getExistingEntity(id);
+        if (!Objects.equals(request.getFieldCode(), entity.getFieldCode())) {
+            checkFieldCodeUnique(entity.getBizType(), request.getFieldCode(), id);
+        }
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         MetadataFieldConvert.INSTANCE.updateEntity(request, entity);
@@ -111,15 +118,52 @@ public class MetadataFieldServiceImpl implements MetadataFieldService {
      */
     @Override
     public List<MetadataFieldVO> listAvailable(String bizType) {
+        return listAvailable(bizType, null);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public List<MetadataFieldVO> listAvailable(String bizType, Long excludeDefinitionId) {
         List<MetadataFieldEntity> enabled = metadataFieldMapper.selectList(new LambdaQueryWrapper<MetadataFieldEntity>()
                 .eq(MetadataFieldEntity::getBizType, bizType)
                 .eq(MetadataFieldEntity::getStatus, MetadataFieldStatus.ENABLED)
                 .orderByAsc(MetadataFieldEntity::getId));
 
-        List<MetadataFieldEntity> available = enabled.stream()
+        List<MetadataFieldEntity> available = new ArrayList<>(enabled.stream()
                 .filter(entity -> !formFieldDefinitionMapper.existsActiveByMetadataFieldId(entity.getId()))
-                .toList();
+                .toList());
+
+        MetadataFieldEntity currentlyBound = resolveCurrentlyBoundMetadataField(excludeDefinitionId);
+        if (currentlyBound != null
+                && available.stream().noneMatch(entity -> entity.getId().equals(currentlyBound.getId()))) {
+            available.add(currentlyBound);
+        }
         return MetadataFieldConvert.INSTANCE.toVOList(available);
+    }
+
+    /**
+     * 编辑场景下解析"当前表单字段定义已绑定"的元数据字段：若 {@code definitionId}
+     * 对应一条存在且未被逻辑删除的表单字段定义，且其绑定的元数据字段状态为启用，
+     * 返回该元数据字段；否则返回 {@code null}（不额外纳入可用列表）。
+     *
+     * @param definitionId 表单字段定义 id，可为 null
+     * @return 当前绑定且启用的元数据字段，不存在/未启用/定义不存在或已删除时返回 null
+     */
+    private MetadataFieldEntity resolveCurrentlyBoundMetadataField(Long definitionId) {
+        if (definitionId == null) {
+            return null;
+        }
+        FormFieldDefinitionEntity definition = formFieldDefinitionMapper.selectById(definitionId);
+        if (definition == null || Objects.equals(definition.getStatus(), FormFieldStatus.DELETED)) {
+            return null;
+        }
+        MetadataFieldEntity metadata = metadataFieldMapper.selectById(definition.getMetadataFieldId());
+        if (metadata == null || !Objects.equals(metadata.getStatus(), MetadataFieldStatus.ENABLED)) {
+            return null;
+        }
+        return metadata;
     }
 
     /**
@@ -141,6 +185,24 @@ public class MetadataFieldServiceImpl implements MetadataFieldService {
         operationLogRecorder.recordStatusChange(OperationLogResourceType.METADATA_FIELD, id, entity.getFieldName(),
                 status == MetadataFieldStatus.ENABLED, beforeSnapshot, toLogSnapshot(entity));
         return getById(id);
+    }
+
+    /**
+     * 校验 fieldCode 在同一业务对象类型下是否唯一。
+     *
+     * @param bizType   业务对象类型
+     * @param fieldCode 待校验的字段标识
+     * @param excludeId 更新场景下需要排除的自身 id
+     */
+    private void checkFieldCodeUnique(String bizType, String fieldCode, Long excludeId) {
+        LambdaQueryWrapper<MetadataFieldEntity> wrapper = new LambdaQueryWrapper<MetadataFieldEntity>()
+                .eq(MetadataFieldEntity::getBizType, bizType)
+                .eq(MetadataFieldEntity::getFieldCode, fieldCode)
+                .ne(MetadataFieldEntity::getId, excludeId);
+        Long count = metadataFieldMapper.selectCount(wrapper);
+        if (count != null && count > 0) {
+            throw new MetadataFieldCodeDuplicateException("字段标识[" + fieldCode + "]在该业务对象类型下已存在");
+        }
     }
 
     /**
@@ -169,6 +231,7 @@ public class MetadataFieldServiceImpl implements MetadataFieldService {
         snapshot.put("表名称", entity.getTableName());
         snapshot.put("字段列名", entity.getColumnName());
         snapshot.put("字段类型", entity.getColumnType());
+        snapshot.put("字段标识", entity.getFieldCode());
         snapshot.put("字段名称", entity.getFieldName());
         snapshot.put("状态", statusLabel(entity.getStatus()));
         return snapshot;

@@ -13,8 +13,9 @@ import lombok.Setter;
 /**
  * 元数据字段配置持久化实体，对应表 {@code tab_metadata_field}。记录组织/用户/任职/
  * 应用四类业务对象"可开放配置"的表字段目录，{@code tableName}/{@code columnName}/
- * {@code columnType}/{@code bizType} 一经迁移写入不可通过接口修改，只有
- * {@code fieldName}/{@code status} 可编辑。
+ * {@code columnType}/{@code bizType} 一经迁移写入不可通过接口修改，
+ * {@code fieldName}/{@code fieldCode}/{@code status} 均可编辑；{@code fieldCode}
+ * 需在同一 {@code bizType} 下保持唯一。
  */
 @Getter
 @Setter
@@ -39,6 +40,9 @@ public class MetadataFieldEntity {
 
     /** 字段类型（数据库字段类型），如 VARCHAR(255)，创建后不可修改。 */
     private String columnType;
+
+    /** 字段标识（前端/DTO 使用），如 idCard、showOrder，可编辑，同一 bizType 下需唯一。 */
+    private String fieldCode;
 
     /** 字段名称，如"组织编码"，可编辑。 */
     private String fieldName;

@@ -15,8 +15,10 @@ import lombok.Setter;
 /**
  * 表单字段定义持久化实体，对应表 {@code tab_form_field_definition}。在元数据字段
  * 配置目录的基础上，绑定 {@code metadataFieldId} 并配上业务侧关心的展示/校验属性，
- * 驱动组织/用户/任职/应用四个管理页面的动态渲染。{@code metadataFieldId}/
- * {@code bizType} 一经创建不可修改；是否为承重字段（"锁定"）不落库，由
+ * 驱动组织/用户/任职/应用四个管理页面的动态渲染。{@code bizType} 一经创建不可修改；
+ * {@code metadataFieldId} 对锁定字段（承重字段 name/code）不可修改，非锁定字段
+ * 允许在编辑时重新绑定到同一 {@code bizType} 下另一个可用的元数据字段。是否为
+ * 承重字段（"锁定"）不落库，由
  * {@code cn.nihility.rbac.formfield.constant.LockedFormFields} 在读取时计算得出。
  */
 @Getter
@@ -34,13 +36,21 @@ public class FormFieldDefinitionEntity {
     /** 业务对象类型，创建时取自所绑定元数据字段，之后不可变。 */
     private String bizType;
 
-    /** 绑定的元数据字段 id，关联 {@code tab_metadata_field.id}，创建后不可改绑。 */
+    /**
+     * 绑定的元数据字段 id，关联 {@code tab_metadata_field.id}。锁定字段（承重字段
+     * name/code）创建后不可改绑；非锁定字段允许在编辑时重新绑定到同一 bizType 下
+     * 另一个可用的元数据字段。
+     */
     private Long metadataFieldId;
 
     /** 展示名称，创建时默认取自元数据字段的 fieldName，此后可独立编辑。 */
     private String fieldName;
 
-    /** 前端/DTO 使用的字段标识，如 idCardNo，同一 bizType 下唯一。 */
+    /**
+     * 前端/DTO 使用的字段标识，完全派生自所绑定的元数据字段的 {@code fieldCode}：
+     * 创建/改绑时同步写入落库，读取（详情/列表）时以绑定的元数据字段当前值为准，
+     * 不由客户端直接提交或编辑。
+     */
     private String fieldCode;
 
     /** 控件类型：1=文本框，2=数字框，3=字典下拉。 */

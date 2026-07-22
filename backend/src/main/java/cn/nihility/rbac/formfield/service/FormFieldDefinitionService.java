@@ -31,8 +31,8 @@ public interface FormFieldDefinitionService {
     FormFieldDefinitionVO getById(Long id);
 
     /**
-     * 创建字段定义，校验绑定的元数据字段可用性、fieldCode 唯一性、字典下拉的
-     * dictTypeId 必填性。
+     * 创建字段定义，校验绑定的元数据字段可用性、字典下拉的 dictTypeId 必填性；
+     * fieldCode 取自所绑定元数据字段的当前值，不由请求提交。
      *
      * @param request 创建请求
      * @return 创建后的字段定义详情
@@ -40,8 +40,12 @@ public interface FormFieldDefinitionService {
     FormFieldDefinitionVO create(FormFieldDefinitionCreateRequest request);
 
     /**
-     * 更新字段定义，绑定关系（bizType/metadataFieldId）不可修改；对绑定承重字段的
-     * 定义，拒绝将 isRequired/showInCreate/showInEdit 改为 false。
+     * 更新字段定义，bizType 创建后不可修改。对绑定承重字段（locked=true）的定义，
+     * 拒绝将 isRequired/showInCreate/showInEdit 改为 false，也拒绝改绑
+     * metadataFieldId；非锁定（locked=false）定义允许把 metadataFieldId 改绑到同一
+     * bizType 下另一个状态启用且未被其他有效定义占用的元数据字段，请求体
+     * metadataFieldId 省略或与当前值相同时视为不改绑；改绑成功时 fieldCode 同步
+     * 刷新为新绑定元数据字段的当前值。
      *
      * @param id      字段定义 id
      * @param request 更新请求

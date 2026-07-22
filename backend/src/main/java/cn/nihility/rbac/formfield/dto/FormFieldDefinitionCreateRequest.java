@@ -8,8 +8,8 @@ import lombok.Getter;
 import lombok.Setter;
 
 /**
- * 创建表单字段定义的请求参数。{@code bizType} 不在此请求中，创建时取自
- * {@code metadataFieldId} 所绑定的元数据字段。
+ * 创建表单字段定义的请求参数。{@code bizType}/{@code fieldCode} 均不在此请求中，
+ * 创建时取自 {@code metadataFieldId} 所绑定的元数据字段，客户端无需（也无法）提交。
  */
 @Getter
 @Setter
@@ -26,12 +26,6 @@ public class FormFieldDefinitionCreateRequest {
     @Size(max = 64, message = "展示名称长度不能超过 64 个字符")
     @Schema(description = "展示名称")
     private String fieldName;
-
-    /** 前端/DTO 使用的字段标识，如 idCardNo，同一 bizType 下唯一。 */
-    @NotBlank(message = "字段标识不能为空")
-    @Size(max = 64, message = "字段标识长度不能超过 64 个字符")
-    @Schema(description = "前端/DTO 使用的字段标识")
-    private String fieldCode;
 
     /** 控件类型：1=文本框，2=数字框，3=字典下拉。 */
     @NotNull(message = "控件类型不能为空")

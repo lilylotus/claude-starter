@@ -95,14 +95,16 @@ public class FormFieldDefinitionController {
     }
 
     /**
-     * 更新字段定义，绑定关系不通过本接口修改。
+     * 更新字段定义，绑定承重字段的定义不允许改绑；非锁定定义允许改绑到同一业务
+     * 对象类型下另一个可用的元数据字段。
      *
      * @param id      字段定义 id
      * @param request 更新请求
      * @return 更新后的字段定义详情
      */
-    @Operation(summary = "更新表单字段定义", description = "业务对象类型与绑定的元数据字段创建后不可修改；绑定承重字段的定义拒绝"
-            + "将必填/新增表单展示/编辑表单展示配置为否")
+    @Operation(summary = "更新表单字段定义", description = "业务对象类型创建后不可修改；绑定承重字段（locked=true）的定义拒绝改绑"
+            + "metadataFieldId，也拒绝将必填/新增表单展示/编辑表单展示配置为否；非锁定定义允许把 metadataFieldId 改绑到"
+            + "同一业务对象类型下另一个状态启用且未被占用的元数据字段")
     @PutMapping("/api/form-fields/{id}")
     public FormFieldDefinitionVO update(@PathVariable Long id,
             @Valid @RequestBody FormFieldDefinitionUpdateRequest request) {

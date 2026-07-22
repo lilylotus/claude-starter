@@ -30,7 +30,8 @@ export function createFormField(data: FormFieldDefinitionCreateRequest): Promise
   return request.post('/form-fields', data)
 }
 
-// 编辑字段定义，不支持修改绑定的元数据字段（请求体不含 metadataFieldId）
+// 编辑字段定义；metadataFieldId 省略或等于当前值表示不改绑，传入不同值触发改绑校验
+// （锁定/承重字段定义禁止改绑，非法改绑会被后端拒绝并返回错误信息）
 export function updateFormField(id: number, data: FormFieldDefinitionUpdateRequest): Promise<FormFieldDefinition> {
   return request.put(`/form-fields/${id}`, data)
 }

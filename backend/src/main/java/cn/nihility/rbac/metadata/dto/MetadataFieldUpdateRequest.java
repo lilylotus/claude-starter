@@ -8,8 +8,9 @@ import lombok.Setter;
 
 /**
  * 更新元数据字段的请求参数。表名称/字段列名/字段类型/业务对象类型描述真实的数据库
- * 结构，创建（迁移写入）后不可修改，因此本请求只暴露 {@code fieldName} 一个可编辑
- * 属性；状态不通过本接口修改，需调用启用/停用专用接口。
+ * 结构，创建（迁移写入）后不可修改；{@code fieldName}/{@code fieldCode} 均可通过
+ * 本请求编辑，{@code fieldCode} 需在同一 {@code bizType} 下保持唯一；状态不通过
+ * 本接口修改，需调用启用/停用专用接口。
  */
 @Getter
 @Setter
@@ -21,4 +22,10 @@ public class MetadataFieldUpdateRequest {
     @Size(max = 64, message = "字段名称长度不能超过 64 个字符")
     @Schema(description = "字段名称")
     private String fieldName;
+
+    /** 字段标识（前端/DTO 使用），如 idCard、showOrder，同一业务对象类型下需保持唯一。 */
+    @NotBlank(message = "字段标识不能为空")
+    @Size(max = 64, message = "字段标识长度不能超过 64 个字符")
+    @Schema(description = "字段标识")
+    private String fieldCode;
 }

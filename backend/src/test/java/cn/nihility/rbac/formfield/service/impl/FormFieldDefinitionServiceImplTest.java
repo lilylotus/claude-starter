@@ -17,7 +17,6 @@ import cn.nihility.rbac.formfield.dto.FormFieldDefinitionUpdateRequest;
 import cn.nihility.rbac.formfield.dto.FormFieldDefinitionVO;
 import cn.nihility.rbac.formfield.entity.FormFieldDefinitionEntity;
 import cn.nihility.rbac.formfield.exception.DictTypeRequiredException;
-import cn.nihility.rbac.formfield.exception.FieldCodeDuplicateException;
 import cn.nihility.rbac.formfield.exception.LockedFormFieldException;
 import cn.nihility.rbac.formfield.exception.MetadataFieldAlreadyBoundException;
 import cn.nihility.rbac.formfield.exception.MetadataFieldUnavailableException;
@@ -36,8 +35,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
  * {@link FormFieldDefinitionServiceImpl} 的单元测试，重点覆盖绑定关系校验（可用性/
- * 互斥占用）、fieldCode 唯一性、字典下拉的 dictTypeId 必填性、承重字段（锁定字段）
- * 的停用/删除/放松保护，以及 {@code listActiveByBizType} 对锁定字段的过滤。
+ * 互斥占用）、fieldCode 派生自绑定的元数据字段（创建取值、改绑刷新、读取实时回填）、
+ * 字典下拉的 dictTypeId 必填性、承重字段（锁定字段）的停用/删除/放松保护，以及
+ * {@code listActiveByBizType} 对锁定字段的过滤。
  */
 @ExtendWith(MockitoExtension.class)
 class FormFieldDefinitionServiceImplTest {
@@ -73,7 +73,6 @@ class FormFieldDefinitionServiceImplTest {
     void setUp() {
         formFieldDefinitionService = new FormFieldDefinitionServiceImpl(formFieldDefinitionMapper,
                 metadataFieldMapper, dictTypeMapper, dictItemService, operationLogRecorder);
-        lenient().when(formFieldDefinitionMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
     }
 
     /**
@@ -110,20 +109,6 @@ class FormFieldDefinitionServiceImplTest {
 
         assertThatThrownBy(() -> formFieldDefinitionService.create(buildCreateRequest(1L, FormFieldControlType.TEXT)))
                 .isInstanceOf(MetadataFieldAlreadyBoundException.class);
-    }
-
-    /**
-     * 创建字段定义时，若 fieldCode 在同一业务对象类型下已被其他有效定义占用，应拒绝创建。
-     */
-    @Test
-    void create_shouldThrowException_whenFieldCodeDuplicate() {
-        when(metadataFieldMapper.selectById(1L))
-                .thenReturn(buildMetadataEntity(1L, "USER", "ext1", MetadataFieldStatus.ENABLED));
-        when(formFieldDefinitionMapper.existsActiveByMetadataFieldId(1L)).thenReturn(false);
-        when(formFieldDefinitionMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(1L);
-
-        assertThatThrownBy(() -> formFieldDefinitionService.create(buildCreateRequest(1L, FormFieldControlType.TEXT)))
-                .isInstanceOf(FieldCodeDuplicateException.class);
     }
 
     /**
@@ -165,6 +150,36 @@ class FormFieldDefinitionServiceImplTest {
     }
 
     /**
+     * 创建字段定义成功时，{@code fieldCode} 应完全派生自所绑定的元数据字段，即使请求
+     * 本身不再提交 {@code fieldCode}（创建请求 DTO 已不包含该字段）。
+     */
+    @Test
+    void create_shouldDeriveFieldCodeFromMetadataField() {
+        MetadataFieldEntity metadata = MetadataFieldEntity.builder()
+                .id(1L)
+                .bizType("USER")
+                .tableName("tab_user")
+                .columnName("ext1")
+                .columnType("VARCHAR(255)")
+                .fieldCode("idCardNo")
+                .fieldName("身份证号")
+                .status(MetadataFieldStatus.ENABLED)
+                .build();
+        when(metadataFieldMapper.selectById(1L)).thenReturn(metadata);
+        when(formFieldDefinitionMapper.existsActiveByMetadataFieldId(1L)).thenReturn(false);
+        lenient().when(metadataFieldMapper.selectByIds(any())).thenReturn(List.of(metadata));
+        lenient().when(formFieldDefinitionMapper.selectById(any()))
+                .thenReturn(buildDefinitionEntity(99L, "USER", 1L, "idCardNo", FormFieldStatus.ENABLED));
+
+        formFieldDefinitionService.create(buildCreateRequest(1L, FormFieldControlType.TEXT));
+
+        org.mockito.ArgumentCaptor<FormFieldDefinitionEntity> captor =
+                org.mockito.ArgumentCaptor.forClass(FormFieldDefinitionEntity.class);
+        org.mockito.Mockito.verify(formFieldDefinitionMapper).insert(captor.capture());
+        assertThat(captor.getValue().getFieldCode()).isEqualTo("idCardNo");
+    }
+
+    /**
      * 更新一条绑定承重字段（{@code name}/{@code code}）的定义时，若尝试把
      * {@code isRequired} 改为 {@code false}，应拒绝该次更新。
      */
@@ -198,6 +213,164 @@ class FormFieldDefinitionServiceImplTest {
         formFieldDefinitionService.update(10L, request);
 
         assertThat(entity.getFieldName()).isEqualTo("组织编码（新展示名）");
+    }
+
+    /**
+     * 更新一条非锁定定义时，若请求体 {@code metadataFieldId} 与当前值相同，
+     * 应视为不改绑，不触发改绑校验，正常保存其余属性。
+     */
+    @Test
+    void update_shouldNotTriggerRebindCheck_whenMetadataFieldIdUnchanged() {
+        FormFieldDefinitionEntity entity = buildDefinitionEntity(10L, "ORG", 1L, "remark", FormFieldStatus.ENABLED);
+        when(formFieldDefinitionMapper.selectById(10L)).thenReturn(entity);
+        when(metadataFieldMapper.selectById(1L))
+                .thenReturn(buildMetadataEntity(1L, "ORG", "remark", MetadataFieldStatus.ENABLED));
+
+        FormFieldDefinitionUpdateRequest request = buildUpdateRequest();
+        request.setMetadataFieldId(1L);
+        request.setFieldName("备注（新）");
+
+        formFieldDefinitionService.update(10L, request);
+
+        assertThat(entity.getMetadataFieldId()).isEqualTo(1L);
+        assertThat(entity.getFieldName()).isEqualTo("备注（新）");
+    }
+
+    /**
+     * 更新一条非锁定定义时，若改绑到同一 bizType 下另一个启用且未被占用的元数据
+     * 字段，应改绑成功，且 {@code fieldCode} 同步刷新为新绑定元数据字段的当前值。
+     */
+    @Test
+    void update_shouldRebind_whenNonLockedDefinitionTargetsAvailableMetadataField() {
+        FormFieldDefinitionEntity entity = buildDefinitionEntity(10L, "ORG", 1L, "remark", FormFieldStatus.ENABLED);
+        when(formFieldDefinitionMapper.selectById(10L)).thenReturn(entity);
+        when(metadataFieldMapper.selectById(1L))
+                .thenReturn(buildMetadataEntity(1L, "ORG", "remark", MetadataFieldStatus.ENABLED));
+        MetadataFieldEntity rebindTarget = MetadataFieldEntity.builder()
+                .id(2L)
+                .bizType("ORG")
+                .tableName("tab_org")
+                .columnName("ext1")
+                .columnType("VARCHAR(255)")
+                .fieldCode("ext1Code")
+                .fieldName("ext1")
+                .status(MetadataFieldStatus.ENABLED)
+                .build();
+        when(metadataFieldMapper.selectById(2L)).thenReturn(rebindTarget);
+        when(formFieldDefinitionMapper.existsActiveByMetadataFieldIdExcluding(2L, 10L)).thenReturn(false);
+
+        FormFieldDefinitionUpdateRequest request = buildUpdateRequest();
+        request.setMetadataFieldId(2L);
+
+        formFieldDefinitionService.update(10L, request);
+
+        assertThat(entity.getMetadataFieldId()).isEqualTo(2L);
+        assertThat(entity.getFieldCode()).isEqualTo("ext1Code");
+    }
+
+    /**
+     * 查询字段定义详情时，{@code fieldCode} 应实时取自当前绑定的元数据字段，而不是
+     * 实体上落库时的旧值——即元数据字段的 {@code fieldCode} 被单独编辑后，下一次
+     * 查询表单字段定义应立刻看到最新值。
+     */
+    @Test
+    void getById_shouldReflectLatestFieldCodeFromMetadataField() {
+        FormFieldDefinitionEntity entity = buildDefinitionEntity(10L, "ORG", 1L, "oldCode", FormFieldStatus.ENABLED);
+        MetadataFieldEntity metadata = MetadataFieldEntity.builder()
+                .id(1L)
+                .bizType("ORG")
+                .tableName("tab_org")
+                .columnName("remark")
+                .columnType("VARCHAR(255)")
+                .fieldCode("newCode")
+                .fieldName("备注")
+                .status(MetadataFieldStatus.ENABLED)
+                .build();
+        when(formFieldDefinitionMapper.selectById(10L)).thenReturn(entity);
+        when(metadataFieldMapper.selectByIds(any())).thenReturn(List.of(metadata));
+
+        FormFieldDefinitionVO vo = formFieldDefinitionService.getById(10L);
+
+        assertThat(vo.getFieldCode()).isEqualTo("newCode");
+    }
+
+    /**
+     * 改绑目标已被其他有效定义占用时，应拒绝该次更新。
+     */
+    @Test
+    void update_shouldThrowException_whenRebindTargetAlreadyBound() {
+        FormFieldDefinitionEntity entity = buildDefinitionEntity(10L, "ORG", 1L, "remark", FormFieldStatus.ENABLED);
+        when(formFieldDefinitionMapper.selectById(10L)).thenReturn(entity);
+        when(metadataFieldMapper.selectById(1L))
+                .thenReturn(buildMetadataEntity(1L, "ORG", "remark", MetadataFieldStatus.ENABLED));
+        when(metadataFieldMapper.selectById(2L))
+                .thenReturn(buildMetadataEntity(2L, "ORG", "ext1", MetadataFieldStatus.ENABLED));
+        when(formFieldDefinitionMapper.existsActiveByMetadataFieldIdExcluding(2L, 10L)).thenReturn(true);
+
+        FormFieldDefinitionUpdateRequest request = buildUpdateRequest();
+        request.setMetadataFieldId(2L);
+
+        assertThatThrownBy(() -> formFieldDefinitionService.update(10L, request))
+                .isInstanceOf(MetadataFieldAlreadyBoundException.class);
+        assertThat(entity.getMetadataFieldId()).isEqualTo(1L);
+    }
+
+    /**
+     * 改绑目标不存在或状态非启用时，应拒绝该次更新。
+     */
+    @Test
+    void update_shouldThrowException_whenRebindTargetUnavailable() {
+        FormFieldDefinitionEntity entity = buildDefinitionEntity(10L, "ORG", 1L, "remark", FormFieldStatus.ENABLED);
+        when(formFieldDefinitionMapper.selectById(10L)).thenReturn(entity);
+        when(metadataFieldMapper.selectById(1L))
+                .thenReturn(buildMetadataEntity(1L, "ORG", "remark", MetadataFieldStatus.ENABLED));
+        when(metadataFieldMapper.selectById(2L)).thenReturn(null);
+
+        FormFieldDefinitionUpdateRequest request = buildUpdateRequest();
+        request.setMetadataFieldId(2L);
+
+        assertThatThrownBy(() -> formFieldDefinitionService.update(10L, request))
+                .isInstanceOf(MetadataFieldUnavailableException.class);
+        assertThat(entity.getMetadataFieldId()).isEqualTo(1L);
+    }
+
+    /**
+     * 改绑目标的 bizType 与当前定义不同时，应拒绝该次更新。
+     */
+    @Test
+    void update_shouldThrowException_whenRebindTargetBizTypeMismatch() {
+        FormFieldDefinitionEntity entity = buildDefinitionEntity(10L, "ORG", 1L, "remark", FormFieldStatus.ENABLED);
+        when(formFieldDefinitionMapper.selectById(10L)).thenReturn(entity);
+        when(metadataFieldMapper.selectById(1L))
+                .thenReturn(buildMetadataEntity(1L, "ORG", "remark", MetadataFieldStatus.ENABLED));
+        when(metadataFieldMapper.selectById(2L))
+                .thenReturn(buildMetadataEntity(2L, "USER", "ext1", MetadataFieldStatus.ENABLED));
+
+        FormFieldDefinitionUpdateRequest request = buildUpdateRequest();
+        request.setMetadataFieldId(2L);
+
+        assertThatThrownBy(() -> formFieldDefinitionService.update(10L, request))
+                .isInstanceOf(MetadataFieldUnavailableException.class);
+        assertThat(entity.getMetadataFieldId()).isEqualTo(1L);
+    }
+
+    /**
+     * 更新一条绑定承重字段的定义时，若请求体 {@code metadataFieldId} 与当前值不同，
+     * 应拒绝改绑。
+     */
+    @Test
+    void update_shouldThrowException_whenLockedDefinitionRebind() {
+        FormFieldDefinitionEntity entity = buildDefinitionEntity(10L, "ORG", 1L, "code", FormFieldStatus.ENABLED);
+        when(formFieldDefinitionMapper.selectById(10L)).thenReturn(entity);
+        when(metadataFieldMapper.selectById(1L))
+                .thenReturn(buildMetadataEntity(1L, "ORG", "code", MetadataFieldStatus.ENABLED));
+
+        FormFieldDefinitionUpdateRequest request = buildUpdateRequest();
+        request.setMetadataFieldId(2L);
+
+        assertThatThrownBy(() -> formFieldDefinitionService.update(10L, request))
+                .isInstanceOf(LockedFormFieldException.class);
+        assertThat(entity.getMetadataFieldId()).isEqualTo(1L);
     }
 
     /**
@@ -279,7 +452,6 @@ class FormFieldDefinitionServiceImplTest {
         FormFieldDefinitionCreateRequest request = new FormFieldDefinitionCreateRequest();
         request.setMetadataFieldId(metadataFieldId);
         request.setFieldName("身份证号");
-        request.setFieldCode("idCardNo");
         request.setControlType(controlType);
         if (controlType == FormFieldControlType.DICT) {
             request.setDictTypeId(1L);
@@ -303,7 +475,6 @@ class FormFieldDefinitionServiceImplTest {
     private FormFieldDefinitionUpdateRequest buildUpdateRequest() {
         FormFieldDefinitionUpdateRequest request = new FormFieldDefinitionUpdateRequest();
         request.setFieldName("组织编码");
-        request.setFieldCode("code");
         request.setControlType(FormFieldControlType.TEXT);
         request.setIsUnique(true);
         request.setIsRequired(true);
@@ -331,6 +502,7 @@ class FormFieldDefinitionServiceImplTest {
                 .tableName("tab_" + bizType.toLowerCase())
                 .columnName(columnName)
                 .columnType("VARCHAR(255)")
+                .fieldCode(columnName)
                 .fieldName(columnName)
                 .status(status)
                 .build();

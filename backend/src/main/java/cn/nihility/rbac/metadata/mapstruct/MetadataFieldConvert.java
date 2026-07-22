@@ -36,8 +36,8 @@ public interface MetadataFieldConvert {
     List<MetadataFieldVO> toVOList(List<MetadataFieldEntity> entities);
 
     /**
-     * 把更新请求的字段合并到已有实体上，仅 {@code fieldName} 会被更新；
-     * id/业务对象类型/表名称/字段列名/字段类型/状态/审计字段均不受影响。
+     * 把更新请求的字段合并到已有实体上，{@code fieldName}/{@code fieldCode} 会被
+     * 更新；id/业务对象类型/表名称/字段列名/字段类型/状态/审计字段均不受影响。
      *
      * @param request 更新请求
      * @param entity  待更新的元数据字段实体

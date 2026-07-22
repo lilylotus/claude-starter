@@ -22,9 +22,26 @@ public interface FormFieldDefinitionMapper extends BaseMapper<FormFieldDefinitio
      * @return 是否存在有效绑定
      */
     default boolean existsActiveByMetadataFieldId(Long metadataFieldId) {
-        Long count = selectCount(new LambdaQueryWrapper<FormFieldDefinitionEntity>()
+        return existsActiveByMetadataFieldIdExcluding(metadataFieldId, null);
+    }
+
+    /**
+     * 判断给定的元数据字段当前是否被至少一条有效（未逻辑删除）的表单字段定义绑定，
+     * 排除指定 id 的定义自身（供编辑改绑场景使用：判断新绑定目标是否被"除自己以外"
+     * 的其他定义占用）。
+     *
+     * @param metadataFieldId 元数据字段 id
+     * @param excludeId       需要排除的表单字段定义 id，可为 null（不排除）
+     * @return 是否存在有效绑定
+     */
+    default boolean existsActiveByMetadataFieldIdExcluding(Long metadataFieldId, Long excludeId) {
+        LambdaQueryWrapper<FormFieldDefinitionEntity> wrapper = new LambdaQueryWrapper<FormFieldDefinitionEntity>()
                 .eq(FormFieldDefinitionEntity::getMetadataFieldId, metadataFieldId)
-                .ne(FormFieldDefinitionEntity::getStatus, FormFieldStatus.DELETED));
+                .ne(FormFieldDefinitionEntity::getStatus, FormFieldStatus.DELETED);
+        if (excludeId != null) {
+            wrapper.ne(FormFieldDefinitionEntity::getId, excludeId);
+        }
+        Long count = selectCount(wrapper);
         return count != null && count > 0;
     }
 }

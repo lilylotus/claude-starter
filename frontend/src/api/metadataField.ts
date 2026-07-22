@@ -19,7 +19,7 @@ export function getMetadataFieldById(id: number): Promise<MetadataField> {
   return request.get(`/metadata-fields/${id}`)
 }
 
-// 编辑元数据字段，仅 fieldName 可改
+// 编辑元数据字段，fieldName、fieldCode 均可改（fieldCode 需在同一 bizType 下唯一，重复会被拒绝）
 export function updateMetadataField(id: number, data: MetadataFieldUpdateRequest): Promise<MetadataField> {
   return request.put(`/metadata-fields/${id}`, data)
 }
@@ -35,7 +35,13 @@ export function disableMetadataField(id: number): Promise<MetadataField> {
 }
 
 // 查询指定业务对象类型下"可用"的元数据字段（状态启用且未被任何有效表单字段定义绑定），
-// 供表单管理新增字段定义时选择；bizType 必填
-export function fetchAvailableMetadataFields(bizType: FormFieldBizType): Promise<MetadataField[]> {
-  return request.get('/metadata-fields/available', { params: { bizType } })
+// 供表单管理新增/编辑字段定义时选择；bizType 必填。
+// excludeDefinitionId 可选：传入编辑中的表单字段定义 id 时，响应会额外带上该定义当前
+// 绑定的元数据字段（即便它已被占用），供编辑弹窗下拉框展示"当前绑定 + 其余可选"；
+// 新增弹窗调用时不传，行为不变。
+export function fetchAvailableMetadataFields(
+  bizType: FormFieldBizType,
+  excludeDefinitionId?: number,
+): Promise<MetadataField[]> {
+  return request.get('/metadata-fields/available', { params: { bizType, excludeDefinitionId } })
 }

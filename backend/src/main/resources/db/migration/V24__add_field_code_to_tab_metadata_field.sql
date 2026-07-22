@@ -1,0 +1,37 @@
+-- ----------------------------------------------------------------------------
+-- 元数据字段配置模块 - 新增字段标识列并回填存量数据（Flyway 迁移版本 V24）
+-- 为 tab_metadata_field 新增 field_code（字段标识）列，创建（迁移写入）后不可
+-- 通过接口修改，与 table_name/column_name/column_type 同等对待。存量数据按
+-- column_name 的下划线转驼峰规则回填，转换结果与 V21 手写的表单字段定义
+-- field_code 保持一致（如 id_card -> idCard、show_order -> showOrder）。
+-- ----------------------------------------------------------------------------
+
+ALTER TABLE `tab_metadata_field`
+    ADD COLUMN `field_code` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '字段标识（前端/DTO 使用），创建后不可修改'
+        AFTER `column_type`;
+
+-- 大多数列名本身已是驼峰/无下划线（name、code、remark、mobile、ext1~ext10），
+-- 字段标识直接等于列名。
+UPDATE `tab_metadata_field`
+SET `field_code` = `column_name`
+WHERE `column_name` NOT IN ('id_card', 'show_order', 'position_address', 'position_phone');
+
+-- 含下划线的列名按驼峰转换规则显式回填，与 V21 种子数据保持一致。
+UPDATE `tab_metadata_field`
+SET `field_code` = 'idCard'
+WHERE `column_name` = 'id_card';
+
+UPDATE `tab_metadata_field`
+SET `field_code` = 'showOrder'
+WHERE `column_name` = 'show_order';
+
+UPDATE `tab_metadata_field`
+SET `field_code` = 'positionAddress'
+WHERE `column_name` = 'position_address';
+
+UPDATE `tab_metadata_field`
+SET `field_code` = 'positionPhone'
+WHERE `column_name` = 'position_phone';
+
+ALTER TABLE `tab_metadata_field`
+    ADD UNIQUE KEY `uk_tab_metadata_field_biz_field_code` (`biz_type`, `field_code`);

@@ -11,8 +11,9 @@ import {
 } from '@/types/metadataField'
 
 // 元数据配置页面：按业务对象类型（组织/人员/任职/应用）切换查看"可开放配置"的表字段目录；
-// 目录只能通过数据库迁移预置，本页面只支持编辑字段名称、查看详情、启用/停用，不提供
-// 新增/删除入口（见 openspec/changes/form-field-definition-management/specs/metadata-field-management）。
+// 目录只能通过数据库迁移预置，本页面支持编辑字段名称/字段标识（同一 bizType 下唯一）、
+// 查看详情、启用/停用，不提供新增/删除入口
+// （见 openspec/changes/form-field-definition-management/specs/metadata-field-management）。
 
 const activeBizType = ref<FormFieldBizType>('ORG')
 
@@ -52,22 +53,24 @@ function handlePageChange(targetPage: number) {
   fetchPage(targetPage)
 }
 
-// ---- 编辑弹窗：仅字段名称一个输入框 ----
+// ---- 编辑弹窗：字段名称 + 字段标识 ----
 
 const editDialogVisible = ref(false)
 const editingId = ref<number | null>(null)
 const submitting = ref(false)
 const formRef = ref<FormInstance>()
 
-const form = reactive({ fieldName: '' })
+const form = reactive({ fieldName: '', fieldCode: '' })
 
 const rules: FormRules<typeof form> = {
   fieldName: [{ required: true, message: '请输入字段名称', trigger: 'blur' }],
+  fieldCode: [{ required: true, message: '请输入字段标识', trigger: 'blur' }],
 }
 
 function openEditDialog(row: MetadataField) {
   editingId.value = row.id
   form.fieldName = row.fieldName
+  form.fieldCode = row.fieldCode
   editDialogVisible.value = true
 }
 
@@ -82,7 +85,10 @@ async function submitForm() {
 
   submitting.value = true
   try {
-    await metadataFieldApi.updateMetadataField(editingId.value as number, { fieldName: form.fieldName })
+    await metadataFieldApi.updateMetadataField(editingId.value as number, {
+      fieldName: form.fieldName,
+      fieldCode: form.fieldCode,
+    })
     ElMessage.success('保存成功')
     editDialogVisible.value = false
     await fetchPage()
@@ -130,6 +136,7 @@ async function toggleStatus(row: MetadataField) {
       <el-table-column prop="tableName" label="表名称" min-width="120" />
       <el-table-column prop="columnName" label="字段列名" min-width="120" />
       <el-table-column prop="columnType" label="字段类型" min-width="120" />
+      <el-table-column prop="fieldCode" label="字段标识" min-width="120" />
       <el-table-column prop="fieldName" label="字段名称" min-width="120" />
       <el-table-column label="状态" width="90">
         <template #default="{ row }">
@@ -169,6 +176,9 @@ async function toggleStatus(row: MetadataField) {
         <el-form-item label="字段名称" prop="fieldName">
           <el-input v-model="form.fieldName" placeholder="请输入字段名称" />
         </el-form-item>
+        <el-form-item label="字段标识" prop="fieldCode">
+          <el-input v-model="form.fieldCode" placeholder="请输入字段标识" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editDialogVisible = false">取消</el-button>
@@ -181,6 +191,7 @@ async function toggleStatus(row: MetadataField) {
         <el-descriptions-item label="表名称">{{ detailRow.tableName }}</el-descriptions-item>
         <el-descriptions-item label="字段列名">{{ detailRow.columnName }}</el-descriptions-item>
         <el-descriptions-item label="字段类型">{{ detailRow.columnType }}</el-descriptions-item>
+        <el-descriptions-item label="字段标识">{{ detailRow.fieldCode }}</el-descriptions-item>
         <el-descriptions-item label="字段名称">{{ detailRow.fieldName }}</el-descriptions-item>
         <el-descriptions-item label="状态">
           <el-tag v-if="detailRow.status === METADATA_FIELD_STATUS_ENABLED" type="success">启用</el-tag>

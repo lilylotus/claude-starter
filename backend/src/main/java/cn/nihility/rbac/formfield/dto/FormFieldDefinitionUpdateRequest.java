@@ -8,27 +8,32 @@ import lombok.Getter;
 import lombok.Setter;
 
 /**
- * 更新表单字段定义的请求参数。不包含 {@code bizType}/{@code metadataFieldId}：
- * 绑定关系一经创建不可修改；状态不通过本接口修改，需调用启用/停用/删除专用接口。
- * 若目标定义绑定的是承重字段（{@code locked=true}），服务层会拒绝将
- * {@code isRequired}/{@code showInCreate}/{@code showInEdit} 改为 {@code false}。
+ * 更新表单字段定义的请求参数。不包含 {@code bizType}/{@code fieldCode}：
+ * {@code bizType} 创建后不可修改；{@code fieldCode} 完全派生自所绑定的元数据字段，
+ * 由服务层在改绑时同步刷新，客户端无需（也无法）提交；状态不通过本接口修改，需
+ * 调用启用/停用/删除专用接口。若目标定义绑定的是承重字段（{@code locked=true}），
+ * 服务层会拒绝将 {@code metadataFieldId} 改为不同的值，也会拒绝将
+ * {@code isRequired}/{@code showInCreate}/{@code showInEdit} 改为 {@code false}；
+ * 非锁定定义允许把 {@code metadataFieldId} 改绑到同一 {@code bizType} 下另一个
+ * 启用且未被占用的元数据字段。
  */
 @Getter
 @Setter
 @Schema(description = "更新表单字段定义请求参数")
 public class FormFieldDefinitionUpdateRequest {
 
+    /**
+     * 绑定的元数据字段 id，可选：省略或与当前值相同表示不改绑。锁定定义（
+     * {@code locked=true}）不允许传与当前值不同的取值，否则会被拒绝。
+     */
+    @Schema(description = "绑定的元数据字段 id，省略或与当前值相同表示不改绑；锁定定义不允许改绑")
+    private Long metadataFieldId;
+
     /** 展示名称。 */
     @NotBlank(message = "展示名称不能为空")
     @Size(max = 64, message = "展示名称长度不能超过 64 个字符")
     @Schema(description = "展示名称")
     private String fieldName;
-
-    /** 前端/DTO 使用的字段标识，同一 bizType 下唯一。 */
-    @NotBlank(message = "字段标识不能为空")
-    @Size(max = 64, message = "字段标识长度不能超过 64 个字符")
-    @Schema(description = "前端/DTO 使用的字段标识")
-    private String fieldCode;
 
     /** 控件类型：1=文本框，2=数字框，3=字典下拉。 */
     @NotNull(message = "控件类型不能为空")

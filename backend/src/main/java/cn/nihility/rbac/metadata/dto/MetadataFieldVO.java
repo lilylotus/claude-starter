@@ -39,6 +39,10 @@ public class MetadataFieldVO {
     @Schema(description = "字段类型（数据库字段类型）")
     private String columnType;
 
+    /** 字段标识（前端/DTO 使用），如 idCard、showOrder，可编辑，同一业务对象类型下需唯一。 */
+    @Schema(description = "字段标识（前端/DTO 使用），可编辑，同一业务对象类型下需唯一")
+    private String fieldCode;
+
     /** 字段名称，如"组织编码"。 */
     @Schema(description = "字段名称")
     private String fieldName;

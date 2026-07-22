@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import * as formFieldApi from '@/api/formField'
@@ -18,10 +18,12 @@ import {
 } from '@/types/formField'
 import { DICT_STATUS_ENABLED, type DictTypeRow } from '@/types/dict'
 
-// 表单管理页面：按业务对象类型（组织/人员/任职/应用）切换查看字段定义列表；新增时从
-// "元数据配置"目录选择尚未绑定的可用元数据字段，编辑时绑定关系不可改；绑定承重字段
-// （name/code）的定义不提供停用/删除入口，编辑弹窗对应受限属性渲染为禁用态
-// （见 openspec/changes/form-field-definition-management/specs/form-field-definition-management）。
+// 表单管理页面：按业务对象类型（组织/人员/任职/应用）切换查看字段定义列表；新增/编辑
+// 均可从"元数据配置"目录选择数据字段——新增时只能选尚未绑定的，编辑时下拉框额外包含
+// 当前绑定项；字段标识完全派生自所选数据字段的当前字段标识，展示为禁用输入框，不可
+// 手动编辑，切换数据字段会实时联动更新；绑定承重字段（name/code）的定义数据字段选择器
+// 禁用（不可改绑），也不提供停用/删除入口，编辑弹窗对应受限属性渲染为禁用态
+// （见 openspec/changes/form-field-metadata-enhancements/specs/form-field-definition-management）。
 
 const activeBizType = ref<FormFieldBizType>('ORG')
 
@@ -85,7 +87,8 @@ const editingLocked = ref(false)
 const submitting = ref(false)
 const formRef = ref<FormInstance>()
 
-// 新增弹窗专用：当前业务对象类型下尚未绑定的可用元数据字段
+// 新增/编辑弹窗共用：当前业务对象类型下可选的元数据字段（新增时为"尚未绑定"的列表；
+// 编辑时额外包含当前定义正在绑定的那一个，供改绑下拉框展示"当前绑定 + 其余可选"）
 const availableMetadataFields = ref<MetadataField[]>([])
 
 interface FieldDialogForm {
@@ -137,7 +140,6 @@ function validateDictType(_rule: unknown, value: number | null, callback: (error
 const rules: FormRules<FieldDialogForm> = {
   metadataFieldId: [{ required: true, message: '请选择要绑定的元数据字段', trigger: 'change' }],
   fieldName: [{ required: true, message: '请输入展示名称', trigger: 'blur' }],
-  fieldCode: [{ required: true, message: '请输入字段标识', trigger: 'blur' }],
   controlType: [{ required: true, message: '请选择控件类型', trigger: 'change' }],
   dictTypeId: [{ validator: validateDictType, trigger: 'change' }],
 }
@@ -156,6 +158,7 @@ async function openCreateDialog() {
 
 async function openEditDialog(row: FormFieldDefinition) {
   await fetchDictTypeOptions()
+  availableMetadataFields.value = await metadataFieldApi.fetchAvailableMetadataFields(activeBizType.value, row.id)
   dialogMode.value = 'edit'
   editingId.value = row.id
   editingLocked.value = row.locked
@@ -176,6 +179,15 @@ async function openEditDialog(row: FormFieldDefinition) {
   dialogVisible.value = true
 }
 
+// 字段标识完全派生自所选数据字段的当前字段标识，不支持手动编辑；切换数据字段时同步更新
+watch(
+  () => form.metadataFieldId,
+  (newId) => {
+    const opt = availableMetadataFields.value.find((item) => item.id === newId)
+    form.fieldCode = opt ? opt.fieldCode : ''
+  },
+)
+
 function closeDialog() {
   dialogVisible.value = false
   formRef.value?.clearValidate()
@@ -188,8 +200,8 @@ async function submitForm() {
   submitting.value = true
   try {
     const payload = {
+      metadataFieldId: form.metadataFieldId as number,
       fieldName: form.fieldName,
-      fieldCode: form.fieldCode,
       controlType: form.controlType,
       dictTypeId: form.controlType === FORM_FIELD_CONTROL_TYPE_DICT ? form.dictTypeId : null,
       isUnique: form.isUnique,
@@ -203,9 +215,11 @@ async function submitForm() {
       showOrder: form.showOrder,
     }
     if (dialogMode.value === 'create') {
-      await formFieldApi.createFormField({ ...payload, metadataFieldId: form.metadataFieldId as number })
+      await formFieldApi.createFormField(payload)
       ElMessage.success('新增成功')
     } else {
+      // 非锁定定义的数据字段下拉框可编辑，切换到与原绑定不同的元数据字段会触发服务端
+      // 改绑校验；锁定定义下拉框禁用，metadataFieldId 保持原值提交不受影响
       await formFieldApi.updateFormField(editingId.value as number, payload)
       ElMessage.success('保存成功')
     }
@@ -314,10 +328,15 @@ async function handleDelete(row: FormFieldDefinition) {
       @current-change="handlePageChange"
     />
 
-    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="560px" @close="closeDialog">
+    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="560px" top="5vh" @close="closeDialog">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="110px">
-        <el-form-item v-if="dialogMode === 'create'" label="绑定元数据字段" prop="metadataFieldId">
-          <el-select v-model="form.metadataFieldId" placeholder="请选择尚未绑定的元数据字段" style="width: 100%">
+        <el-form-item label="数据字段" prop="metadataFieldId">
+          <el-select
+            v-model="form.metadataFieldId"
+            placeholder="请选择尚未绑定的元数据字段"
+            style="width: 100%"
+            :disabled="dialogMode === 'edit' && editingLocked"
+          >
             <el-option
               v-for="opt in availableMetadataFields"
               :key="opt.id"
@@ -329,8 +348,8 @@ async function handleDelete(row: FormFieldDefinition) {
         <el-form-item label="展示名称" prop="fieldName">
           <el-input v-model="form.fieldName" placeholder="请输入展示名称" />
         </el-form-item>
-        <el-form-item label="字段标识" prop="fieldCode">
-          <el-input v-model="form.fieldCode" placeholder="前端/DTO 使用的字段标识，如 idCardNo" />
+        <el-form-item label="字段标识">
+          <el-input v-model="form.fieldCode" disabled placeholder="由所选数据字段自动带出" />
         </el-form-item>
         <el-form-item label="控件类型" prop="controlType">
           <el-select v-model="form.controlType" style="width: 100%">

@@ -23,6 +23,7 @@ export interface MetadataField {
   tableName: string
   columnName: string
   columnType: string
+  fieldCode: string
   fieldName: string
   status: number
   createBy: string
@@ -31,10 +32,12 @@ export interface MetadataField {
   updateTime: string
 }
 
-// 编辑元数据字段的请求体：只有字段名称可改，表名称/字段列名/字段类型/业务对象类型
-// 描述真实数据库结构，创建（迁移写入）后不可修改
+// 编辑元数据字段的请求体：字段名称、字段标识可改，表名称/字段列名/字段类型/业务对象类型
+// 描述真实数据库结构，创建（迁移写入）后不可修改；fieldCode 需在同一 bizType 下唯一，
+// 重复会被后端拒绝
 export interface MetadataFieldUpdateRequest {
   fieldName: string
+  fieldCode: string
 }
 
 // 通用分页响应结构，字段命名和后端 cn.nihility.rbac.common.PageResult 对齐

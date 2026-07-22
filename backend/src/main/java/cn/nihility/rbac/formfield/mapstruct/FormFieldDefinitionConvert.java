@@ -42,14 +42,15 @@ public interface FormFieldDefinitionConvert {
     List<FormFieldDefinitionVO> toVOList(List<FormFieldDefinitionEntity> entities);
 
     /**
-     * 创建请求转实体，{@code bizType} 取自所绑定元数据字段，id/状态/审计字段由
-     * 服务层另行赋值。
+     * 创建请求转实体，{@code bizType}/{@code fieldCode} 均取自所绑定元数据字段，
+     * 由服务层在映射之后另行赋值；id/状态/审计字段同样由服务层赋值。
      *
      * @param request 创建请求
      * @return 表单字段定义实体
      */
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "bizType", ignore = true)
+    @Mapping(target = "fieldCode", ignore = true)
     @Mapping(target = "status", ignore = true)
     @Mapping(target = "createBy", ignore = true)
     @Mapping(target = "createTime", ignore = true)
@@ -58,8 +59,9 @@ public interface FormFieldDefinitionConvert {
     FormFieldDefinitionEntity toEntity(FormFieldDefinitionCreateRequest request);
 
     /**
-     * 把更新请求的字段合并到已有实体上，id/业务对象类型/绑定的元数据字段/状态/
-     * 审计字段不受影响。
+     * 把更新请求的字段合并到已有实体上，id/业务对象类型/绑定的元数据字段/字段标识/
+     * 状态/审计字段不受影响；{@code fieldCode} 完全派生自绑定的元数据字段，改绑时
+     * 由服务层另行同步刷新。
      *
      * @param request 更新请求
      * @param entity  待更新的表单字段定义实体
@@ -67,6 +69,7 @@ public interface FormFieldDefinitionConvert {
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "bizType", ignore = true)
     @Mapping(target = "metadataFieldId", ignore = true)
+    @Mapping(target = "fieldCode", ignore = true)
     @Mapping(target = "status", ignore = true)
     @Mapping(target = "createBy", ignore = true)
     @Mapping(target = "createTime", ignore = true)
