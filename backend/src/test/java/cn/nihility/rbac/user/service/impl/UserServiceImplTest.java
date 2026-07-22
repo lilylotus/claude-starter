@@ -26,6 +26,7 @@ import cn.nihility.rbac.user.entity.UserPositionEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import cn.nihility.rbac.user.mapper.UserPositionMapper;
 import cn.nihility.rbac.user.service.support.PositionDynamicFieldSupport;
+import cn.nihility.rbac.user.service.support.PositionLogSnapshotSupport;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -74,14 +75,19 @@ class UserServiceImplTest {
      * 静态调用完成，无需在此注入或 mock。动态字段定义默认桩为空列表，身份证号相关
      * 用例会按需覆盖该桩，模拟默认字段定义（isUnique=true）驱动的唯一性校验。
      * {@link PositionDynamicFieldSupport} 直接用已打桩的
-     * {@code formFieldDefinitionService}/{@code userPositionMapper} 构造真实实例，不额外 mock。
+     * {@code formFieldDefinitionService}/{@code userPositionMapper} 构造真实实例，不额外 mock；
+     * {@link PositionLogSnapshotSupport} 同理，直接用已打桩的
+     * {@code userMapper}/{@code orgMapper}/{@code formFieldDefinitionService} 构造真实实例，
+     * 用于验证 {@code syncPositions} 新增/更新/物理删除分支追加的操作日志记录调用。
      */
     @BeforeEach
     void setUp() {
         PositionDynamicFieldSupport positionDynamicFieldSupport =
                 new PositionDynamicFieldSupport(formFieldDefinitionService, userPositionMapper);
+        PositionLogSnapshotSupport positionLogSnapshotSupport =
+                new PositionLogSnapshotSupport(userMapper, orgMapper, formFieldDefinitionService);
         userService = new UserServiceImpl(userMapper, userPositionMapper, orgMapper, operationLogRecorder,
-                formFieldDefinitionService, positionDynamicFieldSupport);
+                formFieldDefinitionService, positionDynamicFieldSupport, positionLogSnapshotSupport);
         lenient().when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
     }
@@ -165,7 +171,8 @@ class UserServiceImplTest {
 
     /**
      * 更新用户时，若 positions 中某项携带既有任职记录 id 并修改了字段，应按行更新，
-     * 保留原 createBy/createTime，刷新 updateBy/updateTime。
+     * 保留原 createBy/createTime，刷新 updateBy/updateTime，并记录一条 {@code POSITION}
+     * 资源的编辑操作日志（内嵌任职子表单补齐的操作日志记录，与用户自身的编辑日志相互独立）。
      */
     @Test
     void update_shouldKeepCreateAudit_whenUpdatingExistingPosition() {
@@ -210,11 +217,12 @@ class UserServiceImplTest {
         verify(userPositionMapper, never()).deleteByIds(anyList());
         verify(operationLogRecorder).recordUpdate(org.mockito.ArgumentMatchers.eq("user"), any(), any(),
                 any(Map.class), any(Map.class));
+        verify(operationLogRecorder).recordUpdate(eq("position"), eq(10L), any(), any(Map.class), any(Map.class));
     }
 
     /**
      * 更新用户时，若 positions 中包含一项未携带 id 的新记录，应作为新任职记录插入，
-     * 拥有全新的创建审计信息。
+     * 拥有全新的创建审计信息，并记录一条 {@code POSITION} 资源的新增操作日志。
      */
     @Test
     void update_shouldInsertNewPosition_whenRequestItemHasNoId() {
@@ -240,11 +248,12 @@ class UserServiceImplTest {
         assertThat(inserted.getCreateBy()).isNotNull();
         assertThat(inserted.getCreateTime()).isNotNull();
         verify(userPositionMapper, never()).deleteByIds(anyList());
+        verify(operationLogRecorder).recordCreate(eq("position"), any(), any(), any(Map.class));
     }
 
     /**
      * 更新用户时，若某条既有任职记录的 id 未出现在本次 positions 列表中，应被物理删除，
-     * 其余既有记录不受影响。
+     * 其余既有记录不受影响，且应在物理删除前记录一条 {@code POSITION} 资源的删除操作日志。
      */
     @Test
     void update_shouldPhysicallyDeleteMissingPosition() {
@@ -279,10 +288,12 @@ class UserServiceImplTest {
         verify(userPositionMapper).deleteByIds(captor.capture());
         assertThat(captor.getValue()).containsExactly(11L);
         verify(userPositionMapper, never()).insert(any(UserPositionEntity.class));
+        verify(operationLogRecorder).recordDelete(eq("position"), eq(11L), any(), any(Map.class));
     }
 
     /**
-     * 更新用户时，若 positions 传空数组且该用户此前存在任职记录，应删除全部既有任职记录。
+     * 更新用户时，若 positions 传空数组且该用户此前存在任职记录，应删除全部既有任职记录，
+     * 并为每条被删除的任职记录各自记录一条 {@code POSITION} 资源的删除操作日志。
      */
     @Test
     void update_shouldDeleteAllPositions_whenPositionsIsEmpty() {
@@ -305,6 +316,7 @@ class UserServiceImplTest {
         ArgumentCaptor<List<Long>> captor = ArgumentCaptor.forClass(List.class);
         verify(userPositionMapper).deleteByIds(captor.capture());
         assertThat(captor.getValue()).containsExactly(10L);
+        verify(operationLogRecorder).recordDelete(eq("position"), eq(10L), any(), any(Map.class));
     }
 
     /**
@@ -338,6 +350,9 @@ class UserServiceImplTest {
         verify(userPositionMapper, never()).insert(any(UserPositionEntity.class));
         verify(userPositionMapper, never()).updateById(any(UserPositionEntity.class));
         verify(userPositionMapper, never()).deleteByIds(anyList());
+        verify(operationLogRecorder, never()).recordCreate(eq("position"), any(), any(), any(Map.class));
+        verify(operationLogRecorder, never()).recordUpdate(eq("position"), any(), any(), any(Map.class), any(Map.class));
+        verify(operationLogRecorder, never()).recordDelete(eq("position"), any(), any(), any(Map.class));
     }
 
     /**

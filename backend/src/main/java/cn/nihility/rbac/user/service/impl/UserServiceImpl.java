@@ -26,6 +26,7 @@ import cn.nihility.rbac.user.mapper.UserPositionMapper;
 import cn.nihility.rbac.user.mapstruct.UserConvert;
 import cn.nihility.rbac.user.service.UserService;
 import cn.nihility.rbac.user.service.support.PositionDynamicFieldSupport;
+import cn.nihility.rbac.user.service.support.PositionLogSnapshotSupport;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
@@ -82,6 +83,13 @@ public class UserServiceImpl implements UserService {
      * （{@code PositionServiceImpl}）共用同一份校验逻辑。
      */
     private final PositionDynamicFieldSupport positionDynamicFieldSupport;
+
+    /**
+     * 任职记录操作日志的被操作对象名称快照与字段快照共享组件，与独立任职管理入口
+     * （{@code PositionServiceImpl}）共用同一份快照逻辑，供 {@link #syncPositions} 记录内嵌
+     * 任职子表单产生的新增/编辑/删除操作日志时使用。
+     */
+    private final PositionLogSnapshotSupport positionLogSnapshotSupport;
 
     /**
      * {@inheritDoc}
@@ -334,8 +342,10 @@ public class UserServiceImpl implements UserService {
      * 刷新更新审计信息，不修改其 {@code status}）；不携带 {@code id} 的作为新记录插入，
      * {@code status} 显式置为 {@link PositionStatus#ENABLED}；当前用户未被逻辑删除的既有
      * 记录中未出现在本次请求列表中的物理删除；请求携带不属于当前用户的任职记录 id 时拒绝
-     * 整个更新。已被逻辑删除的既有记录不参与本次 diff。任职记录本身的操作日志由独立的
-     * 任职管理入口（{@code PositionServiceImpl}）记录，这里不重复记录。
+     * 整个更新。已被逻辑删除的既有记录不参与本次 diff。新增、更新、物理删除三个分支各自追加
+     * 一次 {@code POSITION} 资源操作日志记录（字段快照口径与独立任职管理入口一致，见
+     * {@link PositionLogSnapshotSupport}），使内嵌子表单产生的任职记录变更也能在该记录自己的
+     * 详情页操作历史中查看。
      *
      * @param userId    用户 id
      * @param positions 请求中的任职记录列表，可为空（视为清空全部既有任职记录）
@@ -361,11 +371,17 @@ public class UserServiceImpl implements UserService {
         for (UserPositionRequest request : requests) {
             if (request.getId() != null) {
                 UserPositionEntity entity = existingById.get(request.getId());
+                Map<String, Object> beforeSnapshot = positionLogSnapshotSupport.snapshot(entity);
+
                 UserConvert.INSTANCE.updatePositionEntity(request, entity);
                 entity.setUpdateBy(DEFAULT_OPERATOR);
                 entity.setUpdateTime(now);
                 userPositionMapper.updateById(entity);
                 keptIds.add(entity.getId());
+
+                operationLogRecorder.recordUpdate(OperationLogResourceType.POSITION, entity.getId(),
+                        positionLogSnapshotSupport.targetName(entity), beforeSnapshot,
+                        positionLogSnapshotSupport.snapshot(entity));
             } else {
                 UserPositionEntity entity = UserConvert.INSTANCE.toPositionEntity(request);
                 entity.setUserId(userId);
@@ -375,6 +391,9 @@ public class UserServiceImpl implements UserService {
                 entity.setUpdateBy(DEFAULT_OPERATOR);
                 entity.setUpdateTime(now);
                 userPositionMapper.insert(entity);
+
+                operationLogRecorder.recordCreate(OperationLogResourceType.POSITION, entity.getId(),
+                        positionLogSnapshotSupport.targetName(entity), positionLogSnapshotSupport.snapshot(entity));
             }
         }
 
@@ -383,6 +402,11 @@ public class UserServiceImpl implements UserService {
                 .filter(existingId -> !keptIds.contains(existingId))
                 .toList();
         if (!idsToDelete.isEmpty()) {
+            for (Long deleteId : idsToDelete) {
+                UserPositionEntity entity = existingById.get(deleteId);
+                operationLogRecorder.recordDelete(OperationLogResourceType.POSITION, deleteId,
+                        positionLogSnapshotSupport.targetName(entity), positionLogSnapshotSupport.snapshot(entity));
+            }
             userPositionMapper.deleteByIds(idsToDelete);
         }
     }

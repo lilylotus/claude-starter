@@ -23,6 +23,7 @@ import cn.nihility.rbac.user.entity.UserPositionEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import cn.nihility.rbac.user.mapper.UserPositionMapper;
 import cn.nihility.rbac.user.service.support.PositionDynamicFieldSupport;
+import cn.nihility.rbac.user.service.support.PositionLogSnapshotSupport;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
@@ -71,14 +72,17 @@ class PositionServiceImplTest {
      * 静态调用完成，无需在此注入或 mock。动态字段定义默认桩为空列表，各分支逻辑测试
      * 不受"表单字段定义"驱动的校验管线影响。{@link PositionDynamicFieldSupport} 直接用
      * 已打桩的 {@code formFieldDefinitionService}/{@code userPositionMapper} 构造真实实例，
-     * 不额外 mock。
+     * 不额外 mock；{@link PositionLogSnapshotSupport} 同理，直接用已打桩的
+     * {@code userMapper}/{@code orgMapper}/{@code formFieldDefinitionService} 构造真实实例。
      */
     @BeforeEach
     void setUp() {
         PositionDynamicFieldSupport positionDynamicFieldSupport =
                 new PositionDynamicFieldSupport(formFieldDefinitionService, userPositionMapper);
-        positionService = new PositionServiceImpl(userPositionMapper, userMapper, orgMapper, operationLogRecorder,
-                formFieldDefinitionService, positionDynamicFieldSupport);
+        PositionLogSnapshotSupport positionLogSnapshotSupport =
+                new PositionLogSnapshotSupport(userMapper, orgMapper, formFieldDefinitionService);
+        positionService = new PositionServiceImpl(userPositionMapper, operationLogRecorder,
+                positionDynamicFieldSupport, positionLogSnapshotSupport);
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
     }
 
