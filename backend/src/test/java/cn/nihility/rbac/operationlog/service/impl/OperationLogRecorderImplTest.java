@@ -9,7 +9,6 @@ import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.constant.OperationType;
 import cn.nihility.rbac.operationlog.entity.OperationLogEntity;
 import cn.nihility.rbac.operationlog.mapper.OperationLogMapper;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -35,7 +34,7 @@ class OperationLogRecorderImplTest {
     @Mock
     private OperationLogMapper operationLogMapper;
 
-    /** 被测服务实例，序列化组件使用真实的 {@link ObjectMapper}，不做打桩。 */
+    /** 被测服务实例，序列化组件使用 {@link cn.nihility.rbac.common.util.JacksonUtils}，不做打桩。 */
     private OperationLogRecorderImpl operationLogRecorder;
 
     /**
@@ -43,7 +42,7 @@ class OperationLogRecorderImplTest {
      */
     @BeforeEach
     void setUp() {
-        operationLogRecorder = new OperationLogRecorderImpl(operationLogMapper, new ObjectMapper());
+        operationLogRecorder = new OperationLogRecorderImpl(operationLogMapper);
     }
 
     /**
@@ -55,7 +54,9 @@ class OperationLogRecorderImplTest {
     }
 
     /**
-     * 新增操作时，before 快照视为全 null，变更详情中每个字段的旧值为空、新值为快照中对应的值。
+     * 新增操作时，before 快照视为全 null，变更详情中每个字段的旧值为空、新值为快照中对应的值；
+     * {@link cn.nihility.rbac.common.util.JacksonUtils} 序列化时排除 {@code null} 字段，
+     * 持久化的 JSON 中 {@code oldValue} 键本身被省略，而不是写成字面量 {@code "oldValue":null}。
      */
     @Test
     void recordCreate_shouldTreatBeforeAsAllNull() {
@@ -70,7 +71,7 @@ class OperationLogRecorderImplTest {
         assertThat(captured.getModule()).isEqualTo(OperationLogResourceType.module(OperationLogResourceType.ROLE));
         assertThat(captured.getResourceName())
                 .isEqualTo(OperationLogResourceType.resourceName(OperationLogResourceType.ROLE));
-        assertThat(captured.getChangeDetail()).contains("\"oldValue\":null").contains("\"newValue\":\"测试角色\"");
+        assertThat(captured.getChangeDetail()).doesNotContain("\"oldValue\"").contains("\"newValue\":\"测试角色\"");
     }
 
     /**
@@ -130,7 +131,9 @@ class OperationLogRecorderImplTest {
     }
 
     /**
-     * 删除操作时，after 快照视为全 null，变更详情中每个字段的新值为空、旧值为快照中对应的值。
+     * 删除操作时，after 快照视为全 null，变更详情中每个字段的新值为空、旧值为快照中对应的值；
+     * {@link cn.nihility.rbac.common.util.JacksonUtils} 序列化时排除 {@code null} 字段，
+     * 持久化的 JSON 中 {@code newValue} 键本身被省略，而不是写成字面量 {@code "newValue":null}。
      */
     @Test
     void recordDelete_shouldTreatAfterAsAllNull() {
@@ -141,7 +144,7 @@ class OperationLogRecorderImplTest {
 
         OperationLogEntity captured = captureInsertedEntity();
         assertThat(captured.getOperationType()).isEqualTo(OperationType.DELETE);
-        assertThat(captured.getChangeDetail()).contains("\"oldValue\":\"测试角色\"").contains("\"newValue\":null");
+        assertThat(captured.getChangeDetail()).contains("\"oldValue\":\"测试角色\"").doesNotContain("\"newValue\"");
     }
 
     /**

@@ -1,9 +1,7 @@
 package cn.nihility.rbac.common.advice;
 
 import cn.nihility.rbac.common.Result;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
+import cn.nihility.rbac.common.util.JacksonUtils;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.HttpMessageConverter;
@@ -19,11 +17,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
  * 自身的接口输出。
  */
 @RestControllerAdvice(basePackages = "cn.nihility.rbac")
-@RequiredArgsConstructor
 public class GlobalResponseAdvice implements ResponseBodyAdvice<Object> {
-
-    /** 用于手动序列化的 Jackson 对象映射器。 */
-    private final ObjectMapper objectMapper;
 
     /**
      * 所有返回值都需要经过本处理器判断是否包装。
@@ -71,10 +65,6 @@ public class GlobalResponseAdvice implements ResponseBodyAdvice<Object> {
      */
     private String writeAsJsonString(Object body, ServerHttpResponse response) {
         response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
-        try {
-            return objectMapper.writeValueAsString(Result.success(body));
-        } catch (JsonProcessingException e) {
-            throw new IllegalStateException("响应序列化失败", e);
-        }
+        return JacksonUtils.toJson(Result.success(body));
     }
 }

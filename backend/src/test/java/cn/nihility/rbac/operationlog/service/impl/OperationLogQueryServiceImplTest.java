@@ -10,7 +10,6 @@ import cn.nihility.rbac.operationlog.dto.OperationLogVO;
 import cn.nihility.rbac.operationlog.entity.OperationLogEntity;
 import cn.nihility.rbac.operationlog.mapper.OperationLogMapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,7 +32,7 @@ class OperationLogQueryServiceImplTest {
     @Mock
     private OperationLogMapper operationLogMapper;
 
-    /** 被测服务实例，序列化组件使用真实的 {@link ObjectMapper}，不做打桩。 */
+    /** 被测服务实例，序列化组件使用 {@link cn.nihility.rbac.common.util.JacksonUtils}，不做打桩。 */
     private OperationLogQueryServiceImpl operationLogQueryService;
 
     /**
@@ -41,7 +40,7 @@ class OperationLogQueryServiceImplTest {
      */
     @BeforeEach
     void setUp() {
-        operationLogQueryService = new OperationLogQueryServiceImpl(operationLogMapper, new ObjectMapper());
+        operationLogQueryService = new OperationLogQueryServiceImpl(operationLogMapper);
     }
 
     /**

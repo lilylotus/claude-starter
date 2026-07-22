@@ -1,5 +1,6 @@
 package cn.nihility.rbac.operationlog.service.impl;
 
+import cn.nihility.rbac.common.util.JacksonUtils;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.constant.OperationType;
 import cn.nihility.rbac.operationlog.dto.OperationLogFieldChangeVO;
@@ -7,7 +8,6 @@ import cn.nihility.rbac.operationlog.entity.OperationLogEntity;
 import cn.nihility.rbac.operationlog.mapper.OperationLogMapper;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.operationlog.util.UserAgentParser;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.LocalDateTime;
 import java.util.LinkedHashSet;
@@ -44,9 +44,6 @@ public class OperationLogRecorderImpl implements OperationLogRecorder {
 
     /** 操作日志数据访问接口。 */
     private final OperationLogMapper operationLogMapper;
-
-    /** 用于把字段变更详情序列化为 JSON 字符串。 */
-    private final ObjectMapper objectMapper;
 
     /**
      * {@inheritDoc}
@@ -163,7 +160,7 @@ public class OperationLogRecorderImpl implements OperationLogRecorder {
      */
     private String toJson(List<OperationLogFieldChangeVO> changes) {
         try {
-            return objectMapper.writeValueAsString(changes);
+            return JacksonUtils.toJson(changes);
         } catch (Exception e) {
             log.warn("操作日志变更详情序列化失败，将写入空数组", e);
             return "[]";

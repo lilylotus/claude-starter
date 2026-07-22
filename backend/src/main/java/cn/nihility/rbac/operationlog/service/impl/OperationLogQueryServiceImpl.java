@@ -2,6 +2,7 @@ package cn.nihility.rbac.operationlog.service.impl;
 
 import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.common.util.JacksonUtils;
 import cn.nihility.rbac.operationlog.constant.OperationType;
 import cn.nihility.rbac.operationlog.dto.OperationLogDetailVO;
 import cn.nihility.rbac.operationlog.dto.OperationLogFieldChangeVO;
@@ -12,7 +13,7 @@ import cn.nihility.rbac.operationlog.mapper.OperationLogMapper;
 import cn.nihility.rbac.operationlog.mapstruct.OperationLogConvert;
 import cn.nihility.rbac.operationlog.service.OperationLogQueryService;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,9 +29,6 @@ public class OperationLogQueryServiceImpl implements OperationLogQueryService {
 
     /** 操作日志数据访问接口。 */
     private final OperationLogMapper operationLogMapper;
-
-    /** 用于把持久化的字段变更详情 JSON 字符串反序列化为结构化列表。 */
-    private final ObjectMapper objectMapper;
 
     /**
      * {@inheritDoc}
@@ -77,8 +75,8 @@ public class OperationLogQueryServiceImpl implements OperationLogQueryService {
             return List.of();
         }
         try {
-            return objectMapper.readValue(changeDetail,
-                    objectMapper.getTypeFactory().constructCollectionType(List.class, OperationLogFieldChangeVO.class));
+            return JacksonUtils.toObj(changeDetail, new TypeReference<List<OperationLogFieldChangeVO>>() {
+            });
         } catch (Exception e) {
             log.warn("操作日志变更详情反序列化失败：{}", changeDetail, e);
             return List.of();
