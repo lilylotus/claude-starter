@@ -14,6 +14,7 @@ import cn.nihility.rbac.formfield.constant.FormFieldBizType;
 import cn.nihility.rbac.formfield.dto.FormFieldDefinitionVO;
 import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
 import cn.nihility.rbac.formfield.support.DynamicFieldValidator;
+import cn.nihility.rbac.formfield.support.FormFieldSnapshotSupport;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.entity.OrgEntity;
@@ -288,7 +289,8 @@ public class AppServiceImpl implements AppService {
 
     /**
      * 构造应用实体的操作日志字段快照，key 为中文字段名，value 为人类可读的格式化值；
-     * 负责人姓名、所属组织名称需分别按 {@code ownerId}/{@code orgId} 回查一次。
+     * 负责人姓名、所属组织名称需分别按 {@code ownerId}/{@code orgId} 回查一次；末尾追加
+     * 当前启用的 {@code ext1}..{@code ext10} 扩展字段（key 使用字段定义的展示名）。
      *
      * @param entity 应用实体
      * @return 操作日志字段快照
@@ -305,7 +307,33 @@ public class AppServiceImpl implements AppService {
         snapshot.put("显示序号", entity.getShowOrder());
         snapshot.put("备注", entity.getRemark());
         snapshot.put("状态", statusLabel(entity.getStatus()));
+
+        List<FormFieldDefinitionVO> definitions =
+                formFieldDefinitionService.listActiveByBizType(FormFieldBizType.APP);
+        FormFieldSnapshotSupport.appendExtFieldSnapshot(snapshot, definitions, extValues(entity));
         return snapshot;
+    }
+
+    /**
+     * 把应用实体的 {@code ext1}..{@code ext10} 逐一收集为列名到当前值的映射，
+     * 供 {@link FormFieldSnapshotSupport#appendExtFieldSnapshot} 使用。
+     *
+     * @param entity 应用实体
+     * @return {@code ext1}..{@code ext10} 列名到当前值的映射
+     */
+    private Map<String, String> extValues(AppEntity entity) {
+        Map<String, String> values = new LinkedHashMap<>();
+        values.put("ext1", entity.getExt1());
+        values.put("ext2", entity.getExt2());
+        values.put("ext3", entity.getExt3());
+        values.put("ext4", entity.getExt4());
+        values.put("ext5", entity.getExt5());
+        values.put("ext6", entity.getExt6());
+        values.put("ext7", entity.getExt7());
+        values.put("ext8", entity.getExt8());
+        values.put("ext9", entity.getExt9());
+        values.put("ext10", entity.getExt10());
+        return values;
     }
 
     /**

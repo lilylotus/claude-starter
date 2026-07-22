@@ -18,7 +18,12 @@ import {
 import type { OrgTreeNode } from '@/types/org'
 import type { DictItemOption } from '@/types/dict'
 import { useDynamicFormFields } from '@/composables/useDynamicFormFields'
-import { FORM_FIELD_CONTROL_TYPE_DICT, FORM_FIELD_CONTROL_TYPE_NUMBER, FORM_FIELD_CONTROL_TYPE_TEXT } from '@/types/formField'
+import {
+  FORM_FIELD_CONTROL_TYPE_DICT,
+  FORM_FIELD_CONTROL_TYPE_NUMBER,
+  FORM_FIELD_CONTROL_TYPE_TEXT,
+  type FormFieldRenderItem,
+} from '@/types/formField'
 
 const userStore = useUserStore()
 const router = useRouter()
@@ -27,9 +32,14 @@ const router = useRouter()
 // 统一按"表单字段定义"（bizType=USER）动态渲染，见 design.md 决策 12
 const userFields = useDynamicFormFields('USER')
 
+// 内嵌"任职信息"子表单同样接入"表单字段定义"（bizType=POSITION），与独立任职管理页面
+// （PositionManagementView.vue）读写同一套动态字段定义，逐行渲染在子表单每一行内
+const positionFields = useDynamicFormFields('POSITION')
+
 onMounted(() => {
   userStore.fetchPage()
   userFields.fetchSchema()
+  positionFields.fetchSchema()
   fetchPositionTypeOptions()
   // 全量组织树（orgTree，供新增/编辑弹窗内任职子表单“所属组织”选择器用）不在这里预加载：
   // 只有打开弹窗时才需要它，此处预加载会让绝大多数只浏览/搜索用户列表的页面访问都白白
@@ -97,6 +107,16 @@ function blankPosition(): UserPositionFormItem {
     positionPhone: '',
     showOrder: 0,
     remark: '',
+    ext1: '',
+    ext2: '',
+    ext3: '',
+    ext4: '',
+    ext5: '',
+    ext6: '',
+    ext7: '',
+    ext8: '',
+    ext9: '',
+    ext10: '',
   }
 }
 
@@ -121,6 +141,13 @@ const rules = computed<FormRules>(() => ({
 // 任职信息子表单每行的独立校验规则，通过动态 prop（positions.{index}.xxx）挂载
 const positionOrgRule = [{ required: true, message: '请选择所属组织', trigger: 'change' }]
 const positionTypeRule = [{ required: true, message: '请选择任职类型', trigger: 'change' }]
+
+// 任职信息子表单每行 bizType=POSITION 动态字段的校验规则，取值逻辑与
+// PositionManagementView.vue 自身表单一致：新增/编辑分别对应 createRules/editRules，
+// 按当前字段的 columnName 取出对应规则（未配置必填/正则时为 undefined，等价于不校验）
+function positionDynamicFieldRules(item: FormFieldRenderItem) {
+  return (dialogMode.value === 'create' ? positionFields.createRules : positionFields.editRules)[item.columnName]
+}
 
 const dialogTitle = computed(() => (dialogMode.value === 'create' ? '新增用户' : '编辑用户'))
 
@@ -160,6 +187,16 @@ async function openEditDialog(row: UserRow) {
     positionPhone: position.positionPhone,
     showOrder: position.showOrder,
     remark: position.remark,
+    ext1: position.ext1 ?? '',
+    ext2: position.ext2 ?? '',
+    ext3: position.ext3 ?? '',
+    ext4: position.ext4 ?? '',
+    ext5: position.ext5 ?? '',
+    ext6: position.ext6 ?? '',
+    ext7: position.ext7 ?? '',
+    ext8: position.ext8 ?? '',
+    ext9: position.ext9 ?? '',
+    ext10: position.ext10 ?? '',
   }))
   dialogVisible.value = true
 }
@@ -403,6 +440,40 @@ async function handleDelete(row: UserRow) {
                 </el-form-item>
                 <el-form-item label="备注" label-width="76px">
                   <el-input v-model="position.remark" placeholder="选填" />
+                </el-form-item>
+                <el-form-item
+                  v-for="item in (dialogMode === 'create' ? positionFields.createFields : positionFields.editFields).filter(
+                    (f) => f.columnName.startsWith('ext'),
+                  )"
+                  :key="item.fieldCode"
+                  :label="item.fieldName"
+                  label-width="76px"
+                  :prop="`positions.${index}.${item.columnName}`"
+                  :rules="positionDynamicFieldRules(item)"
+                >
+                  <el-input
+                    v-if="item.controlType === FORM_FIELD_CONTROL_TYPE_TEXT"
+                    v-model="(position[item.columnName] as string)"
+                    :placeholder="item.placeholder || `请输入${item.fieldName}`"
+                    :disabled="!item.editable"
+                  />
+                  <el-input-number
+                    v-else-if="item.controlType === FORM_FIELD_CONTROL_TYPE_NUMBER"
+                    v-model="(position[item.columnName] as number)"
+                    :min="0"
+                    style="width: 100%"
+                    :disabled="!item.editable"
+                  />
+                  <template v-else>
+                    <el-select
+                      v-model="(position[item.columnName] as string)"
+                      :placeholder="item.placeholder || `请选择${item.fieldName}`"
+                      :disabled="!item.editable"
+                      style="width: 100%"
+                    >
+                      <el-option v-for="opt in item.dictOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                    </el-select>
+                  </template>
                 </el-form-item>
               </div>
               <el-button link type="danger" class="user-position-row__remove" @click="removePositionRow(index)">

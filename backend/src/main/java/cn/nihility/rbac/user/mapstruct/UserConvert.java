@@ -72,9 +72,8 @@ public interface UserConvert {
     /**
      * 任职记录请求转实体，供新增场景使用；id/所属用户/状态/审计字段由服务层另行赋值
      * （新增记录的状态由服务层显式置为启用）。用户管理内嵌的任职子表单
-     * （{@link UserPositionRequest}）不支持填写 {@code ext1}..{@code ext10}
-     * （该能力仅在独立的任职管理入口开放，见 {@code PositionCreateRequest}），
-     * 故这里显式忽略，避免的是 MapStruct 的未映射目标属性警告。
+     * （{@link UserPositionRequest}）与独立任职管理入口（{@code PositionCreateRequest}）
+     * 一样支持 {@code ext1}..{@code ext10}，按同名字段自动映射。
      *
      * @param request 任职记录请求
      * @return 任职记录实体
@@ -82,16 +81,6 @@ public interface UserConvert {
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "userId", ignore = true)
     @Mapping(target = "status", ignore = true)
-    @Mapping(target = "ext1", ignore = true)
-    @Mapping(target = "ext2", ignore = true)
-    @Mapping(target = "ext3", ignore = true)
-    @Mapping(target = "ext4", ignore = true)
-    @Mapping(target = "ext5", ignore = true)
-    @Mapping(target = "ext6", ignore = true)
-    @Mapping(target = "ext7", ignore = true)
-    @Mapping(target = "ext8", ignore = true)
-    @Mapping(target = "ext9", ignore = true)
-    @Mapping(target = "ext10", ignore = true)
     @Mapping(target = "createBy", ignore = true)
     @Mapping(target = "createTime", ignore = true)
     @Mapping(target = "updateBy", ignore = true)
@@ -101,7 +90,7 @@ public interface UserConvert {
     /**
      * 把任职记录更新请求的字段合并到已有任职记录实体上；id/所属用户/状态/创建审计字段
      * 不受影响，更新审计字段由服务层另行刷新；{@code ext1}..{@code ext10} 同
-     * {@link #toPositionEntity} 不受用户管理内嵌任职子表单影响，保持原值不变。
+     * {@link #toPositionEntity} 按同名字段自动映射覆盖原值。
      *
      * @param request 任职记录请求
      * @param entity  待更新的任职记录实体
@@ -109,16 +98,6 @@ public interface UserConvert {
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "userId", ignore = true)
     @Mapping(target = "status", ignore = true)
-    @Mapping(target = "ext1", ignore = true)
-    @Mapping(target = "ext2", ignore = true)
-    @Mapping(target = "ext3", ignore = true)
-    @Mapping(target = "ext4", ignore = true)
-    @Mapping(target = "ext5", ignore = true)
-    @Mapping(target = "ext6", ignore = true)
-    @Mapping(target = "ext7", ignore = true)
-    @Mapping(target = "ext8", ignore = true)
-    @Mapping(target = "ext9", ignore = true)
-    @Mapping(target = "ext10", ignore = true)
     @Mapping(target = "createBy", ignore = true)
     @Mapping(target = "createTime", ignore = true)
     @Mapping(target = "updateBy", ignore = true)

@@ -28,6 +28,18 @@ export interface UserPositionRow {
   positionPhone: string
   showOrder: number
   remark: string
+  // ext1~ext10：可开放配置的扩展字段，是否展示/可编辑由"表单字段定义"（bizType=POSITION）驱动，
+  // 未被任何启用字段定义绑定时恒为空
+  ext1?: string
+  ext2?: string
+  ext3?: string
+  ext4?: string
+  ext5?: string
+  ext6?: string
+  ext7?: string
+  ext8?: string
+  ext9?: string
+  ext10?: string
   createBy: string
   createTime: string
   updateBy: string
@@ -69,7 +81,10 @@ export interface UserRow {
 export type UserDetail = UserRow
 
 // 新增/编辑弹窗内，任职信息子表单一行的数据结构；id 为空表示新增行，
-// 非空表示编辑既有任职记录（提交时按 id 回传给后端做增量 diff）
+// 非空表示编辑既有任职记录（提交时按 id 回传给后端做增量 diff）。
+// 额外声明字符串索引签名，使 bizType=POSITION 的动态字段（ext1~ext10）能以
+// item.columnName 为 key 动态读写，与 useDynamicFormFields 在其余三个业务页面
+// 表单里的用法保持一致
 export interface UserPositionFormItem {
   id?: number
   orgId: number | null
@@ -78,6 +93,17 @@ export interface UserPositionFormItem {
   positionPhone: string
   showOrder: number
   remark: string
+  ext1?: string
+  ext2?: string
+  ext3?: string
+  ext4?: string
+  ext5?: string
+  ext6?: string
+  ext7?: string
+  ext8?: string
+  ext9?: string
+  ext10?: string
+  [key: string]: unknown
 }
 
 // 新增/编辑用户的请求体，positions 为该用户任职记录的完整列表

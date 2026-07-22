@@ -22,6 +22,7 @@ import cn.nihility.rbac.user.dto.PositionVO;
 import cn.nihility.rbac.user.entity.UserPositionEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import cn.nihility.rbac.user.mapper.UserPositionMapper;
+import cn.nihility.rbac.user.service.support.PositionDynamicFieldSupport;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
@@ -68,12 +69,16 @@ class PositionServiceImplTest {
     /**
      * 每个用例执行前重新构造被测服务；实体/DTO 转换通过 {@code PositionConvert.INSTANCE}
      * 静态调用完成，无需在此注入或 mock。动态字段定义默认桩为空列表，各分支逻辑测试
-     * 不受"表单字段定义"驱动的校验管线影响。
+     * 不受"表单字段定义"驱动的校验管线影响。{@link PositionDynamicFieldSupport} 直接用
+     * 已打桩的 {@code formFieldDefinitionService}/{@code userPositionMapper} 构造真实实例，
+     * 不额外 mock。
      */
     @BeforeEach
     void setUp() {
+        PositionDynamicFieldSupport positionDynamicFieldSupport =
+                new PositionDynamicFieldSupport(formFieldDefinitionService, userPositionMapper);
         positionService = new PositionServiceImpl(userPositionMapper, userMapper, orgMapper, operationLogRecorder,
-                formFieldDefinitionService);
+                formFieldDefinitionService, positionDynamicFieldSupport);
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
     }
 

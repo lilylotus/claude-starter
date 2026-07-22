@@ -7,8 +7,10 @@ import { ArrowLeft } from '@element-plus/icons-vue'
 import OperationHistoryPanel from '@/components/OperationHistoryPanel.vue'
 import * as userApi from '@/api/user'
 import * as dictApi from '@/api/dict'
-import { USER_GENDER_OPTIONS, USER_STATUS_ENABLED, type UserRow } from '@/types/user'
+import { USER_GENDER_OPTIONS, USER_STATUS_ENABLED, type UserPositionRow, type UserRow } from '@/types/user'
 import type { DictItemOption } from '@/types/dict'
+import { useDynamicFormFields } from '@/composables/useDynamicFormFields'
+import { FORM_FIELD_CONTROL_TYPE_DICT, type FormFieldRenderItem } from '@/types/formField'
 
 const route = useRoute()
 const router = useRouter()
@@ -18,6 +20,25 @@ const userId = computed(() => Number(route.params.id))
 const loading = ref(false)
 const loadError = ref('')
 const detailData = ref<UserRow | null>(null)
+
+// 详情页展示当前启用状态的全部自定义字段定义（bizType=USER），不受 showInList/
+// showInCreate/showInEdit 过滤——详情页是该资源的完整只读视图，见 design.md 决策 2
+const userFields = useDynamicFormFields('USER')
+
+// 用户名下任职记录表格追加展示 bizType=POSITION 当前启用状态的自定义字段
+const positionFields = useDynamicFormFields('POSITION')
+
+// 按字段定义的 columnName 从用户详情数据里取值；detailData 未声明索引签名（与列表页
+// UserRow 的既有约定一致，只在需要动态取值处就地转换），故此处显式转换一次
+function extFieldValue(item: FormFieldRenderItem): unknown {
+  if (!detailData.value) return undefined
+  return (detailData.value as unknown as Record<string, unknown>)[item.columnName]
+}
+
+// 按字段定义的 columnName 从某条任职记录行里取值
+function positionExtFieldValue(row: UserPositionRow, item: FormFieldRenderItem): unknown {
+  return (row as unknown as Record<string, unknown>)[item.columnName]
+}
 
 function genderLabel(gender: number): string {
   return USER_GENDER_OPTIONS.find((opt) => opt.value === gender)?.label ?? '未知'
@@ -51,6 +72,8 @@ async function fetchDetail() {
 onMounted(() => {
   fetchDetail()
   fetchPositionTypeOptions()
+  userFields.fetchSchema()
+  positionFields.fetchSchema()
 })
 
 // 显式跳回用户列表路由，而不是 router.back()：详情页可能是直接通过 URL/刷新进入的，
@@ -90,6 +113,16 @@ function goBack() {
           </el-descriptions-item>
           <el-descriptions-item label="显示序号">{{ detailData?.showOrder }}</el-descriptions-item>
           <el-descriptions-item label="备注" :span="2">{{ detailData?.remark || '-' }}</el-descriptions-item>
+          <el-descriptions-item
+            v-for="item in userFields.schema.filter((f) => f.columnName.startsWith('ext'))"
+            :key="item.fieldCode"
+            :label="item.fieldName"
+          >
+            <span v-if="item.controlType === FORM_FIELD_CONTROL_TYPE_DICT">
+              {{ userFields.dictOptionLabel(item, extFieldValue(item)) || '-' }}
+            </span>
+            <span v-else>{{ (extFieldValue(item) as string) || '-' }}</span>
+          </el-descriptions-item>
           <el-descriptions-item label="创建人">{{ detailData?.createBy }}</el-descriptions-item>
           <el-descriptions-item label="创建时间">{{ detailData?.createTime }}</el-descriptions-item>
           <el-descriptions-item label="更新人">{{ detailData?.updateBy }}</el-descriptions-item>
@@ -108,6 +141,19 @@ function goBack() {
           <el-table-column prop="positionPhone" label="任职电话" min-width="120" />
           <el-table-column prop="showOrder" label="显示序号" width="90" />
           <el-table-column prop="remark" label="备注" min-width="120" />
+          <el-table-column
+            v-for="item in positionFields.schema.filter((f) => f.columnName.startsWith('ext'))"
+            :key="item.fieldCode"
+            :label="item.fieldName"
+            min-width="120"
+          >
+            <template #default="{ row }">
+              <span v-if="item.controlType === FORM_FIELD_CONTROL_TYPE_DICT">
+                {{ positionFields.dictOptionLabel(item, positionExtFieldValue(row as UserPositionRow, item)) || '-' }}
+              </span>
+              <span v-else>{{ positionExtFieldValue(row as UserPositionRow, item) || '-' }}</span>
+            </template>
+          </el-table-column>
           <el-table-column prop="createBy" label="创建人" min-width="100" />
           <el-table-column prop="createTime" label="创建时间" min-width="160" />
           <el-table-column prop="updateBy" label="更新人" min-width="100" />

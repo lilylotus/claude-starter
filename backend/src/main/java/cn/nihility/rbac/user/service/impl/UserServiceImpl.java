@@ -6,6 +6,7 @@ import cn.nihility.rbac.formfield.constant.FormFieldBizType;
 import cn.nihility.rbac.formfield.dto.FormFieldDefinitionVO;
 import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
 import cn.nihility.rbac.formfield.support.DynamicFieldValidator;
+import cn.nihility.rbac.formfield.support.FormFieldSnapshotSupport;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.entity.OrgEntity;
@@ -24,6 +25,7 @@ import cn.nihility.rbac.user.mapper.UserMapper;
 import cn.nihility.rbac.user.mapper.UserPositionMapper;
 import cn.nihility.rbac.user.mapstruct.UserConvert;
 import cn.nihility.rbac.user.service.UserService;
+import cn.nihility.rbac.user.service.support.PositionDynamicFieldSupport;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
@@ -75,6 +77,13 @@ public class UserServiceImpl implements UserService {
     private final FormFieldDefinitionService formFieldDefinitionService;
 
     /**
+     * {@code bizType=POSITION} 动态字段（必填/正则/唯一性）校验的共享组件，用于内嵌任职
+     * 子表单（{@code positions[]}）中每一项的动态字段校验，与独立任职管理入口
+     * （{@code PositionServiceImpl}）共用同一份校验逻辑。
+     */
+    private final PositionDynamicFieldSupport positionDynamicFieldSupport;
+
+    /**
      * {@inheritDoc}
      */
     @Override
@@ -111,6 +120,7 @@ public class UserServiceImpl implements UserService {
     public UserVO create(UserCreateRequest request) {
         checkCodeUnique(request.getCode(), null);
         validateDynamicFields(request, true, null);
+        validatePositionsDynamicFields(request.getPositions());
 
         UserEntity entity = UserConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
@@ -137,6 +147,7 @@ public class UserServiceImpl implements UserService {
         UserEntity entity = getExistingEntity(id);
         checkCodeUnique(request.getCode(), id);
         validateDynamicFields(request, false, id);
+        validatePositionsDynamicFields(request.getPositions());
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         UserConvert.INSTANCE.updateEntity(request, entity);
@@ -261,6 +272,24 @@ public class UserServiceImpl implements UserService {
     }
 
     /**
+     * 对内嵌任职子表单中的每一项任职记录执行 {@code bizType=POSITION} 的动态字段
+     * 必填/正则/唯一性校验，复用独立任职管理入口共用的 {@link PositionDynamicFieldSupport}，
+     * 避免重复实现一套校验逻辑。每一项是否为"新增"场景按其自身是否携带 {@code id} 判断，
+     * 与 {@link #syncPositions} 的按行 diff 逻辑保持一致。
+     *
+     * @param positions 内嵌任职子表单提交的任职记录请求列表，可为空
+     */
+    private void validatePositionsDynamicFields(List<UserPositionRequest> positions) {
+        if (positions == null || positions.isEmpty()) {
+            return;
+        }
+        for (UserPositionRequest position : positions) {
+            boolean creating = position.getId() == null;
+            positionDynamicFieldSupport.validate(position, creating, position.getId());
+        }
+    }
+
+    /**
      * 按用户 id 查询其全部未被逻辑删除的任职记录（按显示序号降序、id 升序排列），
      * 并批量回填组织名称。
      *
@@ -359,7 +388,8 @@ public class UserServiceImpl implements UserService {
     }
 
     /**
-     * 构造用户实体的操作日志字段快照，key 为中文字段名，value 为人类可读的格式化值。
+     * 构造用户实体的操作日志字段快照，key 为中文字段名，value 为人类可读的格式化值；末尾
+     * 追加当前启用的 {@code ext1}..{@code ext10} 扩展字段（key 使用字段定义的展示名）。
      *
      * @param entity 用户实体
      * @return 操作日志字段快照
@@ -374,7 +404,33 @@ public class UserServiceImpl implements UserService {
         snapshot.put("显示序号", entity.getShowOrder());
         snapshot.put("备注", entity.getRemark());
         snapshot.put("状态", statusLabel(entity.getStatus()));
+
+        List<FormFieldDefinitionVO> definitions =
+                formFieldDefinitionService.listActiveByBizType(FormFieldBizType.USER);
+        FormFieldSnapshotSupport.appendExtFieldSnapshot(snapshot, definitions, extValues(entity));
         return snapshot;
+    }
+
+    /**
+     * 把用户实体的 {@code ext1}..{@code ext10} 逐一收集为列名到当前值的映射，
+     * 供 {@link FormFieldSnapshotSupport#appendExtFieldSnapshot} 使用。
+     *
+     * @param entity 用户实体
+     * @return {@code ext1}..{@code ext10} 列名到当前值的映射
+     */
+    private Map<String, String> extValues(UserEntity entity) {
+        Map<String, String> values = new LinkedHashMap<>();
+        values.put("ext1", entity.getExt1());
+        values.put("ext2", entity.getExt2());
+        values.put("ext3", entity.getExt3());
+        values.put("ext4", entity.getExt4());
+        values.put("ext5", entity.getExt5());
+        values.put("ext6", entity.getExt6());
+        values.put("ext7", entity.getExt7());
+        values.put("ext8", entity.getExt8());
+        values.put("ext9", entity.getExt9());
+        values.put("ext10", entity.getExt10());
+        return values;
     }
 
     /**

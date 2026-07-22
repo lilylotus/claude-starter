@@ -25,6 +25,7 @@ import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.entity.UserPositionEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import cn.nihility.rbac.user.mapper.UserPositionMapper;
+import cn.nihility.rbac.user.service.support.PositionDynamicFieldSupport;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -72,11 +73,15 @@ class UserServiceImplTest {
      * 每个用例执行前重新构造被测服务；实体/DTO 转换通过 {@code UserConvert.INSTANCE}
      * 静态调用完成，无需在此注入或 mock。动态字段定义默认桩为空列表，身份证号相关
      * 用例会按需覆盖该桩，模拟默认字段定义（isUnique=true）驱动的唯一性校验。
+     * {@link PositionDynamicFieldSupport} 直接用已打桩的
+     * {@code formFieldDefinitionService}/{@code userPositionMapper} 构造真实实例，不额外 mock。
      */
     @BeforeEach
     void setUp() {
+        PositionDynamicFieldSupport positionDynamicFieldSupport =
+                new PositionDynamicFieldSupport(formFieldDefinitionService, userPositionMapper);
         userService = new UserServiceImpl(userMapper, userPositionMapper, orgMapper, operationLogRecorder,
-                formFieldDefinitionService);
+                formFieldDefinitionService, positionDynamicFieldSupport);
         lenient().when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
     }

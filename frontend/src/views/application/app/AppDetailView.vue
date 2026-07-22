@@ -7,6 +7,8 @@ import { ArrowLeft } from '@element-plus/icons-vue'
 import OperationHistoryPanel from '@/components/OperationHistoryPanel.vue'
 import * as appApi from '@/api/app'
 import { APP_STATUS_ENABLED, type AppRow } from '@/types/app'
+import { useDynamicFormFields } from '@/composables/useDynamicFormFields'
+import { FORM_FIELD_CONTROL_TYPE_DICT, type FormFieldRenderItem } from '@/types/formField'
 
 const route = useRoute()
 const router = useRouter()
@@ -16,6 +18,17 @@ const appId = computed(() => Number(route.params.id))
 const loading = ref(false)
 const loadError = ref('')
 const detailData = ref<AppRow | null>(null)
+
+// 详情页展示当前启用状态的全部自定义字段定义（bizType=APP），不受 showInList/
+// showInCreate/showInEdit 过滤——详情页是该资源的完整只读视图，见 design.md 决策 2
+const appFields = useDynamicFormFields('APP')
+
+// 按字段定义的 columnName 从详情数据里取值；detailData 未声明索引签名（与列表页
+// AppRow 的既有约定一致，只在需要动态取值处就地转换），故此处显式转换一次
+function extFieldValue(item: FormFieldRenderItem): unknown {
+  if (!detailData.value) return undefined
+  return (detailData.value as unknown as Record<string, unknown>)[item.columnName]
+}
 
 async function fetchDetail() {
   loading.value = true
@@ -29,7 +42,10 @@ async function fetchDetail() {
   }
 }
 
-onMounted(fetchDetail)
+onMounted(() => {
+  fetchDetail()
+  appFields.fetchSchema()
+})
 
 // 显式跳回应用列表路由，而不是 router.back()：详情页可能是直接通过 URL/刷新进入的，
 // 浏览器历史栈在这种场景下可能为空或指向无关页面
@@ -67,6 +83,16 @@ function goBack() {
           </el-descriptions-item>
           <el-descriptions-item label="显示序号">{{ detailData?.showOrder }}</el-descriptions-item>
           <el-descriptions-item label="备注" :span="2">{{ detailData?.remark || '-' }}</el-descriptions-item>
+          <el-descriptions-item
+            v-for="item in appFields.schema.filter((f) => f.columnName.startsWith('ext'))"
+            :key="item.fieldCode"
+            :label="item.fieldName"
+          >
+            <span v-if="item.controlType === FORM_FIELD_CONTROL_TYPE_DICT">
+              {{ appFields.dictOptionLabel(item, extFieldValue(item)) || '-' }}
+            </span>
+            <span v-else>{{ (extFieldValue(item) as string) || '-' }}</span>
+          </el-descriptions-item>
           <el-descriptions-item label="创建人">{{ detailData?.createBy }}</el-descriptions-item>
           <el-descriptions-item label="创建时间">{{ detailData?.createTime }}</el-descriptions-item>
           <el-descriptions-item label="更新人">{{ detailData?.updateBy }}</el-descriptions-item>

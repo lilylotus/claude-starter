@@ -5,7 +5,7 @@ import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.formfield.constant.FormFieldBizType;
 import cn.nihility.rbac.formfield.dto.FormFieldDefinitionVO;
 import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
-import cn.nihility.rbac.formfield.support.DynamicFieldValidator;
+import cn.nihility.rbac.formfield.support.FormFieldSnapshotSupport;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.entity.OrgEntity;
@@ -20,6 +20,7 @@ import cn.nihility.rbac.user.mapper.UserMapper;
 import cn.nihility.rbac.user.mapper.UserPositionMapper;
 import cn.nihility.rbac.user.mapstruct.PositionConvert;
 import cn.nihility.rbac.user.service.PositionService;
+import cn.nihility.rbac.user.service.support.PositionDynamicFieldSupport;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
@@ -27,7 +28,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -42,16 +42,6 @@ public class PositionServiceImpl implements PositionService {
     /** 当前项目尚未接入登录鉴权，创建人/更新人暂时固定为该值。 */
     private static final String DEFAULT_OPERATOR = "admin";
 
-    /**
-     * {@code bizType=POSITION} 下允许被动态字段唯一性校验拼进 {@code ${column}} 的
-     * 列名白名单，取自 {@code tab_metadata_field} 目录里 POSITION 的原有可配置列 +
-     * {@code ext1}..{@code ext10}（design.md Decision 3/8）。任职管理没有承重字段，
-     * 全部字段定义都会经过这条动态校验管线。
-     */
-    private static final Set<String> ALLOWED_DYNAMIC_COLUMNS = Set.of(
-            "position_address", "position_phone", "show_order", "remark",
-            "ext1", "ext2", "ext3", "ext4", "ext5", "ext6", "ext7", "ext8", "ext9", "ext10");
-
     /** 用户任职记录数据访问接口。 */
     private final UserPositionMapper userPositionMapper;
 
@@ -64,8 +54,14 @@ public class PositionServiceImpl implements PositionService {
     /** 操作日志记录组件。 */
     private final OperationLogRecorder operationLogRecorder;
 
-    /** 表单字段定义业务逻辑接口，用于驱动非锁定字段的必填/正则/唯一性校验。 */
+    /** 表单字段定义业务逻辑接口，用于回查操作日志快照所需的启用字段定义。 */
     private final FormFieldDefinitionService formFieldDefinitionService;
+
+    /**
+     * {@code bizType=POSITION} 动态字段（必填/正则/唯一性）校验的共享组件，与用户管理
+     * 内嵌任职子表单（{@code UserServiceImpl}）共用同一份校验逻辑。
+     */
+    private final PositionDynamicFieldSupport positionDynamicFieldSupport;
 
     /**
      * {@inheritDoc}
@@ -98,7 +94,7 @@ public class PositionServiceImpl implements PositionService {
      */
     @Override
     public PositionVO create(PositionCreateRequest request) {
-        validateDynamicFields(request, true, null);
+        positionDynamicFieldSupport.validate(request, true, null);
 
         UserPositionEntity entity = PositionConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
@@ -121,7 +117,7 @@ public class PositionServiceImpl implements PositionService {
     @Override
     public PositionVO update(Long id, PositionUpdateRequest request) {
         UserPositionEntity entity = getExistingEntity(id);
-        validateDynamicFields(request, false, id);
+        positionDynamicFieldSupport.validate(request, false, id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         PositionConvert.INSTANCE.updateEntity(request, entity);
@@ -203,26 +199,6 @@ public class PositionServiceImpl implements PositionService {
     }
 
     /**
-     * 对适用于当前场景的字段定义执行必填、正则、唯一性校验（design.md Decision 9）。
-     * 任职管理没有承重字段，{@code formFieldDefinitionService.listActiveByBizType}
-     * 返回的全部定义都会参与这条校验管线。
-     *
-     * @param request   创建或更新请求，按 {@code fieldCode} 反射读取字段值
-     * @param creating  是否为新增场景
-     * @param excludeId 更新场景下需要排除的自身 id，创建场景传 {@code null}
-     */
-    private void validateDynamicFields(Object request, boolean creating, Long excludeId) {
-        List<FormFieldDefinitionVO> definitions =
-                formFieldDefinitionService.listActiveByBizType(FormFieldBizType.POSITION);
-        DynamicFieldValidator.validate(definitions, request, creating, (column, value) -> {
-            if (!ALLOWED_DYNAMIC_COLUMNS.contains(column)) {
-                throw new BusinessException("非法的动态字段列名：" + column);
-            }
-            return userPositionMapper.countByColumnValue(column, value, excludeId);
-        });
-    }
-
-    /**
      * 构造任职记录的操作日志被操作对象名称快照："所属用户姓名-所属组织名称"，
      * 任职记录本身没有独立的名称字段。
      *
@@ -239,7 +215,8 @@ public class PositionServiceImpl implements PositionService {
 
     /**
      * 构造任职记录实体的操作日志字段快照，key 为中文字段名，value 为人类可读的格式化值；
-     * 所属用户姓名、所属组织名称需分别按 {@code userId}/{@code orgId} 回查一次。
+     * 所属用户姓名、所属组织名称需分别按 {@code userId}/{@code orgId} 回查一次；末尾追加
+     * 当前启用的 {@code ext1}..{@code ext10} 扩展字段（key 使用字段定义的展示名）。
      *
      * @param entity 任职记录实体
      * @return 操作日志字段快照
@@ -257,7 +234,33 @@ public class PositionServiceImpl implements PositionService {
         snapshot.put("显示序号", entity.getShowOrder());
         snapshot.put("备注", entity.getRemark());
         snapshot.put("状态", statusLabel(entity.getStatus()));
+
+        List<FormFieldDefinitionVO> definitions =
+                formFieldDefinitionService.listActiveByBizType(FormFieldBizType.POSITION);
+        FormFieldSnapshotSupport.appendExtFieldSnapshot(snapshot, definitions, extValues(entity));
         return snapshot;
+    }
+
+    /**
+     * 把任职记录实体的 {@code ext1}..{@code ext10} 逐一收集为列名到当前值的映射，
+     * 供 {@link FormFieldSnapshotSupport#appendExtFieldSnapshot} 使用。
+     *
+     * @param entity 任职记录实体
+     * @return {@code ext1}..{@code ext10} 列名到当前值的映射
+     */
+    private Map<String, String> extValues(UserPositionEntity entity) {
+        Map<String, String> values = new LinkedHashMap<>();
+        values.put("ext1", entity.getExt1());
+        values.put("ext2", entity.getExt2());
+        values.put("ext3", entity.getExt3());
+        values.put("ext4", entity.getExt4());
+        values.put("ext5", entity.getExt5());
+        values.put("ext6", entity.getExt6());
+        values.put("ext7", entity.getExt7());
+        values.put("ext8", entity.getExt8());
+        values.put("ext9", entity.getExt9());
+        values.put("ext10", entity.getExt10());
+        return values;
     }
 
     /**
