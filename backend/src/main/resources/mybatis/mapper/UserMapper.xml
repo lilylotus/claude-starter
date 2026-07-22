@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 用户管理的动态列唯一性校验：column 只接受调用方（UserServiceImpl）从
+     tab_metadata_field 目录解析得到、并经白名单校验的合法列名，不接受任意字符串
+     拼接，避免 SQL 注入（design.md Decision 8）。-1000 为 UserStatus.DELETED 的字面量，
+     与其他状态常量类保持一致，不再单独传参。 -->
+<mapper namespace="cn.nihility.rbac.user.mapper.UserMapper">
+
+    <select id="countByColumnValue" resultType="int">
+        SELECT COUNT(*)
+        FROM tab_user
+        WHERE status != -1000
+        AND ${column} = #{value}
+        <if test="excludeId != null">AND id != #{excludeId}</if>
+    </select>
+
+</mapper>

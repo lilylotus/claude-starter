@@ -39,6 +39,8 @@ export const MENU_GROUPS: MenuGroup[] = [
     children: [
       { title: '菜单管理', path: '/system/menus', permissionKey: 'system:menu:view' },
       { title: '字典管理', path: '/system/dicts', permissionKey: 'system:dict:view' },
+      { title: '元数据配置', path: '/system/metadata-fields', permissionKey: 'system:metadataField:view' },
+      { title: '表单管理', path: '/system/form-fields', permissionKey: 'system:formField:view' },
       { title: '操作日志', path: '/system/logs', permissionKey: 'system:log:view' },
     ],
   },

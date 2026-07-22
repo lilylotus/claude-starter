@@ -9,12 +9,19 @@ import * as orgApi from '@/api/org'
 import * as userApi from '@/api/user'
 import { APP_STATUS_ENABLED, type AppFormRequest, type AppRow } from '@/types/app'
 import type { OrgTreeNode } from '@/types/org'
+import { useDynamicFormFields } from '@/composables/useDynamicFormFields'
+import { FORM_FIELD_CONTROL_TYPE_DICT, FORM_FIELD_CONTROL_TYPE_NUMBER, FORM_FIELD_CONTROL_TYPE_TEXT } from '@/types/formField'
 
 const appStore = useAppStore()
 const router = useRouter()
 
+// 除负责人（ownerId）、所属组织（orgId）、启停用状态（status）外的全部字段
+// （含原有表字段与 ext1~ext10）统一按"表单字段定义"（bizType=APP）动态渲染，见 design.md 决策 12
+const appFields = useDynamicFormFields('APP')
+
 onMounted(() => {
   appStore.fetchPage()
+  appFields.fetchSchema()
   // 全量组织树（orgTree，供新增/编辑弹窗内“所属组织”选择器用）不在这里预加载：
   // 只有打开弹窗时才需要它，此处预加载会让绝大多数只浏览应用列表的页面访问都白白
   // 发一次 GET /api/orgs/tree（见 openCreateDialog/openEditDialog）
@@ -71,31 +78,33 @@ const submitting = ref(false)
 const formRef = ref<FormInstance>()
 
 // ownerId/orgId 在校验通过前允许暂时为空（由用户手动选择），因此不直接复用
-// AppFormRequest（其字段类型是提交给后端时已确定非空的 number）
-interface AppForm {
-  name: string
-  code: string
+// AppFormRequest（其字段类型是提交给后端时已确定非空的 number）；其余字段
+// （name/code/showOrder/remark/ext1~ext10）由 appFields 动态渲染驱动，
+// key 为各自绑定的 columnName
+interface AppFormStatic {
   ownerId: number | null
   orgId: number | null
-  showOrder: number
-  remark: string
 }
+
+type AppForm = AppFormStatic & Record<string, unknown>
 
 const form = reactive<AppForm>({
-  name: '',
-  code: '',
   ownerId: null,
   orgId: null,
-  showOrder: 0,
-  remark: '',
 })
 
-const rules: FormRules<AppForm> = {
-  name: [{ required: true, message: '请输入应用名称', trigger: 'blur' }],
-  code: [{ required: true, message: '请输入应用编码', trigger: 'blur' }],
+// 保留 form 里指定 key（如 ownerId/orgId），清空其余动态字段的 key，供每次打开弹窗前重置
+function resetDynamicKeys(target: Record<string, unknown>, keep: string[]) {
+  Object.keys(target).forEach((key) => {
+    if (!keep.includes(key)) delete target[key]
+  })
+}
+
+const rules = computed<FormRules>(() => ({
   ownerId: [{ required: true, message: '请选择负责人', trigger: 'change' }],
   orgId: [{ required: true, message: '请选择所属组织', trigger: 'change' }],
-}
+  ...(dialogMode.value === 'create' ? appFields.createRules : appFields.editRules),
+}))
 
 const dialogTitle = computed(() => (dialogMode.value === 'create' ? '新增应用' : '编辑应用'))
 
@@ -103,12 +112,10 @@ async function openCreateDialog() {
   await fetchOrgTree()
   dialogMode.value = 'create'
   editingId.value = null
-  form.name = ''
-  form.code = ''
+  resetDynamicKeys(form, ['ownerId', 'orgId'])
+  Object.assign(form, appFields.buildFormModel(appFields.createFields))
   form.ownerId = null
   form.orgId = null
-  form.showOrder = 0
-  form.remark = ''
   ownerOptions.value = []
   dialogVisible.value = true
 }
@@ -118,12 +125,10 @@ async function openEditDialog(row: AppRow) {
   editingId.value = row.id
   const detail = await appApi.getAppById(row.id)
   await fetchOrgTree()
-  form.name = detail.name
-  form.code = detail.code
+  resetDynamicKeys(form, ['ownerId', 'orgId'])
+  Object.assign(form, appFields.buildFormModel(appFields.editFields, detail))
   form.ownerId = detail.ownerId
   form.orgId = detail.orgId
-  form.showOrder = detail.showOrder
-  form.remark = detail.remark
   // 回显负责人选项，避免刚打开编辑弹窗时下拉框因搜索结果为空而显示不出已选中的负责人姓名
   ownerOptions.value = [{ id: detail.ownerId, name: detail.ownerName, mobile: '' }]
   dialogVisible.value = true
@@ -141,14 +146,11 @@ async function submitForm() {
   submitting.value = true
   try {
     // 上面的表单校验已经确保 ownerId/orgId 必填，此处已知非空
-    const payload: AppFormRequest = {
-      name: form.name,
-      code: form.code,
+    const payload = {
+      ...form,
       ownerId: form.ownerId as number,
       orgId: form.orgId as number,
-      showOrder: form.showOrder,
-      remark: form.remark,
-    }
+    } as unknown as AppFormRequest
     if (dialogMode.value === 'create') {
       await appApi.createApp(payload)
       ElMessage.success('新增成功')
@@ -203,8 +205,19 @@ async function handleDelete(row: AppRow) {
       </header>
 
       <el-table v-loading="appStore.listLoading" :data="appStore.list" empty-text="暂无应用">
-        <el-table-column prop="name" label="应用名称" min-width="140" />
-        <el-table-column prop="code" label="应用编码" min-width="120" />
+        <el-table-column
+          v-for="col in appFields.listColumns"
+          :key="col.fieldCode"
+          :label="col.fieldName"
+          min-width="120"
+        >
+          <template #default="{ row }">
+            <span v-if="col.controlType === FORM_FIELD_CONTROL_TYPE_DICT">
+              {{ appFields.dictOptionLabel(col, (row as Record<string, unknown>)[col.columnName]) }}
+            </span>
+            <span v-else>{{ (row as Record<string, unknown>)[col.columnName] }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="ownerName" label="负责人" min-width="100" />
         <el-table-column prop="orgName" label="所属组织" min-width="140" />
         <el-table-column label="状态" width="90">
@@ -213,7 +226,6 @@ async function handleDelete(row: AppRow) {
             <el-tag v-else type="warning">停用</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="showOrder" label="显示序号" width="90" />
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="goToDetail(row as AppRow)">详情</el-button>
@@ -243,12 +255,6 @@ async function handleDelete(row: AppRow) {
 
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="560px" @close="closeDialog">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
-        <el-form-item label="应用名称" prop="name">
-          <el-input v-model="form.name" placeholder="请输入应用名称" />
-        </el-form-item>
-        <el-form-item label="应用编码" prop="code">
-          <el-input v-model="form.code" placeholder="请输入应用编码" />
-        </el-form-item>
         <el-form-item label="负责人" prop="ownerId">
           <el-select
             v-model="form.ownerId"
@@ -279,12 +285,35 @@ async function handleDelete(row: AppRow) {
             style="width: 100%"
           />
         </el-form-item>
-        <el-form-item label="显示序号" prop="showOrder">
-          <el-input-number v-model="form.showOrder" :min="0" style="width: 100%" />
-          <div class="app-form-hint">数值越大，排序越靠前</div>
-        </el-form-item>
-        <el-form-item label="备注" prop="remark">
-          <el-input v-model="form.remark" type="textarea" :rows="3" placeholder="选填" />
+        <el-form-item
+          v-for="item in (dialogMode === 'create' ? appFields.createFields : appFields.editFields)"
+          :key="item.fieldCode"
+          :label="item.fieldName"
+          :prop="item.columnName"
+        >
+          <el-input
+            v-if="item.controlType === FORM_FIELD_CONTROL_TYPE_TEXT"
+            v-model="(form[item.columnName] as string)"
+            :placeholder="item.placeholder || `请输入${item.fieldName}`"
+            :disabled="!item.editable"
+          />
+          <el-input-number
+            v-else-if="item.controlType === FORM_FIELD_CONTROL_TYPE_NUMBER"
+            v-model="(form[item.columnName] as number)"
+            :min="0"
+            style="width: 100%"
+            :disabled="!item.editable"
+          />
+          <template v-else>
+            <el-select
+              v-model="(form[item.columnName] as string)"
+              :placeholder="item.placeholder || `请选择${item.fieldName}`"
+              :disabled="!item.editable"
+              style="width: 100%"
+            >
+              <el-option v-for="opt in item.dictOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+            </el-select>
+          </template>
         </el-form-item>
       </el-form>
       <template #footer>

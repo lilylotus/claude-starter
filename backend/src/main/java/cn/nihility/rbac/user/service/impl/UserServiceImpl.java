@@ -2,6 +2,10 @@ package cn.nihility.rbac.user.service.impl;
 
 import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.formfield.constant.FormFieldBizType;
+import cn.nihility.rbac.formfield.dto.FormFieldDefinitionVO;
+import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
+import cn.nihility.rbac.formfield.support.DynamicFieldValidator;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.entity.OrgEntity;
@@ -44,6 +48,17 @@ public class UserServiceImpl implements UserService {
     /** 当前项目尚未接入登录鉴权，创建人/更新人暂时固定为该值。 */
     private static final String DEFAULT_OPERATOR = "admin";
 
+    /**
+     * {@code bizType=USER} 下允许被动态字段唯一性校验拼进 {@code ${column}} 的列名
+     * 白名单，取自 {@code tab_metadata_field} 目录里 USER 的原有可配置列 +
+     * {@code ext1}..{@code ext10}（design.md Decision 3/8）。身份证号（{@code idCard}）
+     * 的唯一性校验已从此前的硬编码 {@code checkIdCardUnique} 迁移到这条数据驱动管线，
+     * 由默认字段定义（{@code isUnique=true}）驱动，管理员可在"表单管理"页面调整。
+     */
+    private static final Set<String> ALLOWED_DYNAMIC_COLUMNS = Set.of(
+            "name", "code", "mobile", "id_card", "show_order", "remark",
+            "ext1", "ext2", "ext3", "ext4", "ext5", "ext6", "ext7", "ext8", "ext9", "ext10");
+
     /** 用户数据访问接口。 */
     private final UserMapper userMapper;
 
@@ -55,6 +70,9 @@ public class UserServiceImpl implements UserService {
 
     /** 操作日志记录组件。 */
     private final OperationLogRecorder operationLogRecorder;
+
+    /** 表单字段定义业务逻辑接口，用于驱动非锁定字段的必填/正则/唯一性校验。 */
+    private final FormFieldDefinitionService formFieldDefinitionService;
 
     /**
      * {@inheritDoc}
@@ -92,7 +110,7 @@ public class UserServiceImpl implements UserService {
     @Override
     public UserVO create(UserCreateRequest request) {
         checkCodeUnique(request.getCode(), null);
-        checkIdCardUnique(request.getIdCard(), null);
+        validateDynamicFields(request, true, null);
 
         UserEntity entity = UserConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
@@ -118,7 +136,7 @@ public class UserServiceImpl implements UserService {
     public UserVO update(Long id, UserUpdateRequest request) {
         UserEntity entity = getExistingEntity(id);
         checkCodeUnique(request.getCode(), id);
-        checkIdCardUnique(request.getIdCard(), id);
+        validateDynamicFields(request, false, id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         UserConvert.INSTANCE.updateEntity(request, entity);
@@ -221,25 +239,25 @@ public class UserServiceImpl implements UserService {
     }
 
     /**
-     * 校验身份证号（若提供）在未删除的用户中是否唯一。
+     * 对非锁定（{@code locked=false}）且适用于当前场景的字段定义执行必填、正则、
+     * 唯一性校验（design.md Decision 9）。{@code name}/{@code code} 属于承重字段，
+     * 已被 {@link FormFieldDefinitionService#listActiveByBizType} 排除，不受本方法
+     * 影响，继续依赖上面既有的 {@code checkCodeUnique}/Bean Validation；身份证号的
+     * 唯一性校验由本方法驱动（默认字段定义 {@code isUnique=true}），不再单独硬编码。
      *
-     * @param idCard    待校验的身份证号，为空时不做校验
-     * @param excludeId 更新场景下需要排除的自身 id，创建场景传 null
+     * @param request   创建或更新请求，按 {@code fieldCode} 反射读取字段值
+     * @param creating  是否为新增场景
+     * @param excludeId 更新场景下需要排除的自身 id，创建场景传 {@code null}
      */
-    private void checkIdCardUnique(String idCard, Long excludeId) {
-        if (!StringUtils.hasText(idCard)) {
-            return;
-        }
-        LambdaQueryWrapper<UserEntity> wrapper = new LambdaQueryWrapper<UserEntity>()
-                .eq(UserEntity::getIdCard, idCard)
-                .ne(UserEntity::getStatus, UserStatus.DELETED);
-        if (excludeId != null) {
-            wrapper.ne(UserEntity::getId, excludeId);
-        }
-        Long count = userMapper.selectCount(wrapper);
-        if (count != null && count > 0) {
-            throw new BusinessException("身份证号[" + idCard + "]已存在");
-        }
+    private void validateDynamicFields(Object request, boolean creating, Long excludeId) {
+        List<FormFieldDefinitionVO> definitions =
+                formFieldDefinitionService.listActiveByBizType(FormFieldBizType.USER);
+        DynamicFieldValidator.validate(definitions, request, creating, (column, value) -> {
+            if (!ALLOWED_DYNAMIC_COLUMNS.contains(column)) {
+                throw new BusinessException("非法的动态字段列名：" + column);
+            }
+            return userMapper.countByColumnValue(column, value, excludeId);
+        });
     }
 
     /**

@@ -17,12 +17,19 @@ import {
 } from '@/types/user'
 import type { OrgTreeNode } from '@/types/org'
 import type { DictItemOption } from '@/types/dict'
+import { useDynamicFormFields } from '@/composables/useDynamicFormFields'
+import { FORM_FIELD_CONTROL_TYPE_DICT, FORM_FIELD_CONTROL_TYPE_NUMBER, FORM_FIELD_CONTROL_TYPE_TEXT } from '@/types/formField'
 
 const userStore = useUserStore()
 const router = useRouter()
 
+// 除性别（gender）、启停用状态（status）外的全部字段（含原有表字段与 ext1~ext10）
+// 统一按"表单字段定义"（bizType=USER）动态渲染，见 design.md 决策 12
+const userFields = useDynamicFormFields('USER')
+
 onMounted(() => {
   userStore.fetchPage()
+  userFields.fetchSchema()
   fetchPositionTypeOptions()
   // 全量组织树（orgTree，供新增/编辑弹窗内任职子表单“所属组织”选择器用）不在这里预加载：
   // 只有打开弹窗时才需要它，此处预加载会让绝大多数只浏览/搜索用户列表的页面访问都白白
@@ -93,40 +100,23 @@ function blankPosition(): UserPositionFormItem {
   }
 }
 
-const form = reactive<UserFormRequest>({
-  name: '',
-  code: '',
-  gender: 0,
-  mobile: '',
-  idCard: '',
-  showOrder: 0,
-  remark: '',
-  positions: [],
-})
+// gender/positions 保持静态声明；其余字段（name/code/mobile/idCard/showOrder/remark/
+// ext1~ext10）由 userFields 动态渲染驱动，key 为各自绑定的 columnName
+type UserForm = { gender: number; positions: UserPositionFormItem[] } & Record<string, unknown>
 
-function validateMobile(_rule: unknown, value: string, callback: (error?: Error) => void) {
-  if (!value || /^1\d{10}$/.test(value)) {
-    callback()
-    return
-  }
-  callback(new Error('手机号格式不正确'))
+const form = reactive<UserForm>({ gender: 0, positions: [] })
+
+// 保留 form 里指定 key（如 gender/positions），清空其余动态字段的 key，供每次打开弹窗前重置
+function resetDynamicKeys(target: Record<string, unknown>, keep: string[]) {
+  Object.keys(target).forEach((key) => {
+    if (!keep.includes(key)) delete target[key]
+  })
 }
 
-function validateIdCard(_rule: unknown, value: string, callback: (error?: Error) => void) {
-  if (!value || /^\d{15}$/.test(value) || /^\d{17}[0-9Xx]$/.test(value)) {
-    callback()
-    return
-  }
-  callback(new Error('身份证号格式不正确'))
-}
-
-const rules: FormRules<UserFormRequest> = {
-  name: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
-  code: [{ required: true, message: '请输入编号', trigger: 'blur' }],
+const rules = computed<FormRules>(() => ({
   gender: [{ required: true, message: '请选择性别', trigger: 'change' }],
-  mobile: [{ validator: validateMobile, trigger: 'blur' }],
-  idCard: [{ validator: validateIdCard, trigger: 'blur' }],
-}
+  ...(dialogMode.value === 'create' ? userFields.createRules : userFields.editRules),
+}))
 
 // 任职信息子表单每行的独立校验规则，通过动态 prop（positions.{index}.xxx）挂载
 const positionOrgRule = [{ required: true, message: '请选择所属组织', trigger: 'change' }]
@@ -142,23 +132,15 @@ function removePositionRow(index: number) {
   form.positions.splice(index, 1)
 }
 
-function resetForm() {
-  form.name = ''
-  form.code = ''
-  form.gender = 0
-  form.mobile = ''
-  form.idCard = ''
-  form.showOrder = 0
-  form.remark = ''
-  form.positions = []
-}
-
 // 任职子表单“所属组织”选择器要用的全量组织树只在真正打开弹窗时才按需请求
 async function openCreateDialog() {
   await fetchOrgTree()
   dialogMode.value = 'create'
   editingId.value = null
-  resetForm()
+  resetDynamicKeys(form, ['gender', 'positions'])
+  Object.assign(form, userFields.buildFormModel(userFields.createFields))
+  form.gender = 0
+  form.positions = []
   dialogVisible.value = true
 }
 
@@ -167,13 +149,9 @@ async function openEditDialog(row: UserRow) {
   editingId.value = row.id
   const detail = await userApi.getUserById(row.id)
   await fetchOrgTree()
-  form.name = detail.name
-  form.code = detail.code
+  resetDynamicKeys(form, ['gender', 'positions'])
+  Object.assign(form, userFields.buildFormModel(userFields.editFields, detail))
   form.gender = detail.gender
-  form.mobile = detail.mobile
-  form.idCard = detail.idCard
-  form.showOrder = detail.showOrder
-  form.remark = detail.remark
   form.positions = detail.positions.map((position) => ({
     id: position.id,
     orgId: position.orgId,
@@ -198,13 +176,13 @@ async function submitForm() {
   submitting.value = true
   try {
     // 上面的表单校验已确保每一行任职记录的 orgId 必填，此处已知非空
-    const payload: UserFormRequest = {
+    const payload = {
       ...form,
       positions: form.positions.map((position) => ({
         ...position,
         orgId: position.orgId as number,
       })),
-    }
+    } as unknown as UserFormRequest
     if (dialogMode.value === 'create') {
       await userApi.createUser(payload)
       ElMessage.success('新增成功')
@@ -288,20 +266,28 @@ async function handleDelete(row: UserRow) {
       </div>
 
       <el-table v-loading="userStore.loading" :data="userStore.list">
-        <el-table-column prop="name" label="姓名" min-width="100" />
-        <el-table-column prop="code" label="编号" min-width="100" />
+        <el-table-column
+          v-for="col in userFields.listColumns"
+          :key="col.fieldCode"
+          :label="col.fieldName"
+          min-width="120"
+        >
+          <template #default="{ row }">
+            <span v-if="col.controlType === FORM_FIELD_CONTROL_TYPE_DICT">
+              {{ userFields.dictOptionLabel(col, (row as Record<string, unknown>)[col.columnName]) }}
+            </span>
+            <span v-else>{{ (row as Record<string, unknown>)[col.columnName] }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="性别" width="80">
           <template #default="{ row }">{{ genderLabel((row as UserRow).gender) }}</template>
         </el-table-column>
-        <el-table-column prop="mobile" label="手机号" min-width="120" />
-        <el-table-column prop="idCard" label="身份证号" min-width="160" />
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
             <el-tag v-if="(row as UserRow).status === USER_STATUS_ENABLED" type="success">启用</el-tag>
             <el-tag v-else type="warning">停用</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="showOrder" label="显示序号" width="90" />
         <el-table-column label="操作" width="280" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="goToDetail(row as UserRow)">详情</el-button>
@@ -332,30 +318,42 @@ async function handleDelete(row: UserRow) {
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="760px" @close="closeDialog">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
         <div class="user-form-grid">
-          <el-form-item label="姓名" prop="name">
-            <el-input v-model="form.name" placeholder="请输入姓名" />
-          </el-form-item>
-          <el-form-item label="编号" prop="code">
-            <el-input v-model="form.code" placeholder="请输入编号" />
-          </el-form-item>
           <el-form-item label="性别" prop="gender">
             <el-select v-model="form.gender" style="width: 100%">
               <el-option v-for="opt in USER_GENDER_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
             </el-select>
           </el-form-item>
-          <el-form-item label="手机号" prop="mobile">
-            <el-input v-model="form.mobile" placeholder="选填" />
-          </el-form-item>
-          <el-form-item label="身份证号" prop="idCard">
-            <el-input v-model="form.idCard" placeholder="选填" />
-          </el-form-item>
-          <el-form-item label="显示序号" prop="showOrder">
-            <el-input-number v-model="form.showOrder" :min="0" style="width: 100%" />
+          <el-form-item
+            v-for="item in (dialogMode === 'create' ? userFields.createFields : userFields.editFields)"
+            :key="item.fieldCode"
+            :label="item.fieldName"
+            :prop="item.columnName"
+          >
+            <el-input
+              v-if="item.controlType === FORM_FIELD_CONTROL_TYPE_TEXT"
+              v-model="(form[item.columnName] as string)"
+              :placeholder="item.placeholder || `请输入${item.fieldName}`"
+              :disabled="!item.editable"
+            />
+            <el-input-number
+              v-else-if="item.controlType === FORM_FIELD_CONTROL_TYPE_NUMBER"
+              v-model="(form[item.columnName] as number)"
+              :min="0"
+              style="width: 100%"
+              :disabled="!item.editable"
+            />
+            <template v-else>
+              <el-select
+                v-model="(form[item.columnName] as string)"
+                :placeholder="item.placeholder || `请选择${item.fieldName}`"
+                :disabled="!item.editable"
+                style="width: 100%"
+              >
+                <el-option v-for="opt in item.dictOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+              </el-select>
+            </template>
           </el-form-item>
         </div>
-        <el-form-item label="备注" prop="remark">
-          <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="选填" />
-        </el-form-item>
 
         <div class="user-position-section">
           <div class="user-position-section__header">

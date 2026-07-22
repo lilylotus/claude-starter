@@ -122,6 +122,24 @@ DictManagement（字典管理，/system/dicts）
 - DictManagement:dictItem:delete    删除字典项
 （字典项没有独立页面级 view，复用 DictManagement:dictType:view）
 
+MetadataFieldManagement（元数据配置，/system/metadata-fields）
+- MetadataFieldManagement:metadataField:view      元数据配置页面访问
+- MetadataFieldManagement:metadataField:edit      编辑元数据字段（仅字段名称可改）
+- MetadataFieldManagement:metadataField:detail    查看元数据字段详情
+- MetadataFieldManagement:metadataField:enable    启用元数据字段
+- MetadataFieldManagement:metadataField:disable   停用元数据字段
+（目录只能通过数据库迁移预置，页面不提供新增/删除入口，故没有 add/delete）
+
+FormFieldManagement（表单管理，/system/form-fields）
+- FormFieldManagement:formField:view      表单管理页面访问
+- FormFieldManagement:formField:add       新增表单字段定义（从元数据配置目录选择可用字段绑定）
+- FormFieldManagement:formField:edit      编辑表单字段定义
+- FormFieldManagement:formField:detail    查看表单字段定义详情
+- FormFieldManagement:formField:enable    启用表单字段定义
+- FormFieldManagement:formField:disable   停用表单字段定义
+- FormFieldManagement:formField:delete    删除表单字段定义
+（绑定组织/用户/应用 name、code 等承重字段的定义不可停用/删除，页面按此隐藏对应按钮）
+
 OperationLogManagement（操作日志管理，/system/logs）
 - OperationLogManagement:log:view      操作日志管理页面访问
 （只读页面，仅支持分页查询与详情，没有 add/edit/enable/disable/delete）

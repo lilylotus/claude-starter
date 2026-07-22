@@ -2,6 +2,10 @@ package cn.nihility.rbac.user.service.impl;
 
 import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.formfield.constant.FormFieldBizType;
+import cn.nihility.rbac.formfield.dto.FormFieldDefinitionVO;
+import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
+import cn.nihility.rbac.formfield.support.DynamicFieldValidator;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.entity.OrgEntity;
@@ -20,8 +24,10 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -36,6 +42,16 @@ public class PositionServiceImpl implements PositionService {
     /** 当前项目尚未接入登录鉴权，创建人/更新人暂时固定为该值。 */
     private static final String DEFAULT_OPERATOR = "admin";
 
+    /**
+     * {@code bizType=POSITION} 下允许被动态字段唯一性校验拼进 {@code ${column}} 的
+     * 列名白名单，取自 {@code tab_metadata_field} 目录里 POSITION 的原有可配置列 +
+     * {@code ext1}..{@code ext10}（design.md Decision 3/8）。任职管理没有承重字段，
+     * 全部字段定义都会经过这条动态校验管线。
+     */
+    private static final Set<String> ALLOWED_DYNAMIC_COLUMNS = Set.of(
+            "position_address", "position_phone", "show_order", "remark",
+            "ext1", "ext2", "ext3", "ext4", "ext5", "ext6", "ext7", "ext8", "ext9", "ext10");
+
     /** 用户任职记录数据访问接口。 */
     private final UserPositionMapper userPositionMapper;
 
@@ -47,6 +63,9 @@ public class PositionServiceImpl implements PositionService {
 
     /** 操作日志记录组件。 */
     private final OperationLogRecorder operationLogRecorder;
+
+    /** 表单字段定义业务逻辑接口，用于驱动非锁定字段的必填/正则/唯一性校验。 */
+    private final FormFieldDefinitionService formFieldDefinitionService;
 
     /**
      * {@inheritDoc}
@@ -79,6 +98,8 @@ public class PositionServiceImpl implements PositionService {
      */
     @Override
     public PositionVO create(PositionCreateRequest request) {
+        validateDynamicFields(request, true, null);
+
         UserPositionEntity entity = PositionConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(PositionStatus.ENABLED);
@@ -100,6 +121,7 @@ public class PositionServiceImpl implements PositionService {
     @Override
     public PositionVO update(Long id, PositionUpdateRequest request) {
         UserPositionEntity entity = getExistingEntity(id);
+        validateDynamicFields(request, false, id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         PositionConvert.INSTANCE.updateEntity(request, entity);
@@ -178,6 +200,26 @@ public class PositionServiceImpl implements PositionService {
             throw new BusinessException("任职记录不存在");
         }
         return entity;
+    }
+
+    /**
+     * 对适用于当前场景的字段定义执行必填、正则、唯一性校验（design.md Decision 9）。
+     * 任职管理没有承重字段，{@code formFieldDefinitionService.listActiveByBizType}
+     * 返回的全部定义都会参与这条校验管线。
+     *
+     * @param request   创建或更新请求，按 {@code fieldCode} 反射读取字段值
+     * @param creating  是否为新增场景
+     * @param excludeId 更新场景下需要排除的自身 id，创建场景传 {@code null}
+     */
+    private void validateDynamicFields(Object request, boolean creating, Long excludeId) {
+        List<FormFieldDefinitionVO> definitions =
+                formFieldDefinitionService.listActiveByBizType(FormFieldBizType.POSITION);
+        DynamicFieldValidator.validate(definitions, request, creating, (column, value) -> {
+            if (!ALLOWED_DYNAMIC_COLUMNS.contains(column)) {
+                throw new BusinessException("非法的动态字段列名：" + column);
+            }
+            return userPositionMapper.countByColumnValue(column, value, excludeId);
+        });
     }
 
     /**

@@ -45,6 +45,18 @@ export interface UserRow {
   idCard: string
   showOrder: number
   remark: string
+  // ext1~ext10：可开放配置的扩展字段，是否展示/可编辑由"表单字段定义"（bizType=USER）驱动，
+  // 未被任何启用字段定义绑定时恒为空
+  ext1?: string
+  ext2?: string
+  ext3?: string
+  ext4?: string
+  ext5?: string
+  ext6?: string
+  ext7?: string
+  ext8?: string
+  ext9?: string
+  ext10?: string
   status: number
   positions: UserPositionRow[]
   createBy: string
@@ -77,6 +89,16 @@ export interface UserFormRequest {
   idCard: string
   showOrder: number
   remark: string
+  ext1?: string
+  ext2?: string
+  ext3?: string
+  ext4?: string
+  ext5?: string
+  ext6?: string
+  ext7?: string
+  ext8?: string
+  ext9?: string
+  ext10?: string
   positions: UserPositionFormItem[]
 }
 

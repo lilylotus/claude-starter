@@ -3,12 +3,14 @@ package cn.nihility.rbac.org.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.constant.OrgStatus;
 import cn.nihility.rbac.org.dto.OrgCreateRequest;
@@ -41,16 +43,22 @@ class OrgServiceImplTest {
     @Mock
     private OperationLogRecorder operationLogRecorder;
 
+    /** 被测服务的表单字段定义业务逻辑依赖，使用 Mockito 打桩。 */
+    @Mock
+    private FormFieldDefinitionService formFieldDefinitionService;
+
     /** 被测服务实例。 */
     private OrgServiceImpl orgService;
 
     /**
      * 每个用例执行前重新构造被测服务；实体/DTO 转换通过 {@code OrgConvert.INSTANCE}
-     * 静态调用完成，无需在此注入或 mock。
+     * 静态调用完成，无需在此注入或 mock。动态字段定义默认桩为空列表，
+     * 各分支逻辑测试不受"表单字段定义"驱动的校验管线影响。
      */
     @BeforeEach
     void setUp() {
-        orgService = new OrgServiceImpl(orgMapper, operationLogRecorder);
+        orgService = new OrgServiceImpl(orgMapper, operationLogRecorder, formFieldDefinitionService);
+        lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
     }
 
     /**

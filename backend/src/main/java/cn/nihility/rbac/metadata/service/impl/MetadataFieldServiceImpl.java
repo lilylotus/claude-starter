@@ -1,0 +1,192 @@
+package cn.nihility.rbac.metadata.service.impl;
+
+import cn.nihility.rbac.common.PageResult;
+import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.formfield.mapper.FormFieldDefinitionMapper;
+import cn.nihility.rbac.metadata.constant.MetadataFieldStatus;
+import cn.nihility.rbac.metadata.dto.MetadataFieldUpdateRequest;
+import cn.nihility.rbac.metadata.dto.MetadataFieldVO;
+import cn.nihility.rbac.metadata.entity.MetadataFieldEntity;
+import cn.nihility.rbac.metadata.exception.MetadataFieldInUseException;
+import cn.nihility.rbac.metadata.mapper.MetadataFieldMapper;
+import cn.nihility.rbac.metadata.mapstruct.MetadataFieldConvert;
+import cn.nihility.rbac.metadata.service.MetadataFieldService;
+import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
+import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+
+/**
+ * 元数据字段配置业务逻辑实现。
+ */
+@Service
+@RequiredArgsConstructor
+public class MetadataFieldServiceImpl implements MetadataFieldService {
+
+    /** 当前项目尚未接入登录鉴权，创建人/更新人暂时固定为该值。 */
+    private static final String DEFAULT_OPERATOR = "admin";
+
+    /** 元数据字段数据访问接口。 */
+    private final MetadataFieldMapper metadataFieldMapper;
+
+    /** 表单字段定义数据访问接口，仅用于判断元数据字段是否被有效定义占用。 */
+    private final FormFieldDefinitionMapper formFieldDefinitionMapper;
+
+    /** 操作日志记录组件。 */
+    private final OperationLogRecorder operationLogRecorder;
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public PageResult<MetadataFieldVO> getPage(String bizType, Integer page, Integer pageSize) {
+        LambdaQueryWrapper<MetadataFieldEntity> wrapper = new LambdaQueryWrapper<MetadataFieldEntity>()
+                .eq(StringUtils.hasText(bizType), MetadataFieldEntity::getBizType, bizType)
+                .orderByAsc(MetadataFieldEntity::getId);
+
+        Page<MetadataFieldEntity> queryPage = new Page<>(page, pageSize);
+        Page<MetadataFieldEntity> resultPage = metadataFieldMapper.selectPage(queryPage, wrapper);
+        List<MetadataFieldVO> records = MetadataFieldConvert.INSTANCE.toVOList(resultPage.getRecords());
+        return PageResult.of(records, resultPage);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public MetadataFieldVO getById(Long id) {
+        return MetadataFieldConvert.INSTANCE.toVO(getExistingEntity(id));
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public MetadataFieldVO update(Long id, MetadataFieldUpdateRequest request) {
+        MetadataFieldEntity entity = getExistingEntity(id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+
+        MetadataFieldConvert.INSTANCE.updateEntity(request, entity);
+        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateTime(LocalDateTime.now());
+        metadataFieldMapper.updateById(entity);
+
+        operationLogRecorder.recordUpdate(OperationLogResourceType.METADATA_FIELD, id, entity.getFieldName(),
+                beforeSnapshot, toLogSnapshot(entity));
+
+        return getById(id);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public MetadataFieldVO enable(Long id) {
+        return changeStatus(id, MetadataFieldStatus.ENABLED);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public MetadataFieldVO disable(Long id) {
+        MetadataFieldEntity entity = getExistingEntity(id);
+        if (formFieldDefinitionMapper.existsActiveByMetadataFieldId(id)) {
+            throw new MetadataFieldInUseException(
+                    "元数据字段[" + entity.getFieldName() + "]已被表单字段定义绑定，无法停用");
+        }
+        return changeStatus(id, MetadataFieldStatus.DISABLED);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public List<MetadataFieldVO> listAvailable(String bizType) {
+        List<MetadataFieldEntity> enabled = metadataFieldMapper.selectList(new LambdaQueryWrapper<MetadataFieldEntity>()
+                .eq(MetadataFieldEntity::getBizType, bizType)
+                .eq(MetadataFieldEntity::getStatus, MetadataFieldStatus.ENABLED)
+                .orderByAsc(MetadataFieldEntity::getId));
+
+        List<MetadataFieldEntity> available = enabled.stream()
+                .filter(entity -> !formFieldDefinitionMapper.existsActiveByMetadataFieldId(entity.getId()))
+                .toList();
+        return MetadataFieldConvert.INSTANCE.toVOList(available);
+    }
+
+    /**
+     * 变更元数据字段状态（启用/停用）并返回更新后的详情。
+     *
+     * @param id     元数据字段 id
+     * @param status 目标状态
+     * @return 更新后的元数据字段详情
+     */
+    private MetadataFieldVO changeStatus(Long id, int status) {
+        MetadataFieldEntity entity = getExistingEntity(id);
+        Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+
+        entity.setStatus(status);
+        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateTime(LocalDateTime.now());
+        metadataFieldMapper.updateById(entity);
+
+        operationLogRecorder.recordStatusChange(OperationLogResourceType.METADATA_FIELD, id, entity.getFieldName(),
+                status == MetadataFieldStatus.ENABLED, beforeSnapshot, toLogSnapshot(entity));
+        return getById(id);
+    }
+
+    /**
+     * 查询一个元数据字段，不存在时抛出业务异常。
+     *
+     * @param id 元数据字段 id
+     * @return 元数据字段实体
+     */
+    private MetadataFieldEntity getExistingEntity(Long id) {
+        MetadataFieldEntity entity = metadataFieldMapper.selectById(id);
+        if (entity == null) {
+            throw new BusinessException("元数据字段不存在");
+        }
+        return entity;
+    }
+
+    /**
+     * 构造元数据字段实体的操作日志字段快照，key 为中文字段名，value 为人类可读的格式化值。
+     *
+     * @param entity 元数据字段实体
+     * @return 操作日志字段快照
+     */
+    private Map<String, Object> toLogSnapshot(MetadataFieldEntity entity) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("业务对象类型", entity.getBizType());
+        snapshot.put("表名称", entity.getTableName());
+        snapshot.put("字段列名", entity.getColumnName());
+        snapshot.put("字段类型", entity.getColumnType());
+        snapshot.put("字段名称", entity.getFieldName());
+        snapshot.put("状态", statusLabel(entity.getStatus()));
+        return snapshot;
+    }
+
+    /**
+     * 把元数据字段状态码值转换为中文文案，供操作日志快照使用。
+     *
+     * @param status 状态码值
+     * @return 中文文案
+     */
+    private String statusLabel(Integer status) {
+        if (Objects.equals(status, MetadataFieldStatus.ENABLED)) {
+            return "启用";
+        }
+        if (Objects.equals(status, MetadataFieldStatus.DISABLED)) {
+            return "停用";
+        }
+        return "已删除";
+    }
+}

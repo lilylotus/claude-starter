@@ -16,6 +16,7 @@ import cn.nihility.rbac.app.entity.AppEntity;
 import cn.nihility.rbac.app.mapper.AppMapper;
 import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.user.mapper.UserMapper;
@@ -54,18 +55,25 @@ class AppServiceImplTest {
     @Mock
     private OperationLogRecorder operationLogRecorder;
 
+    /** 被测服务的表单字段定义业务逻辑依赖，使用 Mockito 打桩。 */
+    @Mock
+    private FormFieldDefinitionService formFieldDefinitionService;
+
     /** 被测服务实例。 */
     private AppServiceImpl appService;
 
     /**
      * 每个用例执行前重新构造被测服务；实体/DTO 转换通过 {@code AppConvert.INSTANCE}
-     * 静态调用完成，无需在此注入或 mock。
+     * 静态调用完成，无需在此注入或 mock。动态字段定义默认桩为空列表，各分支逻辑测试
+     * 不受"表单字段定义"驱动的校验管线影响。
      */
     @BeforeEach
     void setUp() {
-        appService = new AppServiceImpl(appMapper, userMapper, orgMapper, operationLogRecorder);
+        appService = new AppServiceImpl(appMapper, userMapper, orgMapper, operationLogRecorder,
+                formFieldDefinitionService);
         lenient().when(userMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
+        lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
     }
 
     /**

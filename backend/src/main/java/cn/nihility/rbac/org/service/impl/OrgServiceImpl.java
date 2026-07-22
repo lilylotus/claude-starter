@@ -2,6 +2,10 @@ package cn.nihility.rbac.org.service.impl;
 
 import cn.nihility.rbac.common.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.formfield.constant.FormFieldBizType;
+import cn.nihility.rbac.formfield.dto.FormFieldDefinitionVO;
+import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
+import cn.nihility.rbac.formfield.support.DynamicFieldValidator;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.constant.OrgStatus;
@@ -39,11 +43,25 @@ public class OrgServiceImpl implements OrgService {
     /** 当前项目尚未接入登录鉴权，创建人/更新人暂时固定为该值。 */
     private static final String DEFAULT_OPERATOR = "admin";
 
+    /**
+     * {@code bizType=ORG} 下允许被动态字段唯一性校验拼进 {@code ${column}} 的列名
+     * 白名单，取自 {@code tab_metadata_field} 目录里 ORG 的原有可配置列 +
+     * {@code ext1}..{@code ext10}（design.md Decision 3/8）；{@code name}/
+     * {@code code} 虽然也在目录中，但属于承重字段，不会经过这条动态校验管线，
+     * 列入白名单只是双重防护，不影响实际调用路径。
+     */
+    private static final Set<String> ALLOWED_DYNAMIC_COLUMNS = Set.of(
+            "name", "code", "show_order", "remark",
+            "ext1", "ext2", "ext3", "ext4", "ext5", "ext6", "ext7", "ext8", "ext9", "ext10");
+
     /** 组织数据访问接口。 */
     private final OrgMapper orgMapper;
 
     /** 操作日志记录组件。 */
     private final OperationLogRecorder operationLogRecorder;
+
+    /** 表单字段定义业务逻辑接口，用于驱动非锁定字段的必填/正则/唯一性校验。 */
+    private final FormFieldDefinitionService formFieldDefinitionService;
 
     /**
      * {@inheritDoc}
@@ -114,6 +132,7 @@ public class OrgServiceImpl implements OrgService {
     @Override
     public OrgVO create(OrgCreateRequest request) {
         checkCodeUnique(request.getCode(), null);
+        validateDynamicFields(request, true, null);
 
         OrgEntity entity = OrgConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
@@ -137,6 +156,7 @@ public class OrgServiceImpl implements OrgService {
     public OrgVO update(Long id, OrgUpdateRequest request) {
         OrgEntity entity = getExistingEntity(id);
         checkCodeUnique(request.getCode(), id);
+        validateDynamicFields(request, false, id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         OrgConvert.INSTANCE.updateEntity(request, entity);
@@ -268,6 +288,27 @@ public class OrgServiceImpl implements OrgService {
         if (count != null && count > 0) {
             throw new BusinessException("组织编码[" + code + "]已存在");
         }
+    }
+
+    /**
+     * 对非锁定（{@code locked=false}）且适用于当前场景的字段定义执行必填、正则、
+     * 唯一性校验（design.md Decision 9）。{@code name}/{@code code} 属于承重字段，
+     * 已被 {@link FormFieldDefinitionService#listActiveByBizType} 排除，不受本方法
+     * 影响，继续依赖上面既有的 {@code checkCodeUnique}/Bean Validation。
+     *
+     * @param request   创建或更新请求，按 {@code fieldCode} 反射读取字段值
+     * @param creating  是否为新增场景
+     * @param excludeId 更新场景下需要排除的自身 id，创建场景传 {@code null}
+     */
+    private void validateDynamicFields(Object request, boolean creating, Long excludeId) {
+        List<FormFieldDefinitionVO> definitions =
+                formFieldDefinitionService.listActiveByBizType(FormFieldBizType.ORG);
+        DynamicFieldValidator.validate(definitions, request, creating, (column, value) -> {
+            if (!ALLOWED_DYNAMIC_COLUMNS.contains(column)) {
+                throw new BusinessException("非法的动态字段列名：" + column);
+            }
+            return orgMapper.countByColumnValue(column, value, excludeId);
+        });
     }
 
     /**

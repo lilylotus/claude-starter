@@ -27,6 +27,8 @@ const implementedComponents: Record<string, () => Promise<unknown>> = {
   '/permission/admins': () => import('@/views/permission/admin/AdminManagementView.vue'),
   '/system/dicts': () => import('@/views/system/dict/DictManagementView.vue'),
   '/system/menus': () => import('@/views/system/menu/MenuManagementView.vue'),
+  '/system/metadata-fields': () => import('@/views/system/metadatafields/MetadataFieldListView.vue'),
+  '/system/form-fields': () => import('@/views/system/formfields/FormFieldListView.vue'),
   '/system/logs': () => import('@/views/system/log/OperationLogManagementView.vue'),
 }
 

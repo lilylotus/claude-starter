@@ -48,23 +48,14 @@ public interface OrgConvert {
     OrgTreeNodeVO toTreeNode(OrgEntity entity);
 
     /**
-     * 创建请求转实体，id/状态/扩展字段/审计字段由服务层另行赋值。
+     * 创建请求转实体，id/状态/审计字段由服务层另行赋值；{@code ext1}..{@code ext10}
+     * 随请求体按同名属性自动映射，无需手写转换代码。
      *
      * @param request 创建请求
      * @return 组织实体
      */
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "status", ignore = true)
-    @Mapping(target = "ext1", ignore = true)
-    @Mapping(target = "ext2", ignore = true)
-    @Mapping(target = "ext3", ignore = true)
-    @Mapping(target = "ext4", ignore = true)
-    @Mapping(target = "ext5", ignore = true)
-    @Mapping(target = "ext6", ignore = true)
-    @Mapping(target = "ext7", ignore = true)
-    @Mapping(target = "ext8", ignore = true)
-    @Mapping(target = "ext9", ignore = true)
-    @Mapping(target = "ext10", ignore = true)
     @Mapping(target = "createBy", ignore = true)
     @Mapping(target = "createTime", ignore = true)
     @Mapping(target = "updateBy", ignore = true)
@@ -72,23 +63,14 @@ public interface OrgConvert {
     OrgEntity toEntity(OrgCreateRequest request);
 
     /**
-     * 把更新请求的字段合并到已有实体上，id/状态/扩展字段/审计字段不受影响。
+     * 把更新请求的字段合并到已有实体上，id/状态/审计字段不受影响；
+     * {@code ext1}..{@code ext10} 随请求体按同名属性自动映射。
      *
      * @param request 更新请求
      * @param entity  待更新的组织实体
      */
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "status", ignore = true)
-    @Mapping(target = "ext1", ignore = true)
-    @Mapping(target = "ext2", ignore = true)
-    @Mapping(target = "ext3", ignore = true)
-    @Mapping(target = "ext4", ignore = true)
-    @Mapping(target = "ext5", ignore = true)
-    @Mapping(target = "ext6", ignore = true)
-    @Mapping(target = "ext7", ignore = true)
-    @Mapping(target = "ext8", ignore = true)
-    @Mapping(target = "ext9", ignore = true)
-    @Mapping(target = "ext10", ignore = true)
     @Mapping(target = "createBy", ignore = true)
     @Mapping(target = "createTime", ignore = true)
     @Mapping(target = "updateBy", ignore = true)

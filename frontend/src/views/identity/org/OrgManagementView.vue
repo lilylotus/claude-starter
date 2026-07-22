@@ -7,11 +7,18 @@ import type Node from 'element-plus/es/components/tree/src/model/node'
 import { useOrgStore } from '@/stores/org'
 import * as orgApi from '@/api/org'
 import { ORG_STATUS_ENABLED, type OrgFormRequest, type OrgRow, type OrgTreeNode } from '@/types/org'
+import { useDynamicFormFields } from '@/composables/useDynamicFormFields'
+import { FORM_FIELD_CONTROL_TYPE_DICT, FORM_FIELD_CONTROL_TYPE_NUMBER, FORM_FIELD_CONTROL_TYPE_TEXT } from '@/types/formField'
 
 const orgStore = useOrgStore()
 const router = useRouter()
 
+// 除上级组织（parentId）、启停用状态（status）外的全部字段（含原有表字段与 ext1~ext10）
+// 统一按"表单字段定义"（bizType=ORG）动态渲染，见 design.md 决策 12
+const orgFields = useDynamicFormFields('ORG')
+
 onMounted(() => {
+  orgFields.fetchSchema()
   // 左侧导航树不需要在这里主动拉取顶级节点：el-tree 在 lazy 模式下挂载时会自动对
   // 根节点调用一次 loadNode（parentId = 0），navTreeTopLevel 只用于增删改之后的
   // 局部刷新（见 orgStore.refreshNavTreeBranch），这里主动调用会造成重复请求
@@ -121,22 +128,24 @@ const formRef = ref<FormInstance>()
 const treeSelectRenderKey = ref(0)
 
 // 表单里的 parentId 在“未选中任何左侧树节点就新增”时允许暂时为空（由用户手动选择），
-// 提交前会校验为必填，真正提交给后端时保证已经是合法的 number
-type OrgForm = Omit<OrgFormRequest, 'parentId'> & { parentId: number | null }
+// 提交前会校验为必填，真正提交给后端时保证已经是合法的 number；其余字段（name/code/
+// showOrder/remark/ext1~ext10）由 orgFields 动态渲染驱动，key 为各自绑定的 columnName，
+// 不在这里静态声明
+type OrgForm = { parentId: number | null } & Record<string, unknown>
 
-const form = reactive<OrgForm>({
-  name: '',
-  code: '',
-  parentId: null,
-  showOrder: 0,
-  remark: '',
-})
+const form = reactive<OrgForm>({ parentId: null })
 
-const rules: FormRules<OrgForm> = {
-  name: [{ required: true, message: '请输入组织名称', trigger: 'blur' }],
-  code: [{ required: true, message: '请输入编码', trigger: 'blur' }],
-  parentId: [{ required: true, message: '请选择上级组织', trigger: 'change' }],
+// 保留 form 里指定 key（如 parentId），清空其余动态字段的 key，供每次打开弹窗前重置
+function resetDynamicKeys(target: Record<string, unknown>, keep: string[]) {
+  Object.keys(target).forEach((key) => {
+    if (!keep.includes(key)) delete target[key]
+  })
 }
+
+const rules = computed<FormRules>(() => ({
+  parentId: [{ required: true, message: '请选择上级组织', trigger: 'change' }],
+  ...(dialogMode.value === 'create' ? orgFields.createRules : orgFields.editRules),
+}))
 
 const dialogTitle = computed(() => (dialogMode.value === 'create' ? '新增组织' : '编辑组织'))
 
@@ -146,12 +155,10 @@ async function openCreateDialog() {
   await orgStore.fetchTree()
   dialogMode.value = 'create'
   editingId.value = null
-  form.name = ''
-  form.code = ''
+  resetDynamicKeys(form, ['parentId'])
+  Object.assign(form, orgFields.buildFormModel(orgFields.createFields))
   // 未选中左侧树节点时不预填默认值，交由用户在弹窗里手动选择一个真实组织节点
   form.parentId = orgStore.selectedId
-  form.showOrder = 0
-  form.remark = ''
   treeSelectRenderKey.value++
   dialogVisible.value = true
 }
@@ -161,11 +168,9 @@ async function openEditDialog(row: OrgRow) {
   editingId.value = row.id
   const detail = await orgApi.getOrgById(row.id)
   await orgStore.fetchTree()
-  form.name = detail.name
-  form.code = detail.code
+  resetDynamicKeys(form, ['parentId'])
+  Object.assign(form, orgFields.buildFormModel(orgFields.editFields, detail))
   form.parentId = detail.parentId
-  form.showOrder = detail.showOrder
-  form.remark = detail.remark
   treeSelectRenderKey.value++
   dialogVisible.value = true
 }
@@ -188,7 +193,7 @@ async function submitForm() {
   submitting.value = true
   try {
     // 上面的表单校验已经确保 parentId 必填，此处已知非空
-    const payload = form as OrgFormRequest
+    const payload = { ...form, parentId: form.parentId as number } as unknown as OrgFormRequest
     if (dialogMode.value === 'create') {
       await orgApi.createOrg(payload)
       ElMessage.success('新增成功')
@@ -269,15 +274,25 @@ async function handleDelete(row: OrgRow) {
         :data="orgStore.children"
         :empty-text="rightPanelEmptyText"
       >
-        <el-table-column prop="name" label="组织名称" min-width="140" />
-        <el-table-column prop="code" label="编码" min-width="120" />
+        <el-table-column
+          v-for="col in orgFields.listColumns"
+          :key="col.fieldCode"
+          :label="col.fieldName"
+          min-width="120"
+        >
+          <template #default="{ row }">
+            <span v-if="col.controlType === FORM_FIELD_CONTROL_TYPE_DICT">
+              {{ orgFields.dictOptionLabel(col, (row as Record<string, unknown>)[col.columnName]) }}
+            </span>
+            <span v-else>{{ (row as Record<string, unknown>)[col.columnName] }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
             <el-tag v-if="row.status === ORG_STATUS_ENABLED" type="success">启用</el-tag>
             <el-tag v-else type="warning">停用</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="showOrder" label="显示序号" width="90" />
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="goToDetail(row as OrgRow)">详情</el-button>
@@ -307,12 +322,6 @@ async function handleDelete(row: OrgRow) {
 
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="480px" @close="closeDialog">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
-        <el-form-item label="组织名称" prop="name">
-          <el-input v-model="form.name" placeholder="请输入组织名称" />
-        </el-form-item>
-        <el-form-item label="编码" prop="code">
-          <el-input v-model="form.code" placeholder="请输入编码" />
-        </el-form-item>
         <el-form-item label="上级组织" prop="parentId">
           <!-- check-strictly：el-tree-select 默认单选模式下只有叶子节点可被点击选中，
                非叶子节点点击只会展开/收起；上级组织可能本身已经有子组织，必须开启
@@ -328,12 +337,35 @@ async function handleDelete(row: OrgRow) {
             style="width: 100%"
           />
         </el-form-item>
-        <el-form-item label="显示序号" prop="showOrder">
-          <el-input-number v-model="form.showOrder" :min="0" style="width: 100%" />
-          <div class="org-form-hint">数值越大，排序越靠前</div>
-        </el-form-item>
-        <el-form-item label="备注" prop="remark">
-          <el-input v-model="form.remark" type="textarea" :rows="3" placeholder="选填" />
+        <el-form-item
+          v-for="item in (dialogMode === 'create' ? orgFields.createFields : orgFields.editFields)"
+          :key="item.fieldCode"
+          :label="item.fieldName"
+          :prop="item.columnName"
+        >
+          <el-input
+            v-if="item.controlType === FORM_FIELD_CONTROL_TYPE_TEXT"
+            v-model="(form[item.columnName] as string)"
+            :placeholder="item.placeholder || `请输入${item.fieldName}`"
+            :disabled="!item.editable"
+          />
+          <el-input-number
+            v-else-if="item.controlType === FORM_FIELD_CONTROL_TYPE_NUMBER"
+            v-model="(form[item.columnName] as number)"
+            :min="0"
+            style="width: 100%"
+            :disabled="!item.editable"
+          />
+          <template v-else>
+            <el-select
+              v-model="(form[item.columnName] as string)"
+              :placeholder="item.placeholder || `请选择${item.fieldName}`"
+              :disabled="!item.editable"
+              style="width: 100%"
+            >
+              <el-option v-for="opt in item.dictOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+            </el-select>
+          </template>
         </el-form-item>
       </el-form>
       <template #footer>

@@ -4,12 +4,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.formfield.constant.FormFieldBizType;
+import cn.nihility.rbac.formfield.constant.FormFieldControlType;
+import cn.nihility.rbac.formfield.dto.FormFieldDefinitionVO;
+import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.user.constant.UserStatus;
@@ -56,17 +61,24 @@ class UserServiceImplTest {
     @Mock
     private OperationLogRecorder operationLogRecorder;
 
+    /** 被测服务的表单字段定义业务逻辑依赖，使用 Mockito 打桩。 */
+    @Mock
+    private FormFieldDefinitionService formFieldDefinitionService;
+
     /** 被测服务实例。 */
     private UserServiceImpl userService;
 
     /**
      * 每个用例执行前重新构造被测服务；实体/DTO 转换通过 {@code UserConvert.INSTANCE}
-     * 静态调用完成，无需在此注入或 mock。
+     * 静态调用完成，无需在此注入或 mock。动态字段定义默认桩为空列表，身份证号相关
+     * 用例会按需覆盖该桩，模拟默认字段定义（isUnique=true）驱动的唯一性校验。
      */
     @BeforeEach
     void setUp() {
-        userService = new UserServiceImpl(userMapper, userPositionMapper, orgMapper, operationLogRecorder);
+        userService = new UserServiceImpl(userMapper, userPositionMapper, orgMapper, operationLogRecorder,
+                formFieldDefinitionService);
         lenient().when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
+        lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
     }
 
     /**
@@ -86,10 +98,18 @@ class UserServiceImplTest {
 
     /**
      * 创建用户时，若身份证号非空且在未删除的用户中已存在，应抛出业务异常且不执行插入。
+     * 身份证号的唯一性校验由"表单字段定义"驱动的动态校验管线执行（默认字段定义
+     * {@code isUnique=true}），不再是硬编码逻辑，因此这里桩住
+     * {@code formFieldDefinitionService.listActiveByBizType} 返回一条绑定
+     * {@code id_card} 列且 {@code isUnique=true} 的定义，并桩住
+     * {@code userMapper.countByColumnValue} 模拟命中重复。
      */
     @Test
     void create_shouldThrowBusinessException_whenIdCardAlreadyExists() {
-        when(userMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L).thenReturn(1L);
+        when(userMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+        when(formFieldDefinitionService.listActiveByBizType(FormFieldBizType.USER))
+                .thenReturn(List.of(buildIdCardDefinition()));
+        when(userMapper.countByColumnValue(eq("id_card"), eq("110101199001011234"), any())).thenReturn(1);
 
         UserCreateRequest request = buildCreateRequest("张三", "U001", "110101199001011234");
 
@@ -118,12 +138,17 @@ class UserServiceImplTest {
 
     /**
      * 更新用户时，若身份证号非空且与另一个未删除用户重复（非自身），应拒绝更新。
+     * 身份证号的唯一性校验由"表单字段定义"驱动的动态校验管线执行，桩住方式同
+     * {@link #create_shouldThrowBusinessException_whenIdCardAlreadyExists}。
      */
     @Test
     void update_shouldThrowBusinessException_whenIdCardConflictsWithAnotherUser() {
         UserEntity entity = buildUserEntity(1L, "张三", "U001", UserStatus.ENABLED);
         when(userMapper.selectById(1L)).thenReturn(entity);
-        when(userMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L).thenReturn(1L);
+        when(userMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+        when(formFieldDefinitionService.listActiveByBizType(FormFieldBizType.USER))
+                .thenReturn(List.of(buildIdCardDefinition()));
+        when(userMapper.countByColumnValue(eq("id_card"), eq("110101199001011234"), eq(1L))).thenReturn(1);
 
         UserUpdateRequest request = buildUpdateRequest("张三", "U001", "110101199001011234", List.of());
 
@@ -377,6 +402,29 @@ class UserServiceImplTest {
         request.setShowOrder(0);
         request.setPositions(new ArrayList<>(positions));
         return request;
+    }
+
+    /**
+     * 构造一条绑定 {@code id_card} 列、{@code isUnique=true} 的非锁定字段定义，
+     * 模拟身份证号的默认表单字段定义（迁移种子数据 V21 的行为），供动态校验管线测试
+     * 复用。
+     *
+     * @return 身份证号字段定义
+     */
+    private FormFieldDefinitionVO buildIdCardDefinition() {
+        return FormFieldDefinitionVO.builder()
+                .fieldCode("idCard")
+                .fieldName("身份证号")
+                .columnName("id_card")
+                .controlType(FormFieldControlType.TEXT)
+                .isRequired(false)
+                .isUnique(true)
+                .showInList(true)
+                .showInCreate(true)
+                .showInEdit(true)
+                .editable(true)
+                .locked(false)
+                .build();
     }
 
     /**

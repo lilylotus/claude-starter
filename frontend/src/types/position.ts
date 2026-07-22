@@ -18,6 +18,18 @@ export interface PositionRow {
   positionPhone: string
   showOrder: number
   remark: string
+  // ext1~ext10：可开放配置的扩展字段，是否展示/可编辑由"表单字段定义"（bizType=POSITION）驱动，
+  // 未被任何启用字段定义绑定时恒为空
+  ext1?: string
+  ext2?: string
+  ext3?: string
+  ext4?: string
+  ext5?: string
+  ext6?: string
+  ext7?: string
+  ext8?: string
+  ext9?: string
+  ext10?: string
   status: number
   createBy: string
   createTime: string
@@ -33,6 +45,16 @@ export interface PositionFormRequest {
   positionPhone: string
   showOrder: number
   remark: string
+  ext1?: string
+  ext2?: string
+  ext3?: string
+  ext4?: string
+  ext5?: string
+  ext6?: string
+  ext7?: string
+  ext8?: string
+  ext9?: string
+  ext10?: string
 }
 
 // 新增任职记录的请求体：在编辑表单字段基础上附加所属用户 id，须为已存在的用户；

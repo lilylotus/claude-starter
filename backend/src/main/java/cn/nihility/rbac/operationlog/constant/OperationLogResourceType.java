@@ -4,9 +4,9 @@ import java.util.Map;
 
 /**
  * 操作日志资源类型常量：覆盖组织、用户、任职、应用、角色、权限点、管理员、菜单、
- * 字典类型、字典项共 10 类资源，用字符串编码（而非数字）表达，避免与各模块自身的
- * 数字状态常量混淆。每个编码同时维护"所属模块中文名"与"资源中文名"两个映射——
- * 字典类型与字典项同属"字典管理"模块，模块粒度是 9 个。
+ * 字典类型、字典项、元数据字段、表单字段定义共 12 类资源，用字符串编码（而非数字）
+ * 表达，避免与各模块自身的数字状态常量混淆。每个编码同时维护"所属模块中文名"与
+ * "资源中文名"两个映射——字典类型与字典项同属"字典管理"模块，模块粒度是 10 个。
  */
 public final class OperationLogResourceType {
 
@@ -40,6 +40,12 @@ public final class OperationLogResourceType {
     /** 字典项。 */
     public static final String DICT_ITEM = "dictItem";
 
+    /** 元数据字段。 */
+    public static final String METADATA_FIELD = "metadataField";
+
+    /** 表单字段定义。 */
+    public static final String FORM_FIELD_DEFINITION = "formFieldDefinition";
+
     /** 资源类型编码 -> 所属模块中文名。 */
     private static final Map<String, String> MODULE_NAMES = Map.ofEntries(
             Map.entry(ORG, "组织管理"),
@@ -51,7 +57,9 @@ public final class OperationLogResourceType {
             Map.entry(ADMIN, "管理员管理"),
             Map.entry(MENU, "菜单管理"),
             Map.entry(DICT_TYPE, "字典管理"),
-            Map.entry(DICT_ITEM, "字典管理"));
+            Map.entry(DICT_ITEM, "字典管理"),
+            Map.entry(METADATA_FIELD, "元数据配置"),
+            Map.entry(FORM_FIELD_DEFINITION, "表单管理"));
 
     /** 资源类型编码 -> 资源中文名。 */
     private static final Map<String, String> RESOURCE_NAMES = Map.ofEntries(
@@ -64,7 +72,9 @@ public final class OperationLogResourceType {
             Map.entry(ADMIN, "管理员"),
             Map.entry(MENU, "菜单"),
             Map.entry(DICT_TYPE, "字典类型"),
-            Map.entry(DICT_ITEM, "字典项"));
+            Map.entry(DICT_ITEM, "字典项"),
+            Map.entry(METADATA_FIELD, "元数据字段"),
+            Map.entry(FORM_FIELD_DEFINITION, "表单字段定义"));
 
     /**
      * 工具类不允许实例化。

@@ -46,6 +46,36 @@ public class AppEntity {
     /** 状态：2000=启用，3000=停用，-1000=已删除。 */
     private Integer status;
 
+    /** 预留扩展字段 1。 */
+    private String ext1;
+
+    /** 预留扩展字段 2。 */
+    private String ext2;
+
+    /** 预留扩展字段 3。 */
+    private String ext3;
+
+    /** 预留扩展字段 4。 */
+    private String ext4;
+
+    /** 预留扩展字段 5。 */
+    private String ext5;
+
+    /** 预留扩展字段 6。 */
+    private String ext6;
+
+    /** 预留扩展字段 7。 */
+    private String ext7;
+
+    /** 预留扩展字段 8。 */
+    private String ext8;
+
+    /** 预留扩展字段 9。 */
+    private String ext9;
+
+    /** 预留扩展字段 10。 */
+    private String ext10;
+
     /** 创建人。 */
     private String createBy;
 
