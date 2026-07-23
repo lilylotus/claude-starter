@@ -10,9 +10,9 @@ import {
   type FormFieldRenderItem,
 } from '@/types/formField'
 
-// 按显示序号降序排列（值越大越靠前），和后端 render-schema 接口的排序约定一致
+// 按显示序号升序排列（值越小越靠前），和后端 render-schema 接口的排序约定一致
 function sortBySchemaOrder(items: FormFieldRenderItem[]): FormFieldRenderItem[] {
-  return [...items].sort((a, b) => b.showOrder - a.showOrder)
+  return [...items].sort((a, b) => a.showOrder - b.showOrder)
 }
 
 // render-schema 接口返回的 columnName 是元数据字段配置里登记的数据库字段列名

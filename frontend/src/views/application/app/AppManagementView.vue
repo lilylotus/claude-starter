@@ -7,6 +7,8 @@ import { useAppStore } from '@/stores/app'
 import * as appApi from '@/api/app'
 import * as orgApi from '@/api/org'
 import * as userApi from '@/api/user'
+import * as excelImportApi from '@/api/excelImport'
+import BatchImportDialog from '@/components/BatchImportDialog.vue'
 import { APP_STATUS_ENABLED, type AppFormRequest, type AppRow } from '@/types/app'
 import type { OrgTreeNode } from '@/types/org'
 import { useDynamicFormFields } from '@/composables/useDynamicFormFields'
@@ -35,6 +37,18 @@ onMounted(() => {
 
 function handlePageChange(targetPage: number) {
   appStore.changePage(targetPage)
+}
+
+// ---- Excel 批量导入：下载模板 / 上传批量导入 ----
+
+const batchImportVisible = ref(false)
+
+async function handleDownloadTemplate() {
+  await excelImportApi.downloadImportTemplate('APP')
+}
+
+async function handleImported() {
+  await appStore.refreshAfterMutation()
 }
 
 // ---- 弹窗内“所属组织”选择器数据源（一次性加载全量组织树，不需要防环处理） ----
@@ -210,7 +224,11 @@ async function handleDelete(row: AppRow) {
     <section class="app-panel">
       <header class="app-panel__header">
         <h2 class="app-panel__title">应用管理</h2>
-        <el-button type="primary" @click="openCreateDialog">新增</el-button>
+        <div class="app-panel__actions">
+          <el-button @click="handleDownloadTemplate">下载导入模板</el-button>
+          <el-button @click="batchImportVisible = true">批量导入</el-button>
+          <el-button type="primary" @click="openCreateDialog">新增</el-button>
+        </div>
       </header>
 
       <el-table v-loading="appStore.listLoading" :data="appStore.list" empty-text="暂无应用">
@@ -352,6 +370,8 @@ async function handleDelete(row: AppRow) {
         <el-button type="primary" :loading="submitting" @click="submitForm">确定</el-button>
       </template>
     </el-dialog>
+
+    <batch-import-dialog v-model="batchImportVisible" biz-type="APP" @imported="handleImported" />
   </div>
 </template>
 
@@ -375,6 +395,12 @@ async function handleDelete(row: AppRow) {
   font-size: 15px;
   color: var(--color-ink);
   margin: 0;
+}
+
+.app-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .app-pagination {

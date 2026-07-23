@@ -30,6 +30,8 @@ OrgManagement（组织管理，/identity/orgs）
 - OrgManagement:org:enable     启用组织
 - OrgManagement:org:disable    停用组织
 - OrgManagement:org:delete     删除组织
+- OrgManagement:org:importTemplate   下载组织导入模板
+- OrgManagement:org:import           批量导入组织
 
 UserManagement（用户管理，/identity/users）
 - UserManagement:user:view     用户管理页面访问
@@ -39,6 +41,8 @@ UserManagement（用户管理，/identity/users）
 - UserManagement:user:enable   启用用户
 - UserManagement:user:disable  停用用户
 - UserManagement:user:delete   删除用户
+- UserManagement:user:importTemplate 下载用户导入模板
+- UserManagement:user:import         批量导入用户
 
 PositionManagement（任职管理，/identity/positions）
 - PositionManagement:position:view     任职管理页面访问
@@ -48,6 +52,8 @@ PositionManagement（任职管理，/identity/positions）
 - PositionManagement:position:enable   启用任职记录
 - PositionManagement:position:disable  停用任职记录
 - PositionManagement:position:delete   删除任职记录
+- PositionManagement:position:importTemplate 下载任职导入模板
+- PositionManagement:position:import         批量导入任职记录
 
 
 应用管理
@@ -61,6 +67,8 @@ AppManagement（应用管理，/application/list）
 - AppManagement:app:enable     启用应用
 - AppManagement:app:disable    停用应用
 - AppManagement:app:delete     删除应用
+- AppManagement:app:importTemplate   下载应用导入模板
+- AppManagement:app:import           批量导入应用
 
 
 权限管理
@@ -131,7 +139,7 @@ MetadataFieldManagement（元数据配置，/system/metadata-fields）
 （目录只能通过数据库迁移预置，页面不提供新增/删除入口，故没有 add/delete）
 
 FormFieldManagement（表单管理，/system/form-fields）
-- FormFieldManagement:formField:view      表单管理页面访问
+- FormFieldManagement:formField:view      表单管理页面访问（含"字段定义"“导入模板配置”两个 tab）
 - FormFieldManagement:formField:add       新增表单字段定义（从元数据配置目录选择可用字段绑定）
 - FormFieldManagement:formField:edit      编辑表单字段定义
 - FormFieldManagement:formField:detail    查看表单字段定义详情
@@ -139,6 +147,12 @@ FormFieldManagement（表单管理，/system/form-fields）
 - FormFieldManagement:formField:disable   停用表单字段定义
 - FormFieldManagement:formField:delete    删除表单字段定义
 （绑定组织/用户/应用 name、code 等承重字段的定义不可停用/删除，页面按此隐藏对应按钮）
+- FormFieldManagement:importFieldConfig:add       新增导入字段配置（从当前业务对象类型下启用的表单字段定义中选择关联字段）
+- FormFieldManagement:importFieldConfig:edit      编辑导入字段配置
+- FormFieldManagement:importFieldConfig:delete    删除导入字段配置
+（"导入模板配置" tab 复用页面级 FormFieldManagement:formField:view 访问权限，没有独立 view；POSITION
+分类下预置的人员编号/组织编码两条系统保护配置不可删除，也不可取消主键/必填标记，页面按此隐藏删除入口
+并禁用对应开关，没有独立的 detail/enable/disable）
 
 OperationLogManagement（操作日志管理，/system/logs）
 - OperationLogManagement:log:view      操作日志管理页面访问

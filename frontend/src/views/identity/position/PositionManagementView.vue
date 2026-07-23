@@ -9,6 +9,8 @@ import * as positionApi from '@/api/position'
 import * as orgApi from '@/api/org'
 import * as userApi from '@/api/user'
 import * as dictApi from '@/api/dict'
+import * as excelImportApi from '@/api/excelImport'
+import BatchImportDialog from '@/components/BatchImportDialog.vue'
 import { POSITION_STATUS_ENABLED, type PositionFormRequest, type PositionRow } from '@/types/position'
 import type { OrgTreeNode } from '@/types/org'
 import type { DictItemOption } from '@/types/dict'
@@ -83,6 +85,19 @@ async function fetchPositionTypeOptions() {
 
 function positionTypeLabel(code: string): string {
   return positionTypeOptions.value.find((opt) => opt.code === code)?.label ?? code
+}
+
+// ---- Excel 批量导入：下载模板 / 上传批量导入 ----
+// 任职导入模板含"人员编号""组织编码"两个固定标识列，见 design.md 决策 2
+
+const batchImportVisible = ref(false)
+
+async function handleDownloadTemplate() {
+  await excelImportApi.downloadImportTemplate('POSITION')
+}
+
+async function handleImported() {
+  await positionStore.refreshAfterMutation()
 }
 
 // ---- 所属用户远程搜索选择器（新增弹窗专用，复用 GET /api/users?name= 分页接口） ----
@@ -280,9 +295,13 @@ async function handleDelete(row: PositionRow) {
       <header class="position-panel__header">
         <!-- 未选中任何左侧树节点时标题保持空白，是本页面刻意的默认态 -->
         <h2 class="position-panel__title">{{ rightPanelTitle }}</h2>
-        <el-button type="primary" :disabled="positionStore.selectedOrgId === null" @click="openCreateDialog">
-          新增
-        </el-button>
+        <div class="position-panel__actions">
+          <el-button @click="handleDownloadTemplate">下载导入模板</el-button>
+          <el-button @click="batchImportVisible = true">批量导入</el-button>
+          <el-button type="primary" :disabled="positionStore.selectedOrgId === null" @click="openCreateDialog">
+            新增
+          </el-button>
+        </div>
       </header>
 
       <el-empty
@@ -443,6 +462,8 @@ async function handleDelete(row: PositionRow) {
         <el-button type="primary" :loading="submitting" @click="submitForm">确定</el-button>
       </template>
     </el-dialog>
+
+    <batch-import-dialog v-model="batchImportVisible" biz-type="POSITION" @imported="handleImported" />
   </div>
 </template>
 
@@ -481,6 +502,12 @@ async function handleDelete(row: PositionRow) {
   font-size: 15px;
   color: var(--color-ink);
   margin: 0;
+}
+
+.position-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .position-empty {

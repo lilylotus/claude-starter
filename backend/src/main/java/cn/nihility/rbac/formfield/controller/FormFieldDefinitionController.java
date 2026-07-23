@@ -59,9 +59,9 @@ public class FormFieldDefinitionController {
      * 列表列与新增/编辑表单。
      *
      * @param bizType 业务对象类型，必填
-     * @return 渲染元数据列表，按显示序号降序排列
+     * @return 渲染元数据列表，按显示序号升序排列
      */
-    @Operation(summary = "查询动态字段渲染元数据", description = "返回指定业务对象类型下全部启用状态的字段定义，按显示序号降序排列；"
+    @Operation(summary = "查询动态字段渲染元数据", description = "返回指定业务对象类型下全部启用状态的字段定义，按显示序号升序排列；"
             + "控件类型为下拉单选字典或多选字典下拉的定义内嵌 dictOptions")
     @GetMapping("/api/form-fields/render-schema")
     public List<FormFieldRenderItemVO> renderSchema(

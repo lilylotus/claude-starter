@@ -8,6 +8,8 @@ import { useUserStore } from '@/stores/user'
 import * as userApi from '@/api/user'
 import * as orgApi from '@/api/org'
 import * as dictApi from '@/api/dict'
+import * as excelImportApi from '@/api/excelImport'
+import BatchImportDialog from '@/components/BatchImportDialog.vue'
 import {
   USER_GENDER_OPTIONS,
   USER_STATUS_ENABLED,
@@ -75,6 +77,18 @@ function handlePageChange(targetPage: number) {
 
 function genderLabel(gender: number): string {
   return USER_GENDER_OPTIONS.find((opt) => opt.value === gender)?.label ?? '未知'
+}
+
+// ---- Excel 批量导入：下载模板 / 上传批量导入 ----
+
+const batchImportVisible = ref(false)
+
+async function handleDownloadTemplate() {
+  await excelImportApi.downloadImportTemplate('USER')
+}
+
+async function handleImported() {
+  await userStore.refreshAfterMutation()
 }
 
 // ---- 组织树（任职信息子表单的组织选择器数据源，一次性加载，不需要防环处理） ----
@@ -269,7 +283,11 @@ async function handleDelete(row: UserRow) {
     <section class="user-panel">
       <header class="user-panel__header">
         <h2 class="user-panel__title">用户列表</h2>
-        <el-button type="primary" @click="openCreateDialog">新增</el-button>
+        <div class="user-panel__actions">
+          <el-button @click="handleDownloadTemplate">下载导入模板</el-button>
+          <el-button @click="batchImportVisible = true">批量导入</el-button>
+          <el-button type="primary" @click="openCreateDialog">新增</el-button>
+        </div>
       </header>
 
       <div class="user-search">
@@ -528,6 +546,8 @@ async function handleDelete(row: UserRow) {
         <el-button type="primary" :loading="submitting" @click="submitForm">确定</el-button>
       </template>
     </el-dialog>
+
+    <batch-import-dialog v-model="batchImportVisible" biz-type="USER" @imported="handleImported" />
   </div>
 </template>
 
@@ -556,6 +576,12 @@ async function handleDelete(row: UserRow) {
   font-size: 15px;
   color: var(--color-ink);
   margin: 0;
+}
+
+.user-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .user-search {

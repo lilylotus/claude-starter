@@ -19,6 +19,12 @@ request.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 
 request.interceptors.response.use(
   (response): any => {
+    // Excel 导入模板下载等接口返回的是原始文件流（非 { code, message, data } 包装
+    // 结构，见 cn.nihility.rbac.excelimport.controller.ExcelImportController#downloadTemplate），
+    // 调用方通过 responseType: 'blob' 显式声明，这里直接透传响应体，跳过业务码解包
+    if (response.config.responseType === 'blob') {
+      return response.data
+    }
     const body = response.data as ApiResponse
     if (body.code !== 0) {
       ElMessage.error(body.message || '请求失败')

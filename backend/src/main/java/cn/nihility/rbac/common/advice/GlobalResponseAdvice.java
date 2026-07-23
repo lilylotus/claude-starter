@@ -4,7 +4,9 @@ import cn.nihility.rbac.common.result.Result;
 import cn.nihility.rbac.common.util.JacksonUtils;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.MediaType;
+import org.springframework.http.converter.ByteArrayHttpMessageConverter;
 import org.springframework.http.converter.HttpMessageConverter;
+import org.springframework.http.converter.ResourceHttpMessageConverter;
 import org.springframework.http.converter.StringHttpMessageConverter;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
@@ -14,21 +16,25 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
 /**
  * 全局响应包装器，把控制器方法的返回值统一包装成 {@link Result}。
  * 仅对 {@code cn.nihility.rbac} 包下的控制器生效，避免影响 springdoc/swagger-ui
- * 自身的接口输出。
+ * 自身的接口输出；返回原始二进制内容（如 Excel 模板/文件下载，选中
+ * {@link ByteArrayHttpMessageConverter}/{@link ResourceHttpMessageConverter} 的
+ * 接口）不做包装，否则会把二进制内容错误地当作 JSON 字段写出，导致下载的文件损坏。
  */
 @RestControllerAdvice(basePackages = "cn.nihility.rbac")
 public class GlobalResponseAdvice implements ResponseBodyAdvice<Object> {
 
     /**
-     * 所有返回值都需要经过本处理器判断是否包装。
+     * 所有返回值都需要经过本处理器判断是否包装，二进制文件下载类接口（选中
+     * {@link ByteArrayHttpMessageConverter}/{@link ResourceHttpMessageConverter}）除外。
      *
      * @param returnType    方法返回类型
      * @param converterType 将要使用的消息转换器类型
-     * @return 始终返回 true
+     * @return 是否需要包装
      */
     @Override
     public boolean supports(MethodParameter returnType, Class<? extends HttpMessageConverter<?>> converterType) {
-        return true;
+        return !ByteArrayHttpMessageConverter.class.isAssignableFrom(converterType)
+                && !ResourceHttpMessageConverter.class.isAssignableFrom(converterType);
     }
 
     /**

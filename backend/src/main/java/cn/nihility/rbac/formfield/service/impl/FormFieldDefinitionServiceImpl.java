@@ -73,7 +73,7 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
         LambdaQueryWrapper<FormFieldDefinitionEntity> wrapper = new LambdaQueryWrapper<FormFieldDefinitionEntity>()
                 .eq(StringUtils.hasText(bizType), FormFieldDefinitionEntity::getBizType, bizType)
                 .ne(FormFieldDefinitionEntity::getStatus, FormFieldStatus.DELETED)
-                .orderByDesc(FormFieldDefinitionEntity::getShowOrder)
+                .orderByAsc(FormFieldDefinitionEntity::getShowOrder)
                 .orderByAsc(FormFieldDefinitionEntity::getId);
 
         Page<FormFieldDefinitionEntity> queryPage = new Page<>(page, pageSize);
@@ -225,7 +225,7 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
                 new LambdaQueryWrapper<FormFieldDefinitionEntity>()
                         .eq(FormFieldDefinitionEntity::getBizType, bizType)
                         .eq(FormFieldDefinitionEntity::getStatus, FormFieldStatus.ENABLED)
-                        .orderByDesc(FormFieldDefinitionEntity::getShowOrder)
+                        .orderByAsc(FormFieldDefinitionEntity::getShowOrder)
                         .orderByAsc(FormFieldDefinitionEntity::getId));
 
         return enrich(entities).stream()
@@ -242,7 +242,7 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
                 new LambdaQueryWrapper<FormFieldDefinitionEntity>()
                         .eq(FormFieldDefinitionEntity::getBizType, bizType)
                         .eq(FormFieldDefinitionEntity::getStatus, FormFieldStatus.ENABLED)
-                        .orderByDesc(FormFieldDefinitionEntity::getShowOrder)
+                        .orderByAsc(FormFieldDefinitionEntity::getShowOrder)
                         .orderByAsc(FormFieldDefinitionEntity::getId));
         List<FormFieldDefinitionVO> vos = enrich(entities);
 

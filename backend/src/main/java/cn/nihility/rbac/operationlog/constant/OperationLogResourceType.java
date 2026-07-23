@@ -4,9 +4,10 @@ import java.util.Map;
 
 /**
  * 操作日志资源类型常量：覆盖组织、用户、任职、应用、角色、权限点、管理员、菜单、
- * 字典类型、字典项、元数据字段、表单字段定义共 12 类资源，用字符串编码（而非数字）
- * 表达，避免与各模块自身的数字状态常量混淆。每个编码同时维护"所属模块中文名"与
- * "资源中文名"两个映射——字典类型与字典项同属"字典管理"模块，模块粒度是 10 个。
+ * 字典类型、字典项、元数据字段、表单字段定义、Excel 导入字段配置共 13 类资源，用
+ * 字符串编码（而非数字）表达，避免与各模块自身的数字状态常量混淆。每个编码同时维护
+ * "所属模块中文名"与"资源中文名"两个映射——字典类型与字典项同属"字典管理"模块，
+ * 模块粒度是 11 个。
  */
 public final class OperationLogResourceType {
 
@@ -46,6 +47,9 @@ public final class OperationLogResourceType {
     /** 表单字段定义。 */
     public static final String FORM_FIELD_DEFINITION = "formFieldDefinition";
 
+    /** Excel 导入字段配置。 */
+    public static final String IMPORT_FIELD_CONFIG = "importFieldConfig";
+
     /** 资源类型编码 -> 所属模块中文名。 */
     private static final Map<String, String> MODULE_NAMES = Map.ofEntries(
             Map.entry(ORG, "组织管理"),
@@ -59,7 +63,8 @@ public final class OperationLogResourceType {
             Map.entry(DICT_TYPE, "字典管理"),
             Map.entry(DICT_ITEM, "字典管理"),
             Map.entry(METADATA_FIELD, "元数据配置"),
-            Map.entry(FORM_FIELD_DEFINITION, "表单管理"));
+            Map.entry(FORM_FIELD_DEFINITION, "表单管理"),
+            Map.entry(IMPORT_FIELD_CONFIG, "表单管理"));
 
     /** 资源类型编码 -> 资源中文名。 */
     private static final Map<String, String> RESOURCE_NAMES = Map.ofEntries(
@@ -74,7 +79,8 @@ public final class OperationLogResourceType {
             Map.entry(DICT_TYPE, "字典类型"),
             Map.entry(DICT_ITEM, "字典项"),
             Map.entry(METADATA_FIELD, "元数据字段"),
-            Map.entry(FORM_FIELD_DEFINITION, "表单字段定义"));
+            Map.entry(FORM_FIELD_DEFINITION, "表单字段定义"),
+            Map.entry(IMPORT_FIELD_CONFIG, "Excel 导入字段配置"));
 
     /**
      * 工具类不允许实例化。

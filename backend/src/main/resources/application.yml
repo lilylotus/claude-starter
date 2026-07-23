@@ -5,6 +5,13 @@ spring:
   application:
     name: RBAC
 
+  # Excel 批量导入上传文件的大小限制，默认的 1MB 单文件上限不足以覆盖上限 1000 行
+  # 的导入场景，适当调大；具体行数上限由业务层（BatchImportServiceImpl）控制。
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
   # 以下数据源配置为本地开发占位值（localhost:3306 / rbac_demo / root / root），
   # 仅用于离线编译和联调脚手架，各环境（测试/预发/生产）务必替换为各自的真实连接信息，
   # 不要把生产凭据提交到仓库。

@@ -6,6 +6,8 @@ import type { FormInstance, FormRules, TreeInstance } from 'element-plus'
 import type Node from 'element-plus/es/components/tree/src/model/node'
 import { useOrgStore } from '@/stores/org'
 import * as orgApi from '@/api/org'
+import * as excelImportApi from '@/api/excelImport'
+import BatchImportDialog from '@/components/BatchImportDialog.vue'
 import { ORG_STATUS_ENABLED, type OrgFormRequest, type OrgRow, type OrgTreeNode } from '@/types/org'
 import { useDynamicFormFields } from '@/composables/useDynamicFormFields'
 import {
@@ -77,6 +79,19 @@ async function refreshNavTreeAfterMutation() {
   if (parentId !== 0) {
     treeRef.value?.updateKeyChildren(parentId, freshChildren)
   }
+}
+
+// ---- Excel 批量导入：下载模板 / 上传批量导入 ----
+
+const batchImportVisible = ref(false)
+
+async function handleDownloadTemplate() {
+  await excelImportApi.downloadImportTemplate('ORG')
+}
+
+async function handleImported() {
+  await orgStore.refreshAfterMutation()
+  await refreshNavTreeAfterMutation()
 }
 
 // ---- 上级组织选择（新增/编辑弹窗内的 el-tree-select 数据源）----
@@ -278,7 +293,11 @@ async function handleDelete(row: OrgRow) {
           默认态下“标题空白、表格已有数据”是有意为之，不要为了“统一”把两者合并
         -->
         <h2 class="org-panel__title">{{ rightPanelTitle }}</h2>
-        <el-button type="primary" @click="openCreateDialog">新增</el-button>
+        <div class="org-panel__actions">
+          <el-button @click="handleDownloadTemplate">下载导入模板</el-button>
+          <el-button @click="batchImportVisible = true">批量导入</el-button>
+          <el-button type="primary" @click="openCreateDialog">新增</el-button>
+        </div>
       </header>
 
       <el-table
@@ -407,6 +426,8 @@ async function handleDelete(row: OrgRow) {
         <el-button type="primary" :loading="submitting" @click="submitForm">确定</el-button>
       </template>
     </el-dialog>
+
+    <batch-import-dialog v-model="batchImportVisible" biz-type="ORG" @imported="handleImported" />
   </div>
 </template>
 
@@ -445,6 +466,12 @@ async function handleDelete(row: OrgRow) {
   font-size: 15px;
   color: var(--color-ink);
   margin: 0;
+}
+
+.org-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .org-pagination {
