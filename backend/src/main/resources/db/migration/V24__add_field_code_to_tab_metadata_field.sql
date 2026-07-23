@@ -6,32 +6,32 @@
 -- field_code 保持一致（如 id_card -> idCard、show_order -> showOrder）。
 -- ----------------------------------------------------------------------------
 
-ALTER TABLE `tab_metadata_field`
-    ADD COLUMN `field_code` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '字段标识（前端/DTO 使用），创建后不可修改'
-        AFTER `column_type`;
+-- ALTER TABLE `tab_metadata_field`
+--     ADD COLUMN `field_code` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '字段标识（前端/DTO 使用），创建后不可修改'
+--         AFTER `column_type`;
 
 -- 大多数列名本身已是驼峰/无下划线（name、code、remark、mobile、ext1~ext10），
 -- 字段标识直接等于列名。
-UPDATE `tab_metadata_field`
-SET `field_code` = `column_name`
-WHERE `column_name` NOT IN ('id_card', 'show_order', 'position_address', 'position_phone');
+-- UPDATE `tab_metadata_field`
+-- SET `field_code` = `column_name`
+-- WHERE `column_name` NOT IN ('id_card', 'show_order', 'position_address', 'position_phone');
 
 -- 含下划线的列名按驼峰转换规则显式回填，与 V21 种子数据保持一致。
-UPDATE `tab_metadata_field`
-SET `field_code` = 'idCard'
-WHERE `column_name` = 'id_card';
-
-UPDATE `tab_metadata_field`
-SET `field_code` = 'showOrder'
-WHERE `column_name` = 'show_order';
-
-UPDATE `tab_metadata_field`
-SET `field_code` = 'positionAddress'
-WHERE `column_name` = 'position_address';
-
-UPDATE `tab_metadata_field`
-SET `field_code` = 'positionPhone'
-WHERE `column_name` = 'position_phone';
-
-ALTER TABLE `tab_metadata_field`
-    ADD UNIQUE KEY `uk_tab_metadata_field_biz_field_code` (`biz_type`, `field_code`);
+-- UPDATE `tab_metadata_field`
+-- SET `field_code` = 'idCard'
+-- WHERE `column_name` = 'id_card';
+--
+-- UPDATE `tab_metadata_field`
+-- SET `field_code` = 'showOrder'
+-- WHERE `column_name` = 'show_order';
+--
+-- UPDATE `tab_metadata_field`
+-- SET `field_code` = 'positionAddress'
+-- WHERE `column_name` = 'position_address';
+--
+-- UPDATE `tab_metadata_field`
+-- SET `field_code` = 'positionPhone'
+-- WHERE `column_name` = 'position_phone';
+--
+-- ALTER TABLE `tab_metadata_field`
+--     ADD UNIQUE KEY `uk_tab_metadata_field_biz_field_code` (`biz_type`, `field_code`);

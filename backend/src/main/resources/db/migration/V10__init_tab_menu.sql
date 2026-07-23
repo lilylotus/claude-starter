@@ -13,6 +13,5 @@ CREATE TABLE `tab_menu` (
     `update_time`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),
     KEY `idx_tab_menu_parent_id` (`parent_id`),
-    KEY `idx_tab_menu_status` (`status`),
     KEY `idx_tab_menu_code` (`code`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '菜单/按钮/API 资源主数据表';

@@ -15,7 +15,6 @@ CREATE TABLE IF NOT EXISTS `tab_dict_type`
     `update_by`   VARCHAR(64)  NULL COMMENT '更新人',
     `update_time` DATETIME     NULL COMMENT '更新时间',
     PRIMARY KEY (`id`),
-    KEY `idx_tab_dict_type_status` (`status`),
     KEY `idx_tab_dict_type_code` (`code`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
@@ -37,7 +36,6 @@ CREATE TABLE IF NOT EXISTS `tab_dict_item`
     `update_time`  DATETIME     NULL COMMENT '更新时间',
     PRIMARY KEY (`id`),
     KEY `idx_tab_dict_item_dict_type_id` (`dict_type_id`),
-    KEY `idx_tab_dict_item_status` (`status`),
     KEY `idx_tab_dict_item_code` (`code`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4

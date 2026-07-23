@@ -101,6 +101,95 @@
       `./gradlew test --tests "cn.nihility.rbac.excelimport.*"` 38 个用例全部通过；
       `npm run build` 通过
 
+## 10. 补充修复：ORG 的 `parentId` 导入列（用户报告的功能缺口，2026-07-23）
+
+- [x] 10.1 新增迁移 `V29__seed_import_field_config_org.sql`，为 `bizType=ORG` 预置一条
+      固定标识列：`fieldCode=__parentCode`，`formFieldDefinitionId=NULL`，默认表头
+      "上级组织编码"，`isPrimaryKey=false`、`isRequired=false`（区别于 POSITION/APP
+      的固定列，允许留空表示顶级组织）
+- [x] 10.2 新增常量类 `cn.nihility.rbac.excelimport.constant.OrgPseudoFieldCode`
+      （`PARENT_CODE = "__parentCode"`），纳入 `LockedImportFieldConfigs` 白名单；
+      同步修正 `ImportFieldConfigServiceImpl.update` 锁定行保护逻辑——原实现硬编码
+      "锁定行的 isPrimaryKey/isRequired 必须为 true"，这对 POSITION/APP 恰好成立，
+      但会错误地阻止 ORG 的 `__parentCode`（种子值为 false）保持原值不变的正常更新
+      （如仅调整表头文字）；已改为按锁定行"当前实体值"比对是否发生变化（不区分改为
+      true 还是 false 的方向），POSITION/APP 场景行为不变（现有单测全部保持通过），
+      ORG 场景下正确允许 isRequired/isPrimaryKey 保持 false 不变的更新、拒绝把它们
+      改为 true。`ImportFieldConfigServiceImplTest` 保持 17 个用例全部通过
+- [x] 10.3 `ImportRowExecutor.processOrg` 扩展：解析 `__parentCode` 列——留空按
+      `parentId=0`（顶级）处理；非空按 `tab_org.code` 匹配得到 `parentId`，匹配不到
+      判定该行失败（"上级组织编码无法匹配到已有组织记录"），匹配到多条按既有"多条已存在
+      记录"规则判定失败；方法签名调整为 `processOrg(rowValues, configs)` 以复用
+      `headerNameOf` 拼装表头文案。额外加固：`OrgServiceImpl.update` 原本完全没有
+      防自环校验，补充"上级组织不能是自身"校验（`parentId == 自身 id` 时拒绝更新），
+      `ImportRowExecutor` 复用该 service 层校验自然抛错判定该行失败，未在
+      `ImportRowExecutor` 内重复实现（design.md Decision 4），新增
+      `OrgServiceImplTest#update_shouldThrowBusinessException_whenParentIdIsSelf`
+- [x] 10.4 已读取 `ImportFieldConfigPanel.vue`：编辑弹窗的主键/必填开关状态取自
+      `row.isPrimaryKey`/`row.isRequired` 实际值并在 `locked` 时统一禁用编辑
+      （`:disabled="editingLocked"`），列表标签也是按实际值条件渲染"主键"/"必填"
+      标签，均未硬编码"锁定即必填"的假设；ORG 的 `__parentCode` 行会正确展示为
+      "系统保护"标签、不展示"必填"标签、开关禁用且保持关闭。锁定行渲染逻辑本身通用，
+      无需改动（仅锁定提示文案"也不可取消主键或必填标记"存在轻微表述漂移，属于纯文案
+      问题且不影响功能正确性，未在本次后端改动范围内一并调整）
+- [x] 10.5 补充/更新 `ImportRowExecutorTest` 用例：新增 `orgConfigs()` 通用夹具方法
+      （组织编码 + `__parentCode`），同步为已有的 4 个 ORG 用例补上 `__parentCode`
+      列（原先完全缺失该列，属于回归判断盲区）；新增
+      `processRow_shouldCreateOrg_whenParentCodeMatched`（合法上级编码新增成功，
+      断言 `parentId` 取自匹配结果）、留空按顶级处理已由改造后的
+      `processRow_shouldCreateOrg_whenNoMatch`/`processRow_shouldUpdateOrg_whenOneMatch`
+      覆盖（断言 `parentId` 为 0）、`processRow_shouldFailOrg_whenParentCodeNotFound`
+      （无法匹配判定失败）。`ImportRowExecutorTest` 共 14 个用例全部通过
+- [x] 10.6 `./gradlew compileJava compileTestJava` 通过；
+      `./gradlew test --tests "cn.nihility.rbac.excelimport.*"` 全部通过；本次未涉及
+      前端文件改动，未运行 `npm run build`
+
+## 11. 二次调整：`__parentCode` 改为必填，字面值 `"0"` 表示顶级组织（用户要求，2026-07-23）
+
+第 10 节最初的设计是"留空表示顶级组织"（`isRequired=false`）。用户要求改为：这一列
+必填，管理员/数据整理人必须显式在每一行填写上级组织编码，若该组织本身是顶级组织，则
+填写字面值 `"0"` 而不是留空。
+
+- [x] 11.1 迁移 `V29__seed_import_field_config_org.sql` 里 `__parentCode` 这一行的
+      `is_required` 由 `0` 改为 `1`（该文件是本次改动新增、未合入其他人分支，可直接
+      编辑，不新增迁移版本号）。核实发现 `INSERT` 语句的 `is_required` 取值在本次会话
+      开始前已是 `1`（历史提交 `5b2fd72 fix(组织导入): 修复组织导入问题`），仅文件顶部
+      的说明注释仍停留在"非必填（is_required=0）"的旧描述——已同步更新注释文字，反映
+      "必填 + 字面值 0 表示顶级"的最终设计
+- [x] 11.2 `ImportRowExecutor.processOrg` 调整 `__parentCode` 解析逻辑：值为字面值
+      `"0"` 时 `parentId=0`（顶级），非 `"0"` 的非空值按 `tab_org.code` 匹配得到
+      `parentId`，匹配不到判定该行失败；`checkRequiredColumns` 沿用现有必填校验逻辑
+      即可（`isRequired=true` 时空字符串直接判定该行失败——"0" 本身不是空字符串，天然
+      能通过必填校验，无需特殊放行逻辑）
+- [x] 11.3 `LockedImportFieldConfigs`/`ImportFieldConfigServiceImpl` 的锁定行保护逻辑
+      不需要改动（第 10 节已把"锁定行 isRequired/isPrimaryKey 是否允许修改"实现为按
+      当前实体值比对是否变化，与具体是 `true` 还是 `false` 无关，`__parentCode`
+      种子值变为 `true` 后行为自动保持一致：管理员仍然不能把它改回 `false`）。仅做
+      确认，未改动相关文件
+- [x] 11.4 更新 `ImportRowExecutorTest` 中 ORG 相关用例：`orgConfigs()` 夹具里
+      `__parentCode` 改为必填；覆盖三种场景——值为 `"0"` 新增成功且 `parentId=0`
+      （`processRow_shouldCreateOrg_whenNoMatch`/`processRow_shouldUpdateOrg_whenOneMatch`
+      改为使用字面值 `"0"`，替换原先"留空按顶级处理"的语义）、值为真实上级组织编码
+      新增成功（`processRow_shouldCreateOrg_whenParentCodeMatched`，未改动）、值缺失/
+      空白判定为必填校验失败（新增 `processRow_shouldFailOrg_whenParentCodeMissing`，
+      断言消息为 `checkRequiredColumns` 的既有提示格式"字段[上级组织编码]不能为空"）；
+      另把 `processRow_shouldFailOrg_whenMultipleMatch`/
+      `processRow_shouldFailOrg_whenBeanValidationViolated` 中作为填充值的
+      `__parentCode` 由 `""` 改为 `"0"`，避免因夹具变为必填而被必填校验提前拦截、
+      掩盖了这两个用例本身要验证的场景；"上级组织编码无法匹配判定失败"
+      （`processRow_shouldFailOrg_whenParentCodeNotFound`）场景未改动，依旧有效
+- [x] 11.5 更新 design.md 中 ORG `parentId` 相关的 Risks 记录与决策说明文字，反映
+      "必填 + 0 表示顶级"而非"选填留空表示顶级"（设计文档已由用户会话预先更新，本次
+      未再改动 design.md）
+- [x] 11.6 只运行范围内的测试确认：`./gradlew compileJava compileTestJava`、
+      `./gradlew test --tests "cn.nihility.rbac.excelimport.*"`、
+      `./gradlew test --tests "cn.nihility.rbac.org.*"`；**不要**运行全量
+      `./gradlew build`/`./gradlew test`（会触发 `RbacApplicationTests` 连接本地真实
+      MySQL 执行 Flyway 迁移，本次改动范围不涉及验证既有迁移文件，避免重演上一轮"为了
+      消除本地 checksum mismatch 而反向修改历史迁移文件"的事故）；**任何情况下都不要
+      修改 V1~V28 已存在的迁移文件**，也不要执行 `git add -A`/`git commit`——改动完成后
+      交回由用户自行确认
+
 ## 8. 测试与验证
 
 - [x] 8.1 后端：导入字段配置 CRUD、POSITION/APP 固定列保护、模板生成表头顺序与必填标红、

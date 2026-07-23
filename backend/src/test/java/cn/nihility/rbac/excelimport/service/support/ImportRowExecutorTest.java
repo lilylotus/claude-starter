@@ -111,14 +111,15 @@ class ImportRowExecutorTest {
     }
 
     /**
-     * 组织编码在未删除的组织中不存在匹配记录时，应走新增流程，调用组织模块既有的
-     * create 方法。
+     * 组织编码在未删除的组织中不存在匹配记录、上级组织编码列填写字面值 {@code "0"}
+     * （表示顶级组织）时，应走新增流程，调用组织模块既有的 create 方法，
+     * {@code parentId} 按字面值 {@code "0"} 直接置为 0。
      */
     @Test
     void processRow_shouldCreateOrg_whenNoMatch() {
-        List<ImportFieldConfigVO> configs = List.of(buildConfig("code", "组织编码", true));
+        List<ImportFieldConfigVO> configs = orgConfigs();
         when(orgMapper.selectList(any())).thenReturn(List.of());
-        Map<String, String> rowValues = Map.of("code", "ORG001", "name", "测试组织");
+        Map<String, String> rowValues = Map.of("code", "ORG001", "name", "测试组织", "__parentCode", "0");
 
         importRowExecutor.processRow(FormFieldBizType.ORG, rowValues, configs);
 
@@ -126,24 +127,45 @@ class ImportRowExecutorTest {
         verify(orgService).create(captor.capture());
         assertThat(captor.getValue().getCode()).isEqualTo("ORG001");
         assertThat(captor.getValue().getName()).isEqualTo("测试组织");
+        assertThat(captor.getValue().getParentId()).isEqualTo(0L);
     }
 
     /**
-     * 组织编码匹配到一条已存在的未删除组织时，应走更新流程，调用组织模块既有的
-     * update 方法。
+     * 组织编码匹配到一条已存在的未删除组织、上级组织编码列填写字面值 {@code "0"}
+     * （表示顶级组织）时，应走更新流程，调用组织模块既有的 update 方法，
+     * {@code parentId} 同样按字面值 {@code "0"} 直接置为 0。
      */
     @Test
     void processRow_shouldUpdateOrg_whenOneMatch() {
-        List<ImportFieldConfigVO> configs = List.of(buildConfig("code", "组织编码", true));
+        List<ImportFieldConfigVO> configs = orgConfigs();
         OrgEntity existing = OrgEntity.builder().id(5L).code("ORG001").status(OrgStatus.ENABLED).build();
         when(orgMapper.selectList(any())).thenReturn(List.of(existing));
-        Map<String, String> rowValues = Map.of("code", "ORG001", "name", "测试组织（更新）");
+        Map<String, String> rowValues = Map.of(
+                "code", "ORG001", "name", "测试组织（更新）", "__parentCode", "0");
 
         importRowExecutor.processRow(FormFieldBizType.ORG, rowValues, configs);
 
         ArgumentCaptor<OrgUpdateRequest> captor = ArgumentCaptor.forClass(OrgUpdateRequest.class);
         verify(orgService).update(eq(5L), captor.capture());
         assertThat(captor.getValue().getName()).isEqualTo("测试组织（更新）");
+        assertThat(captor.getValue().getParentId()).isEqualTo(0L);
+    }
+
+    /**
+     * 上级组织编码列缺失/为空白字符串时，属于必填列未提供，应在
+     * {@code checkRequiredColumns} 阶段即判定该行失败，不进入 {@code processOrg} 的
+     * 业务逻辑，不触及 orgService 的 create/update 调用。
+     */
+    @Test
+    void processRow_shouldFailOrg_whenParentCodeMissing() {
+        List<ImportFieldConfigVO> configs = orgConfigs();
+        Map<String, String> rowValues = Map.of("code", "ORG001", "name", "测试组织", "__parentCode", "  ");
+
+        assertThatThrownBy(() -> importRowExecutor.processRow(FormFieldBizType.ORG, rowValues, configs))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("字段[上级组织编码]不能为空");
+
+        verifyNoInteractions(orgMapper, orgService);
     }
 
     /**
@@ -151,11 +173,11 @@ class ImportRowExecutorTest {
      */
     @Test
     void processRow_shouldFailOrg_whenMultipleMatch() {
-        List<ImportFieldConfigVO> configs = List.of(buildConfig("code", "组织编码", true));
+        List<ImportFieldConfigVO> configs = orgConfigs();
         OrgEntity match1 = OrgEntity.builder().id(5L).code("ORG001").status(OrgStatus.ENABLED).build();
         OrgEntity match2 = OrgEntity.builder().id(6L).code("ORG001").status(OrgStatus.ENABLED).build();
         when(orgMapper.selectList(any())).thenReturn(List.of(match1, match2));
-        Map<String, String> rowValues = Map.of("code", "ORG001", "name", "测试组织");
+        Map<String, String> rowValues = Map.of("code", "ORG001", "name", "测试组织", "__parentCode", "0");
 
         assertThatThrownBy(() -> importRowExecutor.processRow(FormFieldBizType.ORG, rowValues, configs))
                 .isInstanceOf(BusinessException.class)
@@ -169,13 +191,53 @@ class ImportRowExecutorTest {
      */
     @Test
     void processRow_shouldFailOrg_whenBeanValidationViolated() {
-        List<ImportFieldConfigVO> configs = List.of(buildConfig("code", "组织编码", true));
+        List<ImportFieldConfigVO> configs = orgConfigs();
         when(orgMapper.selectList(any())).thenReturn(List.of());
-        Map<String, String> rowValues = Map.of("code", "ORG001");
+        Map<String, String> rowValues = Map.of("code", "ORG001", "__parentCode", "0");
 
         assertThatThrownBy(() -> importRowExecutor.processRow(FormFieldBizType.ORG, rowValues, configs))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("组织名称不能为空");
+
+        verifyNoInteractions(orgService);
+    }
+
+    /**
+     * 上级组织编码列提供了合法取值且能匹配到一条已存在的未删除组织时，新增组织应
+     * 成功，{@code parentId} 取自匹配结果，而不是 Excel 中并不存在的原始文本。
+     */
+    @Test
+    void processRow_shouldCreateOrg_whenParentCodeMatched() {
+        List<ImportFieldConfigVO> configs = orgConfigs();
+        OrgEntity parent = OrgEntity.builder().id(9L).code("ROOT").status(OrgStatus.ENABLED).build();
+        when(orgMapper.selectList(any()))
+                .thenReturn(List.of(parent))
+                .thenReturn(List.of());
+        Map<String, String> rowValues = Map.of(
+                "code", "ORG001", "name", "测试组织", "__parentCode", "ROOT");
+
+        importRowExecutor.processRow(FormFieldBizType.ORG, rowValues, configs);
+
+        ArgumentCaptor<OrgCreateRequest> captor = ArgumentCaptor.forClass(OrgCreateRequest.class);
+        verify(orgService).create(captor.capture());
+        assertThat(captor.getValue().getParentId()).isEqualTo(9L);
+    }
+
+    /**
+     * 上级组织编码列提供了取值但在未删除的组织中不存在匹配记录时，应判定该行失败，
+     * 明确提示是上级组织编码无法匹配，不触及 orgService 的 create/update 调用。
+     */
+    @Test
+    void processRow_shouldFailOrg_whenParentCodeNotFound() {
+        List<ImportFieldConfigVO> configs = orgConfigs();
+        when(orgMapper.selectList(any())).thenReturn(List.of());
+        Map<String, String> rowValues = Map.of(
+                "code", "ORG001", "name", "测试组织", "__parentCode", "NOT_EXIST");
+
+        assertThatThrownBy(() -> importRowExecutor.processRow(FormFieldBizType.ORG, rowValues, configs))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("上级组织编码")
+                .hasMessageContaining("无法匹配");
 
         verifyNoInteractions(orgService);
     }
@@ -348,6 +410,19 @@ class ImportRowExecutorTest {
         verify(positionService).update(eq(9L), captor.capture());
         assertThat(captor.getValue().getOrgId()).isEqualTo(2L);
         assertThat(captor.getValue().getPositionType()).isEqualTo("primary");
+    }
+
+    /**
+     * 构造 ORG 场景下的通用导入字段配置列表：组织编码（主键、必填）+ 上级组织编码
+     * （伪字段，必填，顶级组织需显式填写字面值 {@code "0"}），供 ORG 相关用例复用，
+     * 避免遗漏 {@code __parentCode} 列导致回归判断不准确。
+     *
+     * @return ORG 场景下的导入字段配置列表
+     */
+    private List<ImportFieldConfigVO> orgConfigs() {
+        return List.of(
+                buildConfig("code", "组织编码", true),
+                buildConfig("__parentCode", "上级组织编码", true));
     }
 
     /**

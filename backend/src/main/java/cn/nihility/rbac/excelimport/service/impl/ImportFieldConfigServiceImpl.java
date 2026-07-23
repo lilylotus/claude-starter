@@ -125,11 +125,14 @@ public class ImportFieldConfigServiceImpl implements ImportFieldConfigService {
             if (request.getFormFieldDefinitionId() != null) {
                 throw new LockedImportFieldConfigException("系统保护的导入字段配置不允许改绑表单字段定义");
             }
-            if (!Boolean.TRUE.equals(request.getIsPrimaryKey())) {
-                throw new LockedImportFieldConfigException("系统保护的导入字段配置不允许取消主键标记");
+            // 锁定行的主键/必填标记须保持种子数据预置的原值：POSITION/APP 的固定列均为
+            // true，ORG 的 __parentCode 则为 false（顶级组织本无上级，允许留空），因此
+            // 与实体当前值比对是否发生变化，而不是一律强制为 true。
+            if (!Objects.equals(request.getIsPrimaryKey(), entity.getIsPrimaryKey())) {
+                throw new LockedImportFieldConfigException("系统保护的导入字段配置不允许修改主键标记");
             }
-            if (!Boolean.TRUE.equals(request.getIsRequired())) {
-                throw new LockedImportFieldConfigException("系统保护的导入字段配置不允许取消必填标记");
+            if (!Objects.equals(request.getIsRequired(), entity.getIsRequired())) {
+                throw new LockedImportFieldConfigException("系统保护的导入字段配置不允许修改必填标记");
             }
         }
 

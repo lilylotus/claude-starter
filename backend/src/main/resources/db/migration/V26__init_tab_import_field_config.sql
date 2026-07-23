@@ -28,8 +28,7 @@ CREATE TABLE IF NOT EXISTS `tab_import_field_config`
     `update_time`               DATETIME    NULL COMMENT '更新时间',
     PRIMARY KEY (`id`),
     KEY `idx_tab_import_field_config_biz_type` (`biz_type`),
-    KEY `idx_tab_import_field_config_form_field_definition_id` (`form_field_definition_id`),
-    KEY `idx_tab_import_field_config_status` (`status`)
+    KEY `idx_tab_import_field_config_form_field_definition_id` (`form_field_definition_id`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_general_ci

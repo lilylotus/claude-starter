@@ -5,38 +5,38 @@
 -- 纳入可配置范围。
 -- ----------------------------------------------------------------------------
 
-ALTER TABLE `tab_user`
-    ADD COLUMN `ext1` VARCHAR(255) NULL COMMENT '预留扩展字段 1，暂不使用' AFTER `status`,
-    ADD COLUMN `ext2` VARCHAR(255) NULL COMMENT '预留扩展字段 2，暂不使用' AFTER `ext1`,
-    ADD COLUMN `ext3` VARCHAR(255) NULL COMMENT '预留扩展字段 3，暂不使用' AFTER `ext2`,
-    ADD COLUMN `ext4` VARCHAR(255) NULL COMMENT '预留扩展字段 4，暂不使用' AFTER `ext3`,
-    ADD COLUMN `ext5` VARCHAR(255) NULL COMMENT '预留扩展字段 5，暂不使用' AFTER `ext4`,
-    ADD COLUMN `ext6` VARCHAR(255) NULL COMMENT '预留扩展字段 6，暂不使用' AFTER `ext5`,
-    ADD COLUMN `ext7` VARCHAR(255) NULL COMMENT '预留扩展字段 7，暂不使用' AFTER `ext6`,
-    ADD COLUMN `ext8` VARCHAR(255) NULL COMMENT '预留扩展字段 8，暂不使用' AFTER `ext7`,
-    ADD COLUMN `ext9` VARCHAR(255) NULL COMMENT '预留扩展字段 9，暂不使用' AFTER `ext8`,
-    ADD COLUMN `ext10` VARCHAR(255) NULL COMMENT '预留扩展字段 10，暂不使用' AFTER `ext9`;
+-- ALTER TABLE `tab_user`
+--     ADD COLUMN `ext1` VARCHAR(255) NULL COMMENT '预留扩展字段 1，暂不使用' AFTER `status`,
+--     ADD COLUMN `ext2` VARCHAR(255) NULL COMMENT '预留扩展字段 2，暂不使用' AFTER `ext1`,
+--     ADD COLUMN `ext3` VARCHAR(255) NULL COMMENT '预留扩展字段 3，暂不使用' AFTER `ext2`,
+--     ADD COLUMN `ext4` VARCHAR(255) NULL COMMENT '预留扩展字段 4，暂不使用' AFTER `ext3`,
+--     ADD COLUMN `ext5` VARCHAR(255) NULL COMMENT '预留扩展字段 5，暂不使用' AFTER `ext4`,
+--     ADD COLUMN `ext6` VARCHAR(255) NULL COMMENT '预留扩展字段 6，暂不使用' AFTER `ext5`,
+--     ADD COLUMN `ext7` VARCHAR(255) NULL COMMENT '预留扩展字段 7，暂不使用' AFTER `ext6`,
+--     ADD COLUMN `ext8` VARCHAR(255) NULL COMMENT '预留扩展字段 8，暂不使用' AFTER `ext7`,
+--     ADD COLUMN `ext9` VARCHAR(255) NULL COMMENT '预留扩展字段 9，暂不使用' AFTER `ext8`,
+--     ADD COLUMN `ext10` VARCHAR(255) NULL COMMENT '预留扩展字段 10，暂不使用' AFTER `ext9`;
 
-ALTER TABLE `tab_user_position`
-    ADD COLUMN `ext1` VARCHAR(255) NULL COMMENT '预留扩展字段 1，暂不使用' AFTER `status`,
-    ADD COLUMN `ext2` VARCHAR(255) NULL COMMENT '预留扩展字段 2，暂不使用' AFTER `ext1`,
-    ADD COLUMN `ext3` VARCHAR(255) NULL COMMENT '预留扩展字段 3，暂不使用' AFTER `ext2`,
-    ADD COLUMN `ext4` VARCHAR(255) NULL COMMENT '预留扩展字段 4，暂不使用' AFTER `ext3`,
-    ADD COLUMN `ext5` VARCHAR(255) NULL COMMENT '预留扩展字段 5，暂不使用' AFTER `ext4`,
-    ADD COLUMN `ext6` VARCHAR(255) NULL COMMENT '预留扩展字段 6，暂不使用' AFTER `ext5`,
-    ADD COLUMN `ext7` VARCHAR(255) NULL COMMENT '预留扩展字段 7，暂不使用' AFTER `ext6`,
-    ADD COLUMN `ext8` VARCHAR(255) NULL COMMENT '预留扩展字段 8，暂不使用' AFTER `ext7`,
-    ADD COLUMN `ext9` VARCHAR(255) NULL COMMENT '预留扩展字段 9，暂不使用' AFTER `ext8`,
-    ADD COLUMN `ext10` VARCHAR(255) NULL COMMENT '预留扩展字段 10，暂不使用' AFTER `ext9`;
+-- ALTER TABLE `tab_user_position`
+--     ADD COLUMN `ext1` VARCHAR(255) NULL COMMENT '预留扩展字段 1，暂不使用' AFTER `status`,
+--     ADD COLUMN `ext2` VARCHAR(255) NULL COMMENT '预留扩展字段 2，暂不使用' AFTER `ext1`,
+--     ADD COLUMN `ext3` VARCHAR(255) NULL COMMENT '预留扩展字段 3，暂不使用' AFTER `ext2`,
+--     ADD COLUMN `ext4` VARCHAR(255) NULL COMMENT '预留扩展字段 4，暂不使用' AFTER `ext3`,
+--     ADD COLUMN `ext5` VARCHAR(255) NULL COMMENT '预留扩展字段 5，暂不使用' AFTER `ext4`,
+--     ADD COLUMN `ext6` VARCHAR(255) NULL COMMENT '预留扩展字段 6，暂不使用' AFTER `ext5`,
+--     ADD COLUMN `ext7` VARCHAR(255) NULL COMMENT '预留扩展字段 7，暂不使用' AFTER `ext6`,
+--     ADD COLUMN `ext8` VARCHAR(255) NULL COMMENT '预留扩展字段 8，暂不使用' AFTER `ext7`,
+--     ADD COLUMN `ext9` VARCHAR(255) NULL COMMENT '预留扩展字段 9，暂不使用' AFTER `ext8`,
+--     ADD COLUMN `ext10` VARCHAR(255) NULL COMMENT '预留扩展字段 10，暂不使用' AFTER `ext9`;
 
-ALTER TABLE `tab_app`
-    ADD COLUMN `ext1` VARCHAR(255) NULL COMMENT '预留扩展字段 1，暂不使用' AFTER `status`,
-    ADD COLUMN `ext2` VARCHAR(255) NULL COMMENT '预留扩展字段 2，暂不使用' AFTER `ext1`,
-    ADD COLUMN `ext3` VARCHAR(255) NULL COMMENT '预留扩展字段 3，暂不使用' AFTER `ext2`,
-    ADD COLUMN `ext4` VARCHAR(255) NULL COMMENT '预留扩展字段 4，暂不使用' AFTER `ext3`,
-    ADD COLUMN `ext5` VARCHAR(255) NULL COMMENT '预留扩展字段 5，暂不使用' AFTER `ext4`,
-    ADD COLUMN `ext6` VARCHAR(255) NULL COMMENT '预留扩展字段 6，暂不使用' AFTER `ext5`,
-    ADD COLUMN `ext7` VARCHAR(255) NULL COMMENT '预留扩展字段 7，暂不使用' AFTER `ext6`,
-    ADD COLUMN `ext8` VARCHAR(255) NULL COMMENT '预留扩展字段 8，暂不使用' AFTER `ext7`,
-    ADD COLUMN `ext9` VARCHAR(255) NULL COMMENT '预留扩展字段 9，暂不使用' AFTER `ext8`,
-    ADD COLUMN `ext10` VARCHAR(255) NULL COMMENT '预留扩展字段 10，暂不使用' AFTER `ext9`;
+-- ALTER TABLE `tab_app`
+--     ADD COLUMN `ext1` VARCHAR(255) NULL COMMENT '预留扩展字段 1，暂不使用' AFTER `status`,
+--     ADD COLUMN `ext2` VARCHAR(255) NULL COMMENT '预留扩展字段 2，暂不使用' AFTER `ext1`,
+--     ADD COLUMN `ext3` VARCHAR(255) NULL COMMENT '预留扩展字段 3，暂不使用' AFTER `ext2`,
+--     ADD COLUMN `ext4` VARCHAR(255) NULL COMMENT '预留扩展字段 4，暂不使用' AFTER `ext3`,
+--     ADD COLUMN `ext5` VARCHAR(255) NULL COMMENT '预留扩展字段 5，暂不使用' AFTER `ext4`,
+--     ADD COLUMN `ext6` VARCHAR(255) NULL COMMENT '预留扩展字段 6，暂不使用' AFTER `ext5`,
+--     ADD COLUMN `ext7` VARCHAR(255) NULL COMMENT '预留扩展字段 7，暂不使用' AFTER `ext6`,
+--     ADD COLUMN `ext8` VARCHAR(255) NULL COMMENT '预留扩展字段 8，暂不使用' AFTER `ext7`,
+--     ADD COLUMN `ext9` VARCHAR(255) NULL COMMENT '预留扩展字段 9，暂不使用' AFTER `ext8`,
+--     ADD COLUMN `ext10` VARCHAR(255) NULL COMMENT '预留扩展字段 10，暂不使用' AFTER `ext9`;

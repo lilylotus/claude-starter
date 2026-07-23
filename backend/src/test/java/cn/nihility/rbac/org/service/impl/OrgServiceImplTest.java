@@ -16,6 +16,7 @@ import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.constant.OrgStatus;
 import cn.nihility.rbac.org.dto.OrgCreateRequest;
 import cn.nihility.rbac.org.dto.OrgTreeNodeVO;
+import cn.nihility.rbac.org.dto.OrgUpdateRequest;
 import cn.nihility.rbac.org.dto.OrgVO;
 import cn.nihility.rbac.org.entity.OrgEntity;
 import cn.nihility.rbac.org.mapper.OrgMapper;
@@ -180,6 +181,27 @@ class OrgServiceImplTest {
         verify(operationLogRecorder, times(1))
                 .recordDelete(org.mockito.ArgumentMatchers.eq("org"), org.mockito.ArgumentMatchers.eq(1L),
                         org.mockito.ArgumentMatchers.eq("总公司"), any(Map.class));
+    }
+
+    /**
+     * 更新组织时，若上级组织 id 与自身 id 相同，应拒绝更新并给出明确提示，避免产生
+     * 自环（parentId 指向自身）。
+     */
+    @Test
+    void update_shouldThrowBusinessException_whenParentIdIsSelf() {
+        OrgEntity entity = buildEntity(1L, "研发部", "DEV", 0L, OrgStatus.ENABLED, 0);
+        when(orgMapper.selectById(1L)).thenReturn(entity);
+        lenient().when(orgMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+
+        OrgUpdateRequest request = new OrgUpdateRequest();
+        request.setName("研发部");
+        request.setCode("DEV");
+        request.setParentId(1L);
+        request.setShowOrder(0);
+
+        assertThatThrownBy(() -> orgService.update(1L, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("上级组织不能是自身");
     }
 
     /**

@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS `tab_form_field_definition`
     `metadata_field_id` BIGINT       NOT NULL COMMENT '绑定的元数据字段 id，关联 tab_metadata_field.id，创建后不可改绑',
     `field_name`        VARCHAR(64)  NOT NULL COMMENT '展示名称，创建时默认取自元数据字段的 field_name，此后可独立编辑',
     `field_code`        VARCHAR(64)  NOT NULL COMMENT '前端/DTO 使用的字段标识，如 idCardNo，同一 biz_type 下唯一',
-    `control_type`      INT          NOT NULL COMMENT '控件类型：1=文本框，2=数字框，3=字典下拉',
+    `control_type`      INT          NOT NULL COMMENT '控件类型：1=文本框，2=数字框，3=字典下拉，4=日期，5=多选字典下拉',
     `dict_type_id`      BIGINT       NULL COMMENT '关联的字典类型 id，仅 control_type=3 时必填',
     `is_unique`         TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '是否要求同 biz_type 下有效数据唯一',
     `is_required`       TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '是否必填',
@@ -31,8 +31,7 @@ CREATE TABLE IF NOT EXISTS `tab_form_field_definition`
     `update_time`       DATETIME     NULL COMMENT '更新时间',
     PRIMARY KEY (`id`),
     KEY `idx_tab_form_field_definition_biz_type` (`biz_type`),
-    KEY `idx_tab_form_field_definition_metadata_field_id` (`metadata_field_id`),
-    KEY `idx_tab_form_field_definition_status` (`status`)
+    KEY `idx_tab_form_field_definition_metadata_field_id` (`metadata_field_id`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_general_ci

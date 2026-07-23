@@ -177,6 +177,34 @@ Excel 的典型文件体积，因此把 `max-file-size`/`max-request-size` 都�
 - **[取舍] 不做导入预校验（先扫描整份文件报告问题、再决定是否真正写入）**，直接边解析边写库
   → 用户体验上不如"预检"直观，但避免了两套校验逻辑（预检 vs 实际导入）不一致的维护成本；
   管理员可通过小批量试导入的方式自行"预检"。
+- **[已解决，2026-07-23 二次调整] ORG 的 `parentId` 导入列缺失，无法通过导入定位上级
+  组织**（2026-07-23 用户报告）——`OrgCreateRequest`/`OrgUpdateRequest` 的 `parentId`
+  为 `@NotNull`（默认值 0 表示顶级），但它在 `tab_form_field_definition` 体系里没有
+  对应条目（组织管理页面里是树形选择器，不是可开放配置的展示字段），
+  `ImportRowExecutor.processOrg` 原本完全不解析上级组织，导致任意一行导入的组织都被
+  当作顶级节点新增/更新，无法用于批量建立组织层级——与下面已解决的 APP `ownerId`/
+  `orgId` 是同一类缺口。修复方式比照 POSITION/APP：新增迁移预置 ORG 的 `__parentCode`
+  （上级组织编码，匹配 `tab_org.code`）固定标识列，常量定义在新增的
+  `cn.nihility.rbac.excelimport.constant.OrgPseudoFieldCode`，纳入
+  `LockedImportFieldConfigs` 白名单。
+
+  **首次实现（`is_required=false`，留空表示顶级）**：`__parentCode` 留空时按批量导入
+  固有的"整行覆盖"语义把 `parentId` 显式置为 0，非空时按 `tab_org.code` 匹配得到
+  `parentId`，匹配不到该行判定失败。顺带发现并修复 `ImportFieldConfigServiceImpl`
+  锁定行保护逻辑的一处通用性缺陷（原先硬编码"锁定行的 isPrimaryKey/isRequired 必须为
+  true"，只对 POSITION/APP 恰好成立），改为按锁定行"当前实体值是否被改动"判定，与具体
+  是 `true` 还是 `false` 无关；顺带给 `OrgServiceImpl.update` 补上此前完全缺失的
+  "上级组织不能是自身"防自环校验。
+
+  **二次调整（用户要求，同日）**：把"留空表示顶级"改为"必填 + 字面值 `"0"` 表示顶级"
+  ——管理员/数据整理人必须在每一行显式填写上级组织编码，顶级组织填 `"0"`，不再允许
+  留空。`is_required` 由 `false` 改为 `true`（与 POSITION/APP 的固定列保持一致的必填
+  语义，不再是 ORG 特例）；`processOrg` 判定逻辑相应调整为：值等于字面值 `"0"` →
+  `parentId=0`，其余非空值按 `tab_org.code` 匹配，匹配不到该行判定失败；空字符串/缺失
+  由既有的必填校验（`checkRequiredColumns`）在到达 `processOrg` 之前就判失败，无需
+  额外处理。前一轮为兼容"可选"语义而对锁定行保护逻辑做的通用化改动（按当前实体值比对
+  而非硬编码 `true`）继续保留且仍然正确——`__parentCode` 种子值变为 `true` 后自动获得
+  与 POSITION/APP 一致的"不可被改回 false"保护，不需要为此再单独改代码。
 - **[已解决] APP 的 `ownerId`/`orgId` 导入列配置**——`AppCreateRequest`/
   `AppUpdateRequest` 的 `ownerId`/`orgId` 均为 `@NotNull` 必填字段，但两者在
   `tab_form_field_definition` 体系里没有对应条目（APP 管理页面里是选择器，不是可开放配置的

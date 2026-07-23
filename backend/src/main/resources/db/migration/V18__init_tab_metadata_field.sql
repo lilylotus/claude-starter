@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS `tab_metadata_field`
     `biz_type`    VARCHAR(20)  NOT NULL COMMENT '业务对象类型：ORG/USER/POSITION/APP',
     `table_name`  VARCHAR(64)  NOT NULL COMMENT '字段所属表名称，如 tab_org，创建后不可修改',
     `column_name` VARCHAR(64)  NOT NULL COMMENT '字段列名（数据库字段定义），如 code、ext6，创建后不可修改',
+    `field_code`  VARCHAR(64) NOT NULL DEFAULT '' COMMENT '字段标识（前端/DTO 使用），创建后不可修改',
     `column_type` VARCHAR(32)  NOT NULL COMMENT '字段类型（数据库字段类型），如 VARCHAR(255)，创建后不可修改',
     `field_name`  VARCHAR(64)  NOT NULL COMMENT '字段名称，如"组织编码"，可编辑',
     `status`      INT          NOT NULL DEFAULT 2000 COMMENT '状态：2000=启用，3000=停用，-1000=已删除（逻辑删除，当前不使用）',
@@ -20,8 +21,8 @@ CREATE TABLE IF NOT EXISTS `tab_metadata_field`
     `update_time` DATETIME     NULL COMMENT '更新时间',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_tab_metadata_field_table_column` (`table_name`, `column_name`),
-    KEY `idx_tab_metadata_field_biz_type` (`biz_type`),
-    KEY `idx_tab_metadata_field_status` (`status`)
+    UNIQUE KEY `uk_tab_metadata_field_biz_field_code` (`biz_type`, `field_code`),
+    KEY `idx_tab_metadata_field_biz_type` (`biz_type`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_general_ci

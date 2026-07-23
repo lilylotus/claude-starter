@@ -160,6 +160,9 @@ public class OrgServiceImpl implements OrgService {
     public OrgVO update(Long id, OrgUpdateRequest request) {
         OrgEntity entity = getExistingEntity(id);
         checkCodeUnique(request.getCode(), id);
+        if (Objects.equals(request.getParentId(), id)) {
+            throw new BusinessException("上级组织不能是自身");
+        }
         validateDynamicFields(request, false, id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 

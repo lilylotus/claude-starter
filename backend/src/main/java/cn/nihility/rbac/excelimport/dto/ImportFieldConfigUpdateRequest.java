@@ -11,9 +11,11 @@ import lombok.Setter;
  * 更新 Excel 导入字段配置的请求参数。不包含 {@code bizType}（创建后不可修改）与
  * {@code fieldCode}（完全派生自绑定的表单字段定义或创建时的初始值，改绑时由服务层
  * 同步刷新，客户端无需也无法直接提交）。对锁定（系统保护）的配置（POSITION 的
- * {@code __userCode}/{@code __orgCode}），服务层会拒绝将 {@code formFieldDefinitionId}
- * 改绑为不同的值，也会拒绝将 {@code isPrimaryKey}/{@code isRequired} 改为 {@code false}；
- * {@code excelHeaderName}/{@code showOrder} 仍可调整。
+ * {@code __userCode}/{@code __orgCode}、APP 的 {@code __ownerCode}/{@code __orgCode}、
+ * ORG 的 {@code __parentCode}），服务层会拒绝将 {@code formFieldDefinitionId} 改绑为
+ * 不同的值，也会拒绝修改 {@code isPrimaryKey}/{@code isRequired}（须保持种子数据
+ * 预置的原值，不区分改为 {@code true} 还是 {@code false}）；{@code excelHeaderName}/
+ * {@code showOrder} 仍可调整。
  */
 @Getter
 @Setter
@@ -33,12 +35,12 @@ public class ImportFieldConfigUpdateRequest {
     @Schema(description = "Excel 表头文字")
     private String excelHeaderName;
 
-    /** 是否作为匹配已有记录的主键列之一。锁定配置不允许改为 {@code false}。 */
+    /** 是否作为匹配已有记录的主键列之一。锁定配置不允许修改（须保持种子数据预置的原值）。 */
     @NotNull(message = "是否主键不能为空")
     @Schema(description = "是否作为匹配已有记录的主键列之一")
     private Boolean isPrimaryKey;
 
-    /** 导入语义下的必填。锁定配置不允许改为 {@code false}。 */
+    /** 导入语义下的必填。锁定配置不允许修改（须保持种子数据预置的原值）。 */
     @NotNull(message = "是否必填不能为空")
     @Schema(description = "导入语义下的必填")
     private Boolean isRequired;

@@ -4,6 +4,6 @@
 -- 仅更新 tab_form_field_definition.control_type 的列注释说明取值范围。
 -- ----------------------------------------------------------------------------
 
-ALTER TABLE `tab_form_field_definition`
-    MODIFY COLUMN `control_type` INT NOT NULL
-        COMMENT '控件类型：1=文本框，2=数字框，3=字典下拉，4=日期，5=多选字典下拉';
+-- ALTER TABLE `tab_form_field_definition`
+--     MODIFY COLUMN `control_type` INT NOT NULL
+--         COMMENT '控件类型：1=文本框，2=数字框，3=字典下拉，4=日期，5=多选字典下拉';

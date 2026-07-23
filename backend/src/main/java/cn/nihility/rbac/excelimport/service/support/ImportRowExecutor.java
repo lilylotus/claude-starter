@@ -8,6 +8,7 @@ import cn.nihility.rbac.app.mapper.AppMapper;
 import cn.nihility.rbac.app.service.AppService;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.excelimport.constant.AppPseudoFieldCode;
+import cn.nihility.rbac.excelimport.constant.OrgPseudoFieldCode;
 import cn.nihility.rbac.excelimport.constant.PositionPseudoFieldCode;
 import cn.nihility.rbac.excelimport.dto.ImportFieldConfigVO;
 import cn.nihility.rbac.formfield.constant.FormFieldBizType;
@@ -99,7 +100,7 @@ public class ImportRowExecutor {
     public void processRow(String bizType, Map<String, String> rowValues, List<ImportFieldConfigVO> configs) {
         checkRequiredColumns(rowValues, configs);
         switch (bizType) {
-            case FormFieldBizType.ORG -> processOrg(rowValues);
+            case FormFieldBizType.ORG -> processOrg(rowValues, configs);
             case FormFieldBizType.USER -> processUser(rowValues);
             case FormFieldBizType.APP -> processApp(rowValues, configs);
             case FormFieldBizType.POSITION -> processPosition(rowValues, configs);
@@ -125,15 +126,39 @@ public class ImportRowExecutor {
     }
 
     /**
-     * 处理一行组织数据：按组织编码（{@code code}）匹配已有记录。
+     * 处理一行组织数据：按组织编码（{@code code}）匹配已有记录；"上级组织编码"列
+     * （伪字段 {@link OrgPseudoFieldCode#PARENT_CODE}）与 POSITION/APP 的固定标识列
+     * 一样为必填列，缺失/空白已由 {@link #checkRequiredColumns} 在到达本方法之前
+     * 判定失败——本方法只需处理该列已提供非空值的情形：字面值为 {@code "0"} 时
+     * {@code parentId} 直接置为 0（顶级组织本无上级）；其余取值按 {@code tab_org.code}
+     * 匹配得到 {@code parentId}，匹配不到已有组织时该行判定失败（design.md
+     * Decision 2 二次调整）。
      *
      * @param rowValues 本行数据
+     * @param configs   当前 bizType（ORG）下启用的导入字段配置列表，用于解析
+     *                  上级组织编码列对应的表头文字，拼装更友好的失败提示
      */
-    private void processOrg(Map<String, String> rowValues) {
+    private void processOrg(Map<String, String> rowValues, List<ImportFieldConfigVO> configs) {
         String code = rowValues.get("code");
         if (!StringUtils.hasText(code)) {
             throw new BusinessException("组织编码不能为空");
         }
+
+        String parentCodeHeader = headerNameOf(configs, OrgPseudoFieldCode.PARENT_CODE, "上级组织编码");
+        String parentCode = rowValues.get(OrgPseudoFieldCode.PARENT_CODE);
+        Long parentId;
+        if ("0".equals(parentCode)) {
+            parentId = 0L;
+        } else {
+            OrgEntity parent = findSingleActive(orgMapper.selectList(new LambdaQueryWrapper<OrgEntity>()
+                    .eq(OrgEntity::getCode, parentCode)
+                    .ne(OrgEntity::getStatus, OrgStatus.DELETED)));
+            if (parent == null) {
+                throw new BusinessException(parentCodeHeader + "无法匹配到已有组织记录");
+            }
+            parentId = parent.getId();
+        }
+
         List<OrgEntity> matches = orgMapper.selectList(new LambdaQueryWrapper<OrgEntity>()
                 .eq(OrgEntity::getCode, code)
                 .ne(OrgEntity::getStatus, OrgStatus.DELETED));
@@ -143,11 +168,13 @@ public class ImportRowExecutor {
         if (matches.isEmpty()) {
             OrgCreateRequest request = new OrgCreateRequest();
             bindProperties(request, rowValues);
+            request.setParentId(parentId);
             validateRequest(request);
             orgService.create(request);
         } else {
             OrgUpdateRequest request = new OrgUpdateRequest();
             bindProperties(request, rowValues);
+            request.setParentId(parentId);
             validateRequest(request);
             orgService.update(matches.get(0).getId(), request);
         }
@@ -307,7 +334,8 @@ public class ImportRowExecutor {
 
     /**
      * 在多条匹配记录中判定异常，单条时返回该记录，零条返回 {@code null}，供
-     * {@link #processPosition} 复用统一的"零/一/多"判定语义。
+     * {@link #processOrg}/{@link #processApp}/{@link #processPosition} 复用统一的
+     * "零/一/多"判定语义。
      *
      * @param matches 查询命中的记录列表
      * @param <T>     记录类型
@@ -322,7 +350,8 @@ public class ImportRowExecutor {
 
     /**
      * 从导入字段配置列表中解析指定伪字段标识对应的 Excel 表头文字，未配置时回退到
-     * 给定的默认文案（正常不会发生，POSITION 的两条固定标识列由数据库迁移预置）。
+     * 给定的默认文案（正常不会发生，POSITION/APP/ORG 的固定标识列均由数据库迁移
+     * 预置）。
      *
      * @param configs      导入字段配置列表
      * @param fieldCode    字段标识

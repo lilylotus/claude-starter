@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS `tab_org`
     `parent_id`   BIGINT       NOT NULL DEFAULT 0 COMMENT '上级组织 id，0 表示顶级/根节点',
     `status`      INT          NOT NULL DEFAULT 2000 COMMENT '状态：2000=启用，3000=停用，-1000=已删除（逻辑删除）',
     `show_order`  INT          NOT NULL DEFAULT 0 COMMENT '显示序号，值越大越靠前',
+    `remark`      VARCHAR(255) NULL COMMENT '备注',
     `ext1`        VARCHAR(255) NULL COMMENT '预留扩展字段 1，暂不使用',
     `ext2`        VARCHAR(255) NULL COMMENT '预留扩展字段 2，暂不使用',
     `ext3`        VARCHAR(255) NULL COMMENT '预留扩展字段 3，暂不使用',
@@ -27,7 +28,6 @@ CREATE TABLE IF NOT EXISTS `tab_org`
     `update_time` DATETIME     NULL COMMENT '更新时间',
     PRIMARY KEY (`id`),
     KEY `idx_tab_org_parent_id` (`parent_id`),
-    KEY `idx_tab_org_status` (`status`),
     KEY `idx_tab_org_code` (`code`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4

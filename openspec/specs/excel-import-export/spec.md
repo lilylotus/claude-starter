@@ -1,4 +1,13 @@
-## ADDED Requirements
+# excel-import-export
+
+## Purpose
+
+为组织、人员、任职、应用四类主数据提供统一的 Excel 批量导入与模板下载能力：按业务对象
+类型（`bizType`）维护可配置的导入字段列（含 POSITION/APP/ORG 的固定标识列），支持
+下载与该配置一致的导入模板、上传 Excel 后按主键列匹配已有记录执行新增或更新、以及在
+表单管理页面对导入字段配置进行可视化管理。
+
+## Requirements
 
 ### Requirement: 导入字段配置数据模型
 系统 SHALL 提供 `tab_import_field_config` 表，按业务对象类型（`bizType`，取值
@@ -20,17 +29,21 @@ SHALL 唯一（未删除范围内）。
   新增另一条 `fieldCode` 同样为 `mobile` 的配置
 - **THEN** 系统拒绝创建，返回业务错误
 
-### Requirement: POSITION 与 APP 预置固定标识列
+### Requirement: POSITION、APP 与 ORG 预置固定标识列
 系统 SHALL 通过数据库迁移为 `bizType=POSITION` 预置两条不可删除、不可取消必填的固定导入
 配置：`fieldCode=__userCode`（表头默认"人员编号"，匹配 `tab_user.code`）与
-`fieldCode=__orgCode`（表头默认"组织编码"，匹配 `tab_org.code`）；并为 `bizType=APP`
+`fieldCode=__orgCode`（表头默认"组织编码"，匹配 `tab_org.code`）；为 `bizType=APP`
 同样预置两条：`fieldCode=__ownerCode`（表头默认"负责人编号"，匹配 `tab_user.code`）与
 `fieldCode=__orgCode`（表头默认"组织编码"，匹配 `tab_org.code`）——APP 的 `ownerId`/
 `orgId` 与 POSITION 的 `userId`/`orgId` 一样是关联选择器而非表单字段定义体系内的展示
-字段，但对应的创建/更新请求要求二者必填，需要同样的固定标识列机制才能被批量导入覆盖到。
-上述四条配置的 `formFieldDefinitionId` 均为 `NULL`、`isPrimaryKey` 默认 `true`、
-`isRequired` 恒为 `true`。更新/停用/删除这四条配置的请求 SHALL 被拒绝；其
-`excelHeaderName`、`showOrder` 仍可调整。
+字段，但对应的创建/更新请求要求二者必填，需要同样的固定标识列机制才能被批量导入覆盖到；
+并为 `bizType=ORG` 预置一条：`fieldCode=__parentCode`（表头默认"上级组织编码"，匹配
+`tab_org.code`）——`parentId` 同样是选择器而非展示字段，创建/更新请求同样要求必填（默认值
+0 表示顶级，见"组织导入的上级组织标识映射"需求关于字面值 `"0"` 的约定）。上述七条固定
+配置的 `formFieldDefinitionId` 均为 `NULL`、`isPrimaryKey` 默认 `true`（`__parentCode`
+除外，其 `isPrimaryKey` 为 `false`，因为上级组织不参与"匹配已有组织记录"的主键判定，仅用于
+解析出 `parentId`）、`isRequired` 恒为 `true`。更新/停用/删除这七条配置的请求 SHALL 被
+拒绝；其 `excelHeaderName`、`showOrder` 仍可调整。
 
 #### Scenario: 尝试删除人员编号标识列被拒绝
 - **WHEN** 客户端调用删除接口，目标是 `bizType=POSITION` 下 `fieldCode=__userCode` 的
@@ -45,6 +58,11 @@ SHALL 唯一（未删除范围内）。
 #### Scenario: 尝试删除负责人编号标识列被拒绝
 - **WHEN** 客户端调用删除接口，目标是 `bizType=APP` 下 `fieldCode=__ownerCode` 的配置
 - **THEN** 系统拒绝删除，返回业务错误
+
+#### Scenario: 尝试取消上级组织编码标识列的必填被拒绝
+- **WHEN** 客户端更新 `bizType=ORG` 下 `fieldCode=__parentCode` 的配置，请求体
+  `isRequired=false`
+- **THEN** 系统拒绝该次更新中 `isRequired` 的变更，返回业务错误
 
 ### Requirement: 导入字段配置管理接口
 系统 SHALL 提供导入字段配置的分页/列表查询（按 `bizType` 过滤，按 `showOrder` 升序）、
@@ -136,6 +154,28 @@ SHALL 不影响其余行的处理，最终返回本次导入的成功条数与�
 #### Scenario: 负责人编号无法匹配到任何用户
 - **WHEN** 导入 APP 一行数据，"负责人编号"列取值在当前未删除的用户记录中不存在
 - **THEN** 该行被计入失败明细，原因说明负责人编号无法匹配到已有人员记录
+
+### Requirement: 组织导入的上级组织标识映射
+系统 SHALL 将 ORG 导入行中"上级组织编码"列的取值解析为 `parentId`：取值为字面量
+`"0"` 时 `parentId` 设为 `0`（表示该组织是顶级组织，无上级）；取值为其他非空字符串时，
+按未删除范围内的 `tab_org.code` 匹配得到 `parentId`，匹配不到有效记录时该行 SHALL
+判定为失败，失败原因 SHALL 指出上级组织编码无法匹配；该列为必填列，取值缺失或为空
+字符串时该行 SHALL 在必填校验阶段即判定失败（不进入上级组织匹配逻辑）。
+
+#### Scenario: 上级组织编码为 0 时导入为顶级组织
+- **WHEN** 导入 ORG 一行数据，"上级组织编码"列取值为字面量 `"0"`
+- **THEN** 系统将该组织的 `parentId` 设为 0，作为顶级组织新增或更新，不做上级组织匹配
+  查询
+
+#### Scenario: 上级组织编码无法匹配到任何组织
+- **WHEN** 导入 ORG 一行数据，"上级组织编码"列取值不为 `"0"`，且在当前未删除的组织记录
+  中不存在匹配的 `code`
+- **THEN** 该行被计入失败明细，原因说明上级组织编码无法匹配到已有组织记录
+
+#### Scenario: 上级组织编码留空判定为必填缺失
+- **WHEN** 导入 ORG 一行数据，"上级组织编码"列取值为空
+- **THEN** 该行在必填校验阶段被计入失败明细，原因说明该列不能为空，不进入上级组织匹配
+  逻辑
 
 ### Requirement: 管理页面的导入模板下载与批量导入入口
 系统 SHALL 在组织、人员、任职、应用四个管理页面的工具栏新增"下载导入模板"按钮（触发对应

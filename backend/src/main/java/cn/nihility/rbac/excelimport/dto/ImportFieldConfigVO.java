@@ -61,9 +61,9 @@ public class ImportFieldConfigVO {
     /**
      * 是否为锁定（系统保护）配置，根据 {@code (bizType, fieldCode)} 是否命中
      * {@code LockedImportFieldConfigs} 白名单计算得出，不落库。锁定的配置不可删除，
-     * 也不可把主键/必填标记改为否。
+     * 也不可修改主键/必填标记（须保持种子数据预置的原值）。
      */
-    @Schema(description = "是否为锁定（系统保护）配置，计算得出，不可删除/取消主键或必填标记")
+    @Schema(description = "是否为锁定（系统保护）配置，计算得出，不可删除/修改主键或必填标记")
     private Boolean locked;
 
     /** 创建人。 */

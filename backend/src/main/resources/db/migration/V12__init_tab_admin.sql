@@ -11,7 +11,6 @@ CREATE TABLE `tab_admin` (
     `update_by`   VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
     `update_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),
-    KEY `idx_tab_admin_status` (`status`),
     KEY `idx_tab_admin_code` (`code`),
     KEY `idx_tab_admin_user_id` (`user_id`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '管理员主数据表';

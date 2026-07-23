@@ -5,12 +5,16 @@ import java.util.Set;
 
 /**
  * 锁定（系统保护）的导入字段配置白名单：POSITION 的 {@code __userCode}/
- * {@code __orgCode}、APP 的 {@code __ownerCode}/{@code __orgCode} 固定标识列均由
- * 数据库迁移预置，不属于管理员可以自由增删的配置项，因此在此维护一份
- * {@code (bizType, fieldCode)} 常量白名单，供服务层在更新/删除时反查计算得出一个
- * 只读的 {@code locked} 标记：锁定的配置不可删除、不可改绑表单字段定义、不可取消
- * 主键/必填标记，仅 {@code excelHeaderName}/{@code showOrder} 仍可调整
- * （design.md Decision 2、spec.md "POSITION 预置固定标识列"）。
+ * {@code __orgCode}、APP 的 {@code __ownerCode}/{@code __orgCode}、ORG 的
+ * {@code __parentCode} 固定标识列均由数据库迁移预置，不属于管理员可以自由增删的
+ * 配置项，因此在此维护一份 {@code (bizType, fieldCode)} 常量白名单，供服务层在
+ * 更新/删除时反查计算得出一个只读的 {@code locked} 标记：锁定的配置不可删除、
+ * 不可改绑表单字段定义、不可修改主键/必填标记（保持种子数据预置的原值，
+ * POSITION/APP 的固定列均为 {@code isPrimaryKey=true}/{@code isRequired=true}，
+ * ORG 的 {@code __parentCode} 则为 {@code isPrimaryKey=false}/
+ * {@code isRequired=false}——顶级组织本无上级，允许留空），仅
+ * {@code excelHeaderName}/{@code showOrder} 仍可调整（design.md Decision 2、
+ * spec.md "POSITION 预置固定标识列"）。
  */
 public final class LockedImportFieldConfigs {
 
@@ -19,7 +23,8 @@ public final class LockedImportFieldConfigs {
             key(FormFieldBizType.POSITION, PositionPseudoFieldCode.USER_CODE),
             key(FormFieldBizType.POSITION, PositionPseudoFieldCode.ORG_CODE),
             key(FormFieldBizType.APP, AppPseudoFieldCode.OWNER_CODE),
-            key(FormFieldBizType.APP, AppPseudoFieldCode.ORG_CODE));
+            key(FormFieldBizType.APP, AppPseudoFieldCode.ORG_CODE),
+            key(FormFieldBizType.ORG, OrgPseudoFieldCode.PARENT_CODE));
 
     /**
      * 工具类不允许实例化。
