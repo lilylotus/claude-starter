@@ -61,7 +61,7 @@ class DictTypeServiceImplTest {
         when(dictTypeMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(1L);
 
         DictTypeCreateRequest request = new DictTypeCreateRequest();
-        request.setName("认证类型");
+        request.setName("任职类型");
         request.setCode("position_type");
         request.setShowOrder(0);
 
@@ -75,12 +75,12 @@ class DictTypeServiceImplTest {
      */
     @Test
     void update_shouldThrowBusinessException_whenCodeConflictsWithAnotherDictType() {
-        DictTypeEntity entity = buildEntity(1L, "认证类型", "position_type", DictStatus.ENABLED, 0);
+        DictTypeEntity entity = buildEntity(1L, "任职类型", "position_type", DictStatus.ENABLED, 0);
         when(dictTypeMapper.selectById(1L)).thenReturn(entity);
         when(dictTypeMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(1L);
 
         DictTypeUpdateRequest request = new DictTypeUpdateRequest();
-        request.setName("认证类型");
+        request.setName("任职类型");
         request.setCode("other_type");
         request.setShowOrder(0);
 
@@ -94,7 +94,7 @@ class DictTypeServiceImplTest {
      */
     @Test
     void delete_shouldThrowBusinessException_whenUndeletedItemsExist() {
-        DictTypeEntity entity = buildEntity(1L, "认证类型", "position_type", DictStatus.ENABLED, 0);
+        DictTypeEntity entity = buildEntity(1L, "任职类型", "position_type", DictStatus.ENABLED, 0);
         when(dictTypeMapper.selectById(1L)).thenReturn(entity);
         when(dictItemMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(1L);
 
@@ -108,7 +108,7 @@ class DictTypeServiceImplTest {
      */
     @Test
     void delete_shouldSucceed_whenNoUndeletedItemsExist() {
-        DictTypeEntity entity = buildEntity(1L, "认证类型", "position_type", DictStatus.ENABLED, 0);
+        DictTypeEntity entity = buildEntity(1L, "任职类型", "position_type", DictStatus.ENABLED, 0);
         when(dictTypeMapper.selectById(1L)).thenReturn(entity);
         when(dictItemMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
 
@@ -135,7 +135,7 @@ class DictTypeServiceImplTest {
      */
     @Test
     void getById_shouldThrowBusinessException_whenDictTypeDeleted() {
-        DictTypeEntity entity = buildEntity(1L, "认证类型", "position_type", DictStatus.DELETED, 0);
+        DictTypeEntity entity = buildEntity(1L, "任职类型", "position_type", DictStatus.DELETED, 0);
         when(dictTypeMapper.selectById(1L)).thenReturn(entity);
 
         assertThatThrownBy(() -> dictTypeService.getById(1L))

@@ -21,10 +21,10 @@ public class PositionUpdateRequest {
     @Schema(description = "所属组织 id")
     private Long orgId;
 
-    /** 认证类型编码，取自字典类型 {@code position_type} 下的字典项编码（如 primary/part_time/temporary）。 */
-    @NotBlank(message = "认证类型不能为空")
-    @Size(max = 64, message = "认证类型编码长度不能超过 64 个字符")
-    @Schema(description = "认证类型编码")
+    /** 任职类型编码，取自字典类型 {@code position_type} 下的字典项编码（如 primary/part_time/temporary）。 */
+    @NotBlank(message = "任职类型不能为空")
+    @Size(max = 64, message = "任职类型编码长度不能超过 64 个字符")
+    @Schema(description = "任职类型编码")
     private String positionType;
 
     /** 任职地址，可选。 */

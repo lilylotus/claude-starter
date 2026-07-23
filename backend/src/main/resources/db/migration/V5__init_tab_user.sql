@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS `tab_user_position`
     `id`               BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
     `user_id`          BIGINT      NOT NULL COMMENT '所属用户 id，关联 tab_user.id',
     `org_id`           BIGINT      NOT NULL COMMENT '所属组织 id，关联 tab_org.id，不建物理外键',
-    `position_type`    VARCHAR(64) NOT NULL COMMENT '认证类型编码，取自字典类型 position_type 下的字典项编码',
+    `position_type`    VARCHAR(64) NOT NULL COMMENT '任职类型编码，取自字典类型 position_type 下的字典项编码',
     `position_address` VARCHAR(255) NULL COMMENT '任职地址',
     `position_phone`   VARCHAR(20) NULL COMMENT '任职电话',
     `show_order`       INT         NOT NULL DEFAULT 0 COMMENT '显示序号，值越大越靠前',

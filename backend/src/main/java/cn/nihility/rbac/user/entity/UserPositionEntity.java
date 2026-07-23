@@ -36,7 +36,7 @@ public class UserPositionEntity {
     /** 所属组织 id，关联 {@code tab_org.id}，必填。 */
     private Long orgId;
 
-    /** 认证类型编码，取自字典类型 {@code position_type} 下的字典项编码（如 primary/part_time/temporary）。 */
+    /** 任职类型编码，取自字典类型 {@code position_type} 下的字典项编码（如 primary/part_time/temporary）。 */
     private String positionType;
 
     /** 任职地址。 */

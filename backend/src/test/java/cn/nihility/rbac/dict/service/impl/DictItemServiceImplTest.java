@@ -138,7 +138,7 @@ class DictItemServiceImplTest {
     void getEnabledOptions_shouldReturnEnabledItemsOnly() {
         DictTypeEntity dictType = DictTypeEntity.builder()
                 .id(1L)
-                .name("认证类型")
+                .name("任职类型")
                 .code("position_type")
                 .status(DictStatus.ENABLED)
                 .build();

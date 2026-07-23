@@ -39,8 +39,8 @@ public class PositionVO {
     @Schema(description = "所属组织名称")
     private String orgName;
 
-    /** 认证类型编码。 */
-    @Schema(description = "认证类型编码")
+    /** 任职类型编码。 */
+    @Schema(description = "任职类型编码")
     private String positionType;
 
     /** 任职地址。 */
