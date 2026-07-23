@@ -2,6 +2,8 @@ package cn.nihility.rbac.user.service.impl;
 
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.dict.dto.DictItemOptionVO;
+import cn.nihility.rbac.dict.service.DictItemService;
 import cn.nihility.rbac.formfield.constant.FormFieldBizType;
 import cn.nihility.rbac.formfield.dto.FormFieldDefinitionVO;
 import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
@@ -61,6 +63,9 @@ public class UserServiceImpl implements UserService {
             "name", "code", "mobile", "id_card", "show_order", "remark",
             "ext1", "ext2", "ext3", "ext4", "ext5", "ext6", "ext7", "ext8", "ext9", "ext10");
 
+    /** 性别字段绑定的字典类型编码，用于操作日志快照把存储的字典编码解析为标签。 */
+    private static final String GENDER_DICT_TYPE_CODE = "gender";
+
     /** 用户数据访问接口。 */
     private final UserMapper userMapper;
 
@@ -78,6 +83,9 @@ public class UserServiceImpl implements UserService {
 
     /** 操作日志扩展字段快照填充组件，负责把字典类扩展字段的存储编码解析为标签。 */
     private final FormFieldSnapshotSupport formFieldSnapshotSupport;
+
+    /** 字典项业务逻辑接口，用于把性别字段存储的字典编码解析为标签。 */
+    private final DictItemService dictItemService;
 
     /**
      * {@code bizType=POSITION} 动态字段（必填/正则/唯一性）校验的共享组件，用于内嵌任职
@@ -424,7 +432,7 @@ public class UserServiceImpl implements UserService {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("姓名", entity.getName());
         snapshot.put("编码", entity.getCode());
-        snapshot.put("性别", entity.getGender());
+        snapshot.put("性别", genderLabel(entity.getGender()));
         snapshot.put("手机号", entity.getMobile());
         snapshot.put("身份证号", entity.getIdCard());
         snapshot.put("显示序号", entity.getShowOrder());
@@ -473,5 +481,23 @@ public class UserServiceImpl implements UserService {
             return "停用";
         }
         return "已删除";
+    }
+
+    /**
+     * 把性别字段存储的字典编码转换为标签，供操作日志快照使用；找不到对应字典项
+     * （如字典项已停用/删除）时回退展示原始编码。
+     *
+     * @param genderCode 性别字典编码
+     * @return 性别标签
+     */
+    private String genderLabel(String genderCode) {
+        if (genderCode == null || genderCode.isBlank()) {
+            return genderCode;
+        }
+        return dictItemService.getEnabledOptions(GENDER_DICT_TYPE_CODE).stream()
+                .filter(option -> Objects.equals(option.getCode(), genderCode))
+                .map(DictItemOptionVO::getLabel)
+                .findFirst()
+                .orElse(genderCode);
     }
 }

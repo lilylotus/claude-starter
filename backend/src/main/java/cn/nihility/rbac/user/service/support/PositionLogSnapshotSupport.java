@@ -1,5 +1,7 @@
 package cn.nihility.rbac.user.service.support;
 
+import cn.nihility.rbac.dict.dto.DictItemOptionVO;
+import cn.nihility.rbac.dict.service.DictItemService;
 import cn.nihility.rbac.formfield.constant.FormFieldBizType;
 import cn.nihility.rbac.formfield.dto.FormFieldDefinitionVO;
 import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
@@ -26,6 +28,9 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class PositionLogSnapshotSupport {
 
+    /** 任职类型字段绑定的字典类型编码，用于操作日志快照把存储的字典编码解析为标签。 */
+    private static final String POSITION_TYPE_DICT_TYPE_CODE = "position_type";
+
     /** 用户数据访问接口，仅用于回填所属用户姓名。 */
     private final UserMapper userMapper;
 
@@ -37,6 +42,9 @@ public class PositionLogSnapshotSupport {
 
     /** 操作日志扩展字段快照填充组件，负责把字典类扩展字段的存储编码解析为标签。 */
     private final FormFieldSnapshotSupport formFieldSnapshotSupport;
+
+    /** 字典项业务逻辑接口，用于把任职类型字段存储的字典编码解析为标签。 */
+    private final DictItemService dictItemService;
 
     /**
      * 构造任职记录的操作日志被操作对象名称快照："所属用户姓名-所属组织名称"，
@@ -68,7 +76,7 @@ public class PositionLogSnapshotSupport {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("所属用户", user != null ? user.getName() : null);
         snapshot.put("所属组织", org != null ? org.getName() : null);
-        snapshot.put("任职类型", entity.getPositionType());
+        snapshot.put("任职类型", positionTypeLabel(entity.getPositionType()));
         snapshot.put("任职地址", entity.getPositionAddress());
         snapshot.put("任职电话", entity.getPositionPhone());
         snapshot.put("显示序号", entity.getShowOrder());
@@ -117,5 +125,23 @@ public class PositionLogSnapshotSupport {
             return "停用";
         }
         return "已删除";
+    }
+
+    /**
+     * 把任职类型字段存储的字典编码转换为标签，供操作日志快照使用；找不到对应字典项
+     * （如字典项已停用/删除）时回退展示原始编码。
+     *
+     * @param positionTypeCode 任职类型字典编码
+     * @return 任职类型标签
+     */
+    private String positionTypeLabel(String positionTypeCode) {
+        if (positionTypeCode == null || positionTypeCode.isBlank()) {
+            return positionTypeCode;
+        }
+        return dictItemService.getEnabledOptions(POSITION_TYPE_DICT_TYPE_CODE).stream()
+                .filter(option -> Objects.equals(option.getCode(), positionTypeCode))
+                .map(DictItemOptionVO::getLabel)
+                .findFirst()
+                .orElse(positionTypeCode);
     }
 }
