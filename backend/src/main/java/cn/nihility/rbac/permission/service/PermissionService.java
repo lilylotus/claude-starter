@@ -1,6 +1,6 @@
 package cn.nihility.rbac.permission.service;
 
-import cn.nihility.rbac.common.PageResult;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.permission.dto.PermissionCreateRequest;
 import cn.nihility.rbac.permission.dto.PermissionUpdateRequest;
 import cn.nihility.rbac.permission.dto.PermissionVO;

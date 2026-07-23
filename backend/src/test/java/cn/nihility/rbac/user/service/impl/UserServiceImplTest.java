@@ -15,6 +15,7 @@ import cn.nihility.rbac.formfield.constant.FormFieldBizType;
 import cn.nihility.rbac.formfield.constant.FormFieldControlType;
 import cn.nihility.rbac.formfield.dto.FormFieldDefinitionVO;
 import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
+import cn.nihility.rbac.formfield.support.FormFieldSnapshotSupport;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.user.constant.UserStatus;
@@ -67,6 +68,10 @@ class UserServiceImplTest {
     @Mock
     private FormFieldDefinitionService formFieldDefinitionService;
 
+    /** 被测服务的操作日志扩展字段快照填充依赖，使用 Mockito 打桩。 */
+    @Mock
+    private FormFieldSnapshotSupport formFieldSnapshotSupport;
+
     /** 被测服务实例。 */
     private UserServiceImpl userService;
 
@@ -77,17 +82,19 @@ class UserServiceImplTest {
      * {@link PositionDynamicFieldSupport} 直接用已打桩的
      * {@code formFieldDefinitionService}/{@code userPositionMapper} 构造真实实例，不额外 mock；
      * {@link PositionLogSnapshotSupport} 同理，直接用已打桩的
-     * {@code userMapper}/{@code orgMapper}/{@code formFieldDefinitionService} 构造真实实例，
+     * {@code userMapper}/{@code orgMapper}/{@code formFieldDefinitionService}/
+     * {@code formFieldSnapshotSupport} 构造真实实例，
      * 用于验证 {@code syncPositions} 新增/更新/物理删除分支追加的操作日志记录调用。
      */
     @BeforeEach
     void setUp() {
         PositionDynamicFieldSupport positionDynamicFieldSupport =
                 new PositionDynamicFieldSupport(formFieldDefinitionService, userPositionMapper);
-        PositionLogSnapshotSupport positionLogSnapshotSupport =
-                new PositionLogSnapshotSupport(userMapper, orgMapper, formFieldDefinitionService);
+        PositionLogSnapshotSupport positionLogSnapshotSupport = new PositionLogSnapshotSupport(userMapper, orgMapper,
+                formFieldDefinitionService, formFieldSnapshotSupport);
         userService = new UserServiceImpl(userMapper, userPositionMapper, orgMapper, operationLogRecorder,
-                formFieldDefinitionService, positionDynamicFieldSupport, positionLogSnapshotSupport);
+                formFieldDefinitionService, formFieldSnapshotSupport, positionDynamicFieldSupport,
+                positionLogSnapshotSupport);
         lenient().when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
     }

@@ -1,7 +1,7 @@
 package cn.nihility.rbac.menu.controller;
 
-import cn.nihility.rbac.common.PageResult;
-import cn.nihility.rbac.common.Result;
+import cn.nihility.rbac.common.result.PageResult;
+import cn.nihility.rbac.common.result.Result;
 import cn.nihility.rbac.menu.dto.MenuCreateRequest;
 import cn.nihility.rbac.menu.dto.MenuTreeNodeVO;
 import cn.nihility.rbac.menu.dto.MenuUpdateRequest;

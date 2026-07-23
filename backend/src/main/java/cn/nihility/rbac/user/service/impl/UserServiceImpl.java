@@ -1,6 +1,6 @@
 package cn.nihility.rbac.user.service.impl;
 
-import cn.nihility.rbac.common.PageResult;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.formfield.constant.FormFieldBizType;
 import cn.nihility.rbac.formfield.dto.FormFieldDefinitionVO;
@@ -76,6 +76,9 @@ public class UserServiceImpl implements UserService {
 
     /** 表单字段定义业务逻辑接口，用于驱动非锁定字段的必填/正则/唯一性校验。 */
     private final FormFieldDefinitionService formFieldDefinitionService;
+
+    /** 操作日志扩展字段快照填充组件，负责把字典类扩展字段的存储编码解析为标签。 */
+    private final FormFieldSnapshotSupport formFieldSnapshotSupport;
 
     /**
      * {@code bizType=POSITION} 动态字段（必填/正则/唯一性）校验的共享组件，用于内嵌任职
@@ -431,7 +434,7 @@ public class UserServiceImpl implements UserService {
 
         List<FormFieldDefinitionVO> definitions =
                 formFieldDefinitionService.listActiveByBizType(FormFieldBizType.USER);
-        FormFieldSnapshotSupport.appendExtFieldSnapshot(snapshot, definitions, extValues(entity));
+        formFieldSnapshotSupport.appendExtFieldSnapshot(snapshot, definitions, extValues(entity));
         return snapshot;
     }
 

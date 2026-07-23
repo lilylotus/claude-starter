@@ -1,6 +1,6 @@
 package cn.nihility.rbac.role.service;
 
-import cn.nihility.rbac.common.PageResult;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.role.dto.RoleCreateRequest;
 import cn.nihility.rbac.role.dto.RoleOptionVO;
 import cn.nihility.rbac.role.dto.RoleUpdateRequest;

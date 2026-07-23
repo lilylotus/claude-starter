@@ -1,6 +1,6 @@
 package cn.nihility.rbac.dict.service;
 
-import cn.nihility.rbac.common.PageResult;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.dict.dto.DictItemCreateRequest;
 import cn.nihility.rbac.dict.dto.DictItemOptionVO;
 import cn.nihility.rbac.dict.dto.DictItemUpdateRequest;

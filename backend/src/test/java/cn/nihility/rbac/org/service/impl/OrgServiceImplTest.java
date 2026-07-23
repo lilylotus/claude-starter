@@ -8,9 +8,10 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import cn.nihility.rbac.common.PageResult;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
+import cn.nihility.rbac.formfield.support.FormFieldSnapshotSupport;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.constant.OrgStatus;
 import cn.nihility.rbac.org.dto.OrgCreateRequest;
@@ -47,6 +48,10 @@ class OrgServiceImplTest {
     @Mock
     private FormFieldDefinitionService formFieldDefinitionService;
 
+    /** 被测服务的操作日志扩展字段快照填充依赖，使用 Mockito 打桩。 */
+    @Mock
+    private FormFieldSnapshotSupport formFieldSnapshotSupport;
+
     /** 被测服务实例。 */
     private OrgServiceImpl orgService;
 
@@ -57,7 +62,8 @@ class OrgServiceImplTest {
      */
     @BeforeEach
     void setUp() {
-        orgService = new OrgServiceImpl(orgMapper, operationLogRecorder, formFieldDefinitionService);
+        orgService = new OrgServiceImpl(orgMapper, operationLogRecorder, formFieldDefinitionService,
+                formFieldSnapshotSupport);
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
     }
 

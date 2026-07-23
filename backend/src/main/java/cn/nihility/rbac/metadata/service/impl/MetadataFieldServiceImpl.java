@@ -1,6 +1,6 @@
 package cn.nihility.rbac.metadata.service.impl;
 
-import cn.nihility.rbac.common.PageResult;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.formfield.constant.FormFieldStatus;
 import cn.nihility.rbac.formfield.entity.FormFieldDefinitionEntity;

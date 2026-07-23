@@ -1,7 +1,7 @@
 package cn.nihility.rbac.user.controller;
 
-import cn.nihility.rbac.common.PageResult;
-import cn.nihility.rbac.common.Result;
+import cn.nihility.rbac.common.result.PageResult;
+import cn.nihility.rbac.common.result.Result;
 import cn.nihility.rbac.user.dto.PositionCreateRequest;
 import cn.nihility.rbac.user.dto.PositionUpdateRequest;
 import cn.nihility.rbac.user.dto.PositionVO;

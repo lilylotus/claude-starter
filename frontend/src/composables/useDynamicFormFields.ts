@@ -2,7 +2,9 @@ import { computed, reactive, ref } from 'vue'
 import type { FormRules } from 'element-plus'
 import { fetchFormFieldRenderSchema } from '@/api/formField'
 import {
+  FORM_FIELD_CONTROL_TYPE_DATE,
   FORM_FIELD_CONTROL_TYPE_DICT,
+  FORM_FIELD_CONTROL_TYPE_MULTI_DICT,
   FORM_FIELD_CONTROL_TYPE_NUMBER,
   type FormFieldBizType,
   type FormFieldRenderItem,
@@ -67,12 +69,24 @@ export function useDynamicFormFields(bizType: FormFieldBizType) {
     for (const item of fields) {
       const itemRules: Exclude<FormRules[string], undefined> = []
       if (item.isRequired) {
-        const isDict = item.controlType === FORM_FIELD_CONTROL_TYPE_DICT
-        itemRules.push({
-          required: true,
-          message: isDict ? `请选择${item.fieldName}` : `请输入${item.fieldName}`,
-          trigger: isDict ? 'change' : 'blur',
-        })
+        if (item.controlType === FORM_FIELD_CONTROL_TYPE_MULTI_DICT) {
+          // 多选字典下拉：值是数组，必填校验数组非空（至少选择一项）
+          itemRules.push({
+            type: 'array',
+            required: true,
+            min: 1,
+            message: `请选择${item.fieldName}`,
+            trigger: 'change',
+          })
+        } else {
+          const isDict = item.controlType === FORM_FIELD_CONTROL_TYPE_DICT
+          const isDate = item.controlType === FORM_FIELD_CONTROL_TYPE_DATE
+          itemRules.push({
+            required: true,
+            message: isDict || isDate ? `请选择${item.fieldName}` : `请输入${item.fieldName}`,
+            trigger: isDict || isDate ? 'change' : 'blur',
+          })
+        }
       }
       if (item.validateRegex) {
         try {
@@ -94,7 +108,8 @@ export function useDynamicFormFields(bizType: FormFieldBizType) {
   const editRules = computed(() => buildRules(editFields.value))
 
   // 构建/回填动态表单模型：以 columnName 为 key。source 提供时（编辑场景）从中取值回填，
-  // 取不到时按控件类型给出空白默认值（数字框为 0，其余为空字符串，新增场景）。
+  // 取不到时按控件类型给出空白默认值（数字框为 0，日期为 null，多选字典下拉为 []，
+  // 其余为空字符串，新增场景）。
   // source 的形参类型放宽为 object，调用方可直接传具体的行/详情类型（如 OrgRow），
   // 不必先手动转换成带字符串索引签名的类型
   function buildFormModel(fields: FormFieldRenderItem[], source?: object | null): Record<string, unknown> {
@@ -102,10 +117,26 @@ export function useDynamicFormFields(bizType: FormFieldBizType) {
     const model: Record<string, unknown> = {}
     for (const item of fields) {
       const sourceValue = sourceRecord ? sourceRecord[item.columnName] : undefined
-      if (sourceValue !== undefined && sourceValue !== null) {
+      if (item.controlType === FORM_FIELD_CONTROL_TYPE_MULTI_DICT) {
+        // 后端扩展列（ext1~ext10）是 String 类型，多选值以逗号分隔字符串承载，
+        // 回填到 el-select multiple 的 v-model 前需还原为数组；空字符串/null/undefined
+        // 还原为空数组；防御性兼容极个别已经是数组的来源（如本地未提交过的默认值）
+        if (Array.isArray(sourceValue)) {
+          model[item.columnName] = sourceValue
+        } else if (typeof sourceValue === 'string' && sourceValue.length > 0) {
+          model[item.columnName] = sourceValue.split(',')
+        } else {
+          model[item.columnName] = []
+        }
+      } else if (sourceValue !== undefined && sourceValue !== null) {
         model[item.columnName] = sourceValue
+      } else if (item.controlType === FORM_FIELD_CONTROL_TYPE_NUMBER) {
+        model[item.columnName] = 0
+      } else if (item.controlType === FORM_FIELD_CONTROL_TYPE_DATE) {
+        // el-date-picker 的空值语义是 null，不是空字符串
+        model[item.columnName] = null
       } else {
-        model[item.columnName] = item.controlType === FORM_FIELD_CONTROL_TYPE_NUMBER ? 0 : ''
+        model[item.columnName] = ''
       }
     }
     return model
@@ -115,6 +146,44 @@ export function useDynamicFormFields(bizType: FormFieldBizType) {
   function dictOptionLabel(item: FormFieldRenderItem, value: unknown): string {
     if (value === undefined || value === null || value === '') return ''
     return item.dictOptions.find((opt) => opt.value === value)?.label ?? String(value)
+  }
+
+  // 多选字典下拉字段：把提交/展示用的编码值转换为可读标签，用"、"拼接；单个值找不到
+  // 匹配项时回退展示该值原始字符串，与 dictOptionLabel() 的兜底行为保持一致。
+  // value 兼容两种入参形态：已经是数组（如经过 buildFormModel 回填的表单值），或者
+  // 后端原始的逗号分隔字符串（如列表/详情页未经 buildFormModel 直接读取的行数据）
+  function dictOptionLabels(item: FormFieldRenderItem, value: unknown): string {
+    let values: unknown[]
+    if (Array.isArray(value)) {
+      values = value
+    } else if (typeof value === 'string') {
+      values = value.length > 0 ? value.split(',') : []
+    } else {
+      return ''
+    }
+    if (values.length === 0) return ''
+    return values
+      .map((v) => item.dictOptions.find((opt) => opt.value === v)?.label ?? String(v))
+      .join('、')
+  }
+
+  // 提交前的模型序列化：后端 ORG/USER/POSITION/APP 的 ext1~ext10 扩展列都是 String
+  // 类型，MULTI_DICT 控件的 v-model 却是数组，直接把表单模型展开进请求体会触发
+  // HttpMessageNotReadableException（无法把 JSON 数组反序列化成 String）。这里对
+  // fields 中所有 MULTI_DICT 字段的值 join(',') 成字符串后再返回，供四个业务页面
+  // 的 submitForm() 在构建请求 payload 前调用，其余字段原样透传
+  function buildSubmitModel(
+    fields: FormFieldRenderItem[],
+    model: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const result: Record<string, unknown> = { ...model }
+    for (const item of fields) {
+      if (item.controlType === FORM_FIELD_CONTROL_TYPE_MULTI_DICT) {
+        const value = result[item.columnName]
+        result[item.columnName] = Array.isArray(value) ? value.join(',') : (value ?? '')
+      }
+    }
+    return result
   }
 
   return reactive({
@@ -128,5 +197,7 @@ export function useDynamicFormFields(bizType: FormFieldBizType) {
     editRules,
     buildFormModel,
     dictOptionLabel,
+    dictOptionLabels,
+    buildSubmitModel,
   })
 }

@@ -1,4 +1,4 @@
-package cn.nihility.rbac.common;
+package cn.nihility.rbac.common.result;
 
 import lombok.Getter;
 

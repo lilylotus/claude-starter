@@ -14,9 +14,10 @@ import cn.nihility.rbac.app.dto.AppUpdateRequest;
 import cn.nihility.rbac.app.dto.AppVO;
 import cn.nihility.rbac.app.entity.AppEntity;
 import cn.nihility.rbac.app.mapper.AppMapper;
-import cn.nihility.rbac.common.PageResult;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
+import cn.nihility.rbac.formfield.support.FormFieldSnapshotSupport;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.user.mapper.UserMapper;
@@ -59,6 +60,10 @@ class AppServiceImplTest {
     @Mock
     private FormFieldDefinitionService formFieldDefinitionService;
 
+    /** 被测服务的操作日志扩展字段快照填充依赖，使用 Mockito 打桩。 */
+    @Mock
+    private FormFieldSnapshotSupport formFieldSnapshotSupport;
+
     /** 被测服务实例。 */
     private AppServiceImpl appService;
 
@@ -70,7 +75,7 @@ class AppServiceImplTest {
     @BeforeEach
     void setUp() {
         appService = new AppServiceImpl(appMapper, userMapper, orgMapper, operationLogRecorder,
-                formFieldDefinitionService);
+                formFieldDefinitionService, formFieldSnapshotSupport);
         lenient().when(userMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());

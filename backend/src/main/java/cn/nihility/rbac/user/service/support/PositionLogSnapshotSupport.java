@@ -35,6 +35,9 @@ public class PositionLogSnapshotSupport {
     /** 表单字段定义业务逻辑接口，用于回查操作日志快照所需的启用字段定义。 */
     private final FormFieldDefinitionService formFieldDefinitionService;
 
+    /** 操作日志扩展字段快照填充组件，负责把字典类扩展字段的存储编码解析为标签。 */
+    private final FormFieldSnapshotSupport formFieldSnapshotSupport;
+
     /**
      * 构造任职记录的操作日志被操作对象名称快照："所属用户姓名-所属组织名称"，
      * 任职记录本身没有独立的名称字段。
@@ -74,7 +77,7 @@ public class PositionLogSnapshotSupport {
 
         List<FormFieldDefinitionVO> definitions =
                 formFieldDefinitionService.listActiveByBizType(FormFieldBizType.POSITION);
-        FormFieldSnapshotSupport.appendExtFieldSnapshot(snapshot, definitions, extValues(entity));
+        formFieldSnapshotSupport.appendExtFieldSnapshot(snapshot, definitions, extValues(entity));
         return snapshot;
     }
 

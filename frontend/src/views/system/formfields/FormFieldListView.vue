@@ -12,6 +12,7 @@ import {
 } from '@/types/metadataField'
 import {
   FORM_FIELD_CONTROL_TYPE_DICT,
+  FORM_FIELD_CONTROL_TYPE_MULTI_DICT,
   FORM_FIELD_CONTROL_TYPE_OPTIONS,
   FORM_FIELD_STATUS_ENABLED,
   type FormFieldDefinition,
@@ -129,12 +130,17 @@ function blankForm(): FieldDialogForm {
 
 const form = reactive<FieldDialogForm>(blankForm())
 
+// 是否为需要关联字典类型的控件类型（下拉单选字典、多选字典下拉）
+function isDictLinkedControlType(controlType: number): boolean {
+  return controlType === FORM_FIELD_CONTROL_TYPE_DICT || controlType === FORM_FIELD_CONTROL_TYPE_MULTI_DICT
+}
+
 function validateDictType(_rule: unknown, value: number | null, callback: (error?: Error) => void) {
-  if (form.controlType !== FORM_FIELD_CONTROL_TYPE_DICT || value) {
+  if (!isDictLinkedControlType(form.controlType) || value) {
     callback()
     return
   }
-  callback(new Error('控件类型为字典下拉时必须选择关联的字典类型'))
+  callback(new Error('控件类型为字典下拉或多选字典下拉时必须选择关联的字典类型'))
 }
 
 const rules: FormRules<FieldDialogForm> = {
@@ -203,7 +209,7 @@ async function submitForm() {
       metadataFieldId: form.metadataFieldId as number,
       fieldName: form.fieldName,
       controlType: form.controlType,
-      dictTypeId: form.controlType === FORM_FIELD_CONTROL_TYPE_DICT ? form.dictTypeId : null,
+      dictTypeId: isDictLinkedControlType(form.controlType) ? form.dictTypeId : null,
       isUnique: form.isUnique,
       isRequired: form.isRequired,
       showInList: form.showInList,
@@ -356,7 +362,7 @@ async function handleDelete(row: FormFieldDefinition) {
             <el-option v-for="opt in FORM_FIELD_CONTROL_TYPE_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="form.controlType === FORM_FIELD_CONTROL_TYPE_DICT" label="字典类型" prop="dictTypeId">
+        <el-form-item v-if="isDictLinkedControlType(form.controlType)" label="字典类型" prop="dictTypeId">
           <el-select v-model="form.dictTypeId" placeholder="请选择关联的字典类型" style="width: 100%">
             <el-option v-for="opt in dictTypeOptions" :key="opt.id" :label="opt.name" :value="opt.id" />
           </el-select>

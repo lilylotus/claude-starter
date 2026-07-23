@@ -1,6 +1,6 @@
 package cn.nihility.rbac.operationlog.controller;
 
-import cn.nihility.rbac.common.PageResult;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.operationlog.dto.OperationLogDetailVO;
 import cn.nihility.rbac.operationlog.dto.OperationLogQueryRequest;
 import cn.nihility.rbac.operationlog.dto.OperationLogVO;

@@ -1,6 +1,6 @@
 package cn.nihility.rbac.org.service;
 
-import cn.nihility.rbac.common.PageResult;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.org.dto.OrgCreateRequest;
 import cn.nihility.rbac.org.dto.OrgTreeNodeVO;
 import cn.nihility.rbac.org.dto.OrgUpdateRequest;

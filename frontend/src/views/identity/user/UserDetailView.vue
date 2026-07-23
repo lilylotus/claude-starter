@@ -10,7 +10,11 @@ import * as dictApi from '@/api/dict'
 import { USER_GENDER_OPTIONS, USER_STATUS_ENABLED, type UserPositionRow, type UserRow } from '@/types/user'
 import type { DictItemOption } from '@/types/dict'
 import { useDynamicFormFields } from '@/composables/useDynamicFormFields'
-import { FORM_FIELD_CONTROL_TYPE_DICT, type FormFieldRenderItem } from '@/types/formField'
+import {
+  FORM_FIELD_CONTROL_TYPE_DICT,
+  FORM_FIELD_CONTROL_TYPE_MULTI_DICT,
+  type FormFieldRenderItem,
+} from '@/types/formField'
 
 const route = useRoute()
 const router = useRouter()
@@ -121,6 +125,9 @@ function goBack() {
             <span v-if="item.controlType === FORM_FIELD_CONTROL_TYPE_DICT">
               {{ userFields.dictOptionLabel(item, extFieldValue(item)) || '-' }}
             </span>
+            <span v-else-if="item.controlType === FORM_FIELD_CONTROL_TYPE_MULTI_DICT">
+              {{ userFields.dictOptionLabels(item, extFieldValue(item)) || '-' }}
+            </span>
             <span v-else>{{ (extFieldValue(item) as string) || '-' }}</span>
           </el-descriptions-item>
           <el-descriptions-item label="创建人">{{ detailData?.createBy }}</el-descriptions-item>
@@ -150,6 +157,9 @@ function goBack() {
             <template #default="{ row }">
               <span v-if="item.controlType === FORM_FIELD_CONTROL_TYPE_DICT">
                 {{ positionFields.dictOptionLabel(item, positionExtFieldValue(row as UserPositionRow, item)) || '-' }}
+              </span>
+              <span v-else-if="item.controlType === FORM_FIELD_CONTROL_TYPE_MULTI_DICT">
+                {{ positionFields.dictOptionLabels(item, positionExtFieldValue(row as UserPositionRow, item)) || '-' }}
               </span>
               <span v-else>{{ positionExtFieldValue(row as UserPositionRow, item) || '-' }}</span>
             </template>

@@ -8,7 +8,13 @@ import { useOrgStore } from '@/stores/org'
 import * as orgApi from '@/api/org'
 import { ORG_STATUS_ENABLED, type OrgFormRequest, type OrgRow, type OrgTreeNode } from '@/types/org'
 import { useDynamicFormFields } from '@/composables/useDynamicFormFields'
-import { FORM_FIELD_CONTROL_TYPE_DICT, FORM_FIELD_CONTROL_TYPE_NUMBER, FORM_FIELD_CONTROL_TYPE_TEXT } from '@/types/formField'
+import {
+  FORM_FIELD_CONTROL_TYPE_DATE,
+  FORM_FIELD_CONTROL_TYPE_DICT,
+  FORM_FIELD_CONTROL_TYPE_MULTI_DICT,
+  FORM_FIELD_CONTROL_TYPE_NUMBER,
+  FORM_FIELD_CONTROL_TYPE_TEXT,
+} from '@/types/formField'
 
 const orgStore = useOrgStore()
 const router = useRouter()
@@ -192,8 +198,14 @@ async function submitForm() {
 
   submitting.value = true
   try {
-    // 上面的表单校验已经确保 parentId 必填，此处已知非空
-    const payload = { ...form, parentId: form.parentId as number } as unknown as OrgFormRequest
+    // 上面的表单校验已经确保 parentId 必填，此处已知非空；动态字段（含 MULTI_DICT）
+    // 先经 buildSubmitModel 把多选字典的数组值序列化成逗号分隔字符串，再与静态覆盖
+    // 字段合并，避免把数组直接提交给后端导致 HttpMessageNotReadableException
+    const activeFields = dialogMode.value === 'create' ? orgFields.createFields : orgFields.editFields
+    const payload = {
+      ...orgFields.buildSubmitModel(activeFields, form),
+      parentId: form.parentId as number,
+    } as unknown as OrgFormRequest
     if (dialogMode.value === 'create') {
       await orgApi.createOrg(payload)
       ElMessage.success('新增成功')
@@ -284,6 +296,9 @@ async function handleDelete(row: OrgRow) {
             <span v-if="col.controlType === FORM_FIELD_CONTROL_TYPE_DICT">
               {{ orgFields.dictOptionLabel(col, (row as Record<string, unknown>)[col.columnName]) }}
             </span>
+            <span v-else-if="col.controlType === FORM_FIELD_CONTROL_TYPE_MULTI_DICT">
+              {{ orgFields.dictOptionLabels(col, (row as Record<string, unknown>)[col.columnName]) }}
+            </span>
             <span v-else>{{ (row as Record<string, unknown>)[col.columnName] }}</span>
           </template>
         </el-table-column>
@@ -356,6 +371,25 @@ async function handleDelete(row: OrgRow) {
             style="width: 100%"
             :disabled="!item.editable"
           />
+          <el-date-picker
+            v-else-if="item.controlType === FORM_FIELD_CONTROL_TYPE_DATE"
+            v-model="(form[item.columnName] as string | null)"
+            type="date"
+            value-format="YYYY-MM-DD"
+            style="width: 100%"
+            :placeholder="item.placeholder || `请选择${item.fieldName}`"
+            :disabled="!item.editable"
+          />
+          <el-select
+            v-else-if="item.controlType === FORM_FIELD_CONTROL_TYPE_MULTI_DICT"
+            v-model="(form[item.columnName] as string[])"
+            multiple
+            :placeholder="item.placeholder || `请选择${item.fieldName}`"
+            :disabled="!item.editable"
+            style="width: 100%"
+          >
+            <el-option v-for="opt in item.dictOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+          </el-select>
           <template v-else>
             <el-select
               v-model="(form[item.columnName] as string)"

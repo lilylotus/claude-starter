@@ -1,7 +1,7 @@
 package cn.nihility.rbac.formfield.controller;
 
-import cn.nihility.rbac.common.PageResult;
-import cn.nihility.rbac.common.Result;
+import cn.nihility.rbac.common.result.PageResult;
+import cn.nihility.rbac.common.result.Result;
 import cn.nihility.rbac.formfield.dto.FormFieldDefinitionCreateRequest;
 import cn.nihility.rbac.formfield.dto.FormFieldDefinitionUpdateRequest;
 import cn.nihility.rbac.formfield.dto.FormFieldDefinitionVO;
@@ -62,7 +62,7 @@ public class FormFieldDefinitionController {
      * @return 渲染元数据列表，按显示序号降序排列
      */
     @Operation(summary = "查询动态字段渲染元数据", description = "返回指定业务对象类型下全部启用状态的字段定义，按显示序号降序排列；"
-            + "控件类型为下拉单选字典的定义内嵌 dictOptions")
+            + "控件类型为下拉单选字典或多选字典下拉的定义内嵌 dictOptions")
     @GetMapping("/api/form-fields/render-schema")
     public List<FormFieldRenderItemVO> renderSchema(
             @Parameter(description = "业务对象类型：ORG/USER/POSITION/APP", required = true)

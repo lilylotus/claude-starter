@@ -8,6 +8,8 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.dict.dto.DictItemOptionVO;
+import cn.nihility.rbac.dict.entity.DictTypeEntity;
 import cn.nihility.rbac.dict.mapper.DictTypeMapper;
 import cn.nihility.rbac.dict.service.DictItemService;
 import cn.nihility.rbac.formfield.constant.FormFieldControlType;
@@ -15,6 +17,7 @@ import cn.nihility.rbac.formfield.constant.FormFieldStatus;
 import cn.nihility.rbac.formfield.dto.FormFieldDefinitionCreateRequest;
 import cn.nihility.rbac.formfield.dto.FormFieldDefinitionUpdateRequest;
 import cn.nihility.rbac.formfield.dto.FormFieldDefinitionVO;
+import cn.nihility.rbac.formfield.dto.FormFieldRenderItemVO;
 import cn.nihility.rbac.formfield.entity.FormFieldDefinitionEntity;
 import cn.nihility.rbac.formfield.exception.DictTypeRequiredException;
 import cn.nihility.rbac.formfield.exception.LockedFormFieldException;
@@ -27,10 +30,13 @@ import cn.nihility.rbac.metadata.mapper.MetadataFieldMapper;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
@@ -125,6 +131,136 @@ class FormFieldDefinitionServiceImplTest {
 
         assertThatThrownBy(() -> formFieldDefinitionService.create(request))
                 .isInstanceOf(DictTypeRequiredException.class);
+    }
+
+    /**
+     * 创建字段定义时，控件类型为多选字典下拉但未提供 dictTypeId，应拒绝创建，
+     * 与下拉单选字典的校验规则一致。
+     */
+    @Test
+    void create_shouldThrowException_whenMultiDictControlTypeWithoutDictTypeId() {
+        when(metadataFieldMapper.selectById(1L))
+                .thenReturn(buildMetadataEntity(1L, "USER", "ext1", MetadataFieldStatus.ENABLED));
+        when(formFieldDefinitionMapper.existsActiveByMetadataFieldId(1L)).thenReturn(false);
+
+        FormFieldDefinitionCreateRequest request = buildCreateRequest(1L, FormFieldControlType.MULTI_DICT);
+        request.setDictTypeId(null);
+
+        assertThatThrownBy(() -> formFieldDefinitionService.create(request))
+                .isInstanceOf(DictTypeRequiredException.class);
+    }
+
+    /**
+     * 创建字段定义时，控件类型为日期，即使未提供 dictTypeId 也应正常创建
+     * （日期类型不依赖字典类型）。
+     */
+    @Test
+    void create_shouldSucceed_whenDateControlTypeWithoutDictTypeId() {
+        MetadataFieldEntity metadata = buildMetadataEntity(1L, "USER", "ext1", MetadataFieldStatus.ENABLED);
+        when(metadataFieldMapper.selectById(1L)).thenReturn(metadata);
+        when(formFieldDefinitionMapper.existsActiveByMetadataFieldId(1L)).thenReturn(false);
+        lenient().when(metadataFieldMapper.selectByIds(any())).thenReturn(List.of(metadata));
+        lenient().when(formFieldDefinitionMapper.selectById(any()))
+                .thenReturn(buildDefinitionEntity(99L, "USER", 1L, "birthday", FormFieldStatus.ENABLED));
+
+        FormFieldDefinitionCreateRequest request = buildCreateRequest(1L, FormFieldControlType.DATE);
+        request.setDictTypeId(null);
+
+        formFieldDefinitionService.create(request);
+
+        ArgumentCaptor<FormFieldDefinitionEntity> captor =
+                ArgumentCaptor.forClass(FormFieldDefinitionEntity.class);
+        Mockito.verify(formFieldDefinitionMapper).insert(captor.capture());
+        assertThat(captor.getValue().getControlType()).isEqualTo(FormFieldControlType.DATE);
+        assertThat(captor.getValue().getDictTypeId()).isNull();
+    }
+
+    /**
+     * 创建一条控件类型为日期的字段定义时，写入操作日志的字段快照中"控件类型"
+     * 应展示为中文文案"日期"。
+     */
+    @Test
+    void create_shouldRecordDateControlTypeLabel_inOperationLog() {
+        MetadataFieldEntity metadata = buildMetadataEntity(1L, "USER", "ext1", MetadataFieldStatus.ENABLED);
+        when(metadataFieldMapper.selectById(1L)).thenReturn(metadata);
+        when(formFieldDefinitionMapper.existsActiveByMetadataFieldId(1L)).thenReturn(false);
+        lenient().when(metadataFieldMapper.selectByIds(any())).thenReturn(List.of(metadata));
+        lenient().when(formFieldDefinitionMapper.selectById(any()))
+                .thenReturn(buildDefinitionEntity(99L, "USER", 1L, "birthday", FormFieldStatus.ENABLED));
+
+        formFieldDefinitionService.create(buildCreateRequest(1L, FormFieldControlType.DATE));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        Mockito.verify(operationLogRecorder).recordCreate(any(), any(), any(), captor.capture());
+        assertThat(captor.getValue().get("控件类型")).isEqualTo("日期");
+    }
+
+    /**
+     * 创建一条控件类型为多选字典下拉的字段定义时，写入操作日志的字段快照中
+     * "控件类型"应展示为中文文案"多选字典下拉"。
+     */
+    @Test
+    void create_shouldRecordMultiDictControlTypeLabel_inOperationLog() {
+        MetadataFieldEntity metadata = buildMetadataEntity(1L, "USER", "ext1", MetadataFieldStatus.ENABLED);
+        when(metadataFieldMapper.selectById(1L)).thenReturn(metadata);
+        when(formFieldDefinitionMapper.existsActiveByMetadataFieldId(1L)).thenReturn(false);
+        when(dictTypeMapper.selectById(1L))
+                .thenReturn(DictTypeEntity.builder().id(1L).code("tag_type").name("标签类型").build());
+        lenient().when(metadataFieldMapper.selectByIds(any())).thenReturn(List.of(metadata));
+        lenient().when(formFieldDefinitionMapper.selectById(any()))
+                .thenReturn(buildDefinitionEntity(99L, "USER", 1L, "tags", FormFieldStatus.ENABLED));
+
+        formFieldDefinitionService.create(buildCreateRequest(1L, FormFieldControlType.MULTI_DICT));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        Mockito.verify(operationLogRecorder).recordCreate(any(), any(), any(), captor.capture());
+        assertThat(captor.getValue().get("控件类型")).isEqualTo("多选字典下拉");
+    }
+
+    /**
+     * 动态字段渲染元数据接口对控件类型为多选字典下拉的定义，应内嵌其关联字典
+     * 类型下的启用字典项，与下拉单选字典的行为一致。
+     */
+    @Test
+    void buildRenderSchema_shouldIncludeDictOptions_whenMultiDictControlType() {
+        FormFieldDefinitionEntity entity = buildDefinitionEntity(20L, "USER", 1L, "tags", FormFieldStatus.ENABLED);
+        entity.setControlType(FormFieldControlType.MULTI_DICT);
+        entity.setDictTypeId(5L);
+        when(formFieldDefinitionMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(entity));
+        when(metadataFieldMapper.selectByIds(any()))
+                .thenReturn(List.of(buildMetadataEntity(1L, "USER", "ext1", MetadataFieldStatus.ENABLED)));
+        DictTypeEntity dictType = DictTypeEntity.builder().id(5L).code("tag_type").name("标签类型").build();
+        when(dictTypeMapper.selectByIds(any())).thenReturn(List.of(dictType));
+        when(dictTypeMapper.selectById(5L)).thenReturn(dictType);
+        when(dictItemService.getEnabledOptions("tag_type")).thenReturn(
+                List.of(DictItemOptionVO.builder().code("A").label("标签A").showOrder(0).build()));
+
+        List<FormFieldRenderItemVO> result = formFieldDefinitionService.buildRenderSchema("USER");
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getDictOptions()).hasSize(1);
+        assertThat(result.get(0).getDictOptions().get(0).getLabel()).isEqualTo("标签A");
+        assertThat(result.get(0).getDictOptions().get(0).getValue()).isEqualTo("A");
+    }
+
+    /**
+     * 动态字段渲染元数据接口对控件类型为日期的定义，不应内嵌 {@code dictOptions}。
+     */
+    @Test
+    void buildRenderSchema_shouldExcludeDictOptions_whenDateControlType() {
+        FormFieldDefinitionEntity entity = buildDefinitionEntity(21L, "USER", 1L, "birthday",
+                FormFieldStatus.ENABLED);
+        entity.setControlType(FormFieldControlType.DATE);
+        when(formFieldDefinitionMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(entity));
+        when(metadataFieldMapper.selectByIds(any()))
+                .thenReturn(List.of(buildMetadataEntity(1L, "USER", "ext1", MetadataFieldStatus.ENABLED)));
+
+        List<FormFieldRenderItemVO> result = formFieldDefinitionService.buildRenderSchema("USER");
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getDictOptions()).isEmpty();
     }
 
     /**
@@ -453,7 +589,7 @@ class FormFieldDefinitionServiceImplTest {
         request.setMetadataFieldId(metadataFieldId);
         request.setFieldName("身份证号");
         request.setControlType(controlType);
-        if (controlType == FormFieldControlType.DICT) {
+        if (FormFieldControlType.DICT_TYPES.contains(controlType)) {
             request.setDictTypeId(1L);
         }
         request.setIsUnique(false);

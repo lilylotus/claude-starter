@@ -53,13 +53,14 @@ public class FormFieldDefinitionEntity {
      */
     private String fieldCode;
 
-    /** 控件类型：1=文本框，2=数字框，3=字典下拉。 */
+    /** 控件类型：1=文本框，2=数字框，3=字典下拉，4=日期，5=多选字典下拉。 */
     private Integer controlType;
 
     /**
-     * 关联的字典类型 id，仅 controlType=3 时必填；控件类型切换为非字典下拉时需要
-     * 显式写入 {@code NULL}，MyBatis-Plus 默认的 {@code NOT_NULL} 更新策略会跳过
-     * null 值字段，故用 {@link FieldStrategy#ALWAYS} 覆盖，确保 null 也能写入。
+     * 关联的字典类型 id，仅 controlType=3（字典下拉）或 controlType=5（多选字典下拉）时必填；
+     * 控件类型切换为非字典类型时需要显式写入 {@code NULL}，MyBatis-Plus 默认的
+     * {@code NOT_NULL} 更新策略会跳过 null 值字段，故用 {@link FieldStrategy#ALWAYS}
+     * 覆盖，确保 null 也能写入。
      */
     @TableField(value = "dict_type_id", updateStrategy = FieldStrategy.ALWAYS)
     private Long dictTypeId;

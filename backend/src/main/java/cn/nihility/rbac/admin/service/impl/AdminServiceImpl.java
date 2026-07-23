@@ -15,7 +15,7 @@ import cn.nihility.rbac.admin.mapper.AdminOrgScopeMapper;
 import cn.nihility.rbac.admin.mapper.AdminRoleMapper;
 import cn.nihility.rbac.admin.mapstruct.AdminConvert;
 import cn.nihility.rbac.admin.service.AdminService;
-import cn.nihility.rbac.common.PageResult;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;

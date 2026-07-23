@@ -3,7 +3,7 @@ package cn.nihility.rbac.app.service;
 import cn.nihility.rbac.app.dto.AppCreateRequest;
 import cn.nihility.rbac.app.dto.AppUpdateRequest;
 import cn.nihility.rbac.app.dto.AppVO;
-import cn.nihility.rbac.common.PageResult;
+import cn.nihility.rbac.common.result.PageResult;
 
 /**
  * 应用管理业务逻辑接口，提供应用主数据的分页查询、维护、启停用、逻辑删除能力。

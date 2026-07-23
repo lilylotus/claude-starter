@@ -1,6 +1,6 @@
 package cn.nihility.rbac.common.advice;
 
-import cn.nihility.rbac.common.Result;
+import cn.nihility.rbac.common.result.Result;
 import cn.nihility.rbac.common.util.JacksonUtils;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.MediaType;

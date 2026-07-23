@@ -3,7 +3,7 @@ package cn.nihility.rbac.admin.service;
 import cn.nihility.rbac.admin.dto.AdminCreateRequest;
 import cn.nihility.rbac.admin.dto.AdminUpdateRequest;
 import cn.nihility.rbac.admin.dto.AdminVO;
-import cn.nihility.rbac.common.PageResult;
+import cn.nihility.rbac.common.result.PageResult;
 
 /**
  * 管理员管理业务逻辑接口，提供管理员主数据的分页查询、维护、启停用、逻辑删除能力，

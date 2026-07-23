@@ -33,8 +33,8 @@ public class FormFieldRenderItemVO {
     @Schema(description = "绑定的元数据字段列名")
     private String columnName;
 
-    /** 控件类型：1=文本框，2=数字框，3=字典下拉。 */
-    @Schema(description = "控件类型：1=文本框，2=数字框，3=字典下拉")
+    /** 控件类型：1=文本框，2=数字框，3=字典下拉，4=日期，5=多选字典下拉。 */
+    @Schema(description = "控件类型：1=文本框，2=数字框，3=字典下拉，4=日期，5=多选字典下拉")
     private Integer controlType;
 
     /** 是否必填。 */
@@ -77,8 +77,8 @@ public class FormFieldRenderItemVO {
     @Schema(description = "显示序号，值越大越靠前")
     private Integer showOrder;
 
-    /** 字典下拉可选项，仅 {@code controlType=3} 时内嵌。 */
+    /** 字典下拉可选项，仅 {@code controlType=3}（字典下拉）或 {@code controlType=5}（多选字典下拉）时内嵌。 */
     @Builder.Default
-    @Schema(description = "字典下拉可选项，仅控件类型为字典下拉时内嵌")
+    @Schema(description = "字典下拉可选项，仅控件类型为字典下拉或多选字典下拉时内嵌")
     private List<FormFieldDictOptionVO> dictOptions = new ArrayList<>();
 }

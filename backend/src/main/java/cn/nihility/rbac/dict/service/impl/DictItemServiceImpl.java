@@ -1,6 +1,6 @@
 package cn.nihility.rbac.dict.service.impl;
 
-import cn.nihility.rbac.common.PageResult;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.dict.constant.DictStatus;
 import cn.nihility.rbac.dict.dto.DictItemCreateRequest;

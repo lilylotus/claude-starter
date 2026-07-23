@@ -10,9 +10,10 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import cn.nihility.rbac.common.PageResult;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
+import cn.nihility.rbac.formfield.support.FormFieldSnapshotSupport;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.user.constant.PositionStatus;
@@ -64,6 +65,10 @@ class PositionServiceImplTest {
     @Mock
     private FormFieldDefinitionService formFieldDefinitionService;
 
+    /** 被测服务的操作日志扩展字段快照填充依赖，使用 Mockito 打桩。 */
+    @Mock
+    private FormFieldSnapshotSupport formFieldSnapshotSupport;
+
     /** 被测服务实例。 */
     private PositionServiceImpl positionService;
 
@@ -73,14 +78,15 @@ class PositionServiceImplTest {
      * 不受"表单字段定义"驱动的校验管线影响。{@link PositionDynamicFieldSupport} 直接用
      * 已打桩的 {@code formFieldDefinitionService}/{@code userPositionMapper} 构造真实实例，
      * 不额外 mock；{@link PositionLogSnapshotSupport} 同理，直接用已打桩的
-     * {@code userMapper}/{@code orgMapper}/{@code formFieldDefinitionService} 构造真实实例。
+     * {@code userMapper}/{@code orgMapper}/{@code formFieldDefinitionService}/
+     * {@code formFieldSnapshotSupport} 构造真实实例。
      */
     @BeforeEach
     void setUp() {
         PositionDynamicFieldSupport positionDynamicFieldSupport =
                 new PositionDynamicFieldSupport(formFieldDefinitionService, userPositionMapper);
-        PositionLogSnapshotSupport positionLogSnapshotSupport =
-                new PositionLogSnapshotSupport(userMapper, orgMapper, formFieldDefinitionService);
+        PositionLogSnapshotSupport positionLogSnapshotSupport = new PositionLogSnapshotSupport(userMapper, orgMapper,
+                formFieldDefinitionService, formFieldSnapshotSupport);
         positionService = new PositionServiceImpl(userPositionMapper, operationLogRecorder,
                 positionDynamicFieldSupport, positionLogSnapshotSupport);
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());

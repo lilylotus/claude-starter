@@ -1,6 +1,6 @@
 package cn.nihility.rbac.menu.service;
 
-import cn.nihility.rbac.common.PageResult;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.menu.dto.MenuCreateRequest;
 import cn.nihility.rbac.menu.dto.MenuTreeNodeVO;
 import cn.nihility.rbac.menu.dto.MenuUpdateRequest;

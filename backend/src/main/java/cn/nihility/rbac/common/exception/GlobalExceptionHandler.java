@@ -1,6 +1,6 @@
 package cn.nihility.rbac.common.exception;
 
-import cn.nihility.rbac.common.Result;
+import cn.nihility.rbac.common.result.Result;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;

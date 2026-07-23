@@ -5,16 +5,20 @@ import type { FormFieldBizType } from './metadataField'
 
 export type { FormFieldBizType }
 
-// 控件类型常量：1 = 文本框，2 = 数字框，3 = 字典下拉，和后端
-// cn.nihility.rbac.formfield.constant.FormFieldControlType 对齐。
+// 控件类型常量：1 = 文本框，2 = 数字框，3 = 字典下拉，4 = 日期，5 = 多选字典下拉，
+// 和后端 cn.nihility.rbac.formfield.constant.FormFieldControlType 对齐。
 export const FORM_FIELD_CONTROL_TYPE_TEXT = 1
 export const FORM_FIELD_CONTROL_TYPE_NUMBER = 2
 export const FORM_FIELD_CONTROL_TYPE_DICT = 3
+export const FORM_FIELD_CONTROL_TYPE_DATE = 4
+export const FORM_FIELD_CONTROL_TYPE_MULTI_DICT = 5
 
 export const FORM_FIELD_CONTROL_TYPE_OPTIONS: Array<{ value: number; label: string }> = [
   { value: FORM_FIELD_CONTROL_TYPE_TEXT, label: '文本框' },
   { value: FORM_FIELD_CONTROL_TYPE_NUMBER, label: '数字框' },
   { value: FORM_FIELD_CONTROL_TYPE_DICT, label: '字典下拉' },
+  { value: FORM_FIELD_CONTROL_TYPE_DATE, label: '日期' },
+  { value: FORM_FIELD_CONTROL_TYPE_MULTI_DICT, label: '多选字典下拉' },
 ]
 
 // 状态常量：2000 = 启用，3000 = 停用（-1000 为逻辑删除，后端接口已过滤，前端不会拿到）。

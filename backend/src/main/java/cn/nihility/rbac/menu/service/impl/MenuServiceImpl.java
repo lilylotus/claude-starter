@@ -1,6 +1,6 @@
 package cn.nihility.rbac.menu.service.impl;
 
-import cn.nihility.rbac.common.PageResult;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.menu.constant.MenuResourceType;
 import cn.nihility.rbac.menu.constant.MenuStatus;

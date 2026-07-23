@@ -1,4 +1,4 @@
-package cn.nihility.rbac.common;
+package cn.nihility.rbac.common.result;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import java.util.List;

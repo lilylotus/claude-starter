@@ -8,7 +8,11 @@ import OperationHistoryPanel from '@/components/OperationHistoryPanel.vue'
 import * as appApi from '@/api/app'
 import { APP_STATUS_ENABLED, type AppRow } from '@/types/app'
 import { useDynamicFormFields } from '@/composables/useDynamicFormFields'
-import { FORM_FIELD_CONTROL_TYPE_DICT, type FormFieldRenderItem } from '@/types/formField'
+import {
+  FORM_FIELD_CONTROL_TYPE_DICT,
+  FORM_FIELD_CONTROL_TYPE_MULTI_DICT,
+  type FormFieldRenderItem,
+} from '@/types/formField'
 
 const route = useRoute()
 const router = useRouter()
@@ -90,6 +94,9 @@ function goBack() {
           >
             <span v-if="item.controlType === FORM_FIELD_CONTROL_TYPE_DICT">
               {{ appFields.dictOptionLabel(item, extFieldValue(item)) || '-' }}
+            </span>
+            <span v-else-if="item.controlType === FORM_FIELD_CONTROL_TYPE_MULTI_DICT">
+              {{ appFields.dictOptionLabels(item, extFieldValue(item)) || '-' }}
             </span>
             <span v-else>{{ (extFieldValue(item) as string) || '-' }}</span>
           </el-descriptions-item>

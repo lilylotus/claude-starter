@@ -1,6 +1,6 @@
 package cn.nihility.rbac.operationlog.service.impl;
 
-import cn.nihility.rbac.common.PageResult;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.common.util.JacksonUtils;
 import cn.nihility.rbac.operationlog.constant.OperationType;

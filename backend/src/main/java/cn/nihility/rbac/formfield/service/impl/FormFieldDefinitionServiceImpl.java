@@ -1,6 +1,6 @@
 package cn.nihility.rbac.formfield.service.impl;
 
-import cn.nihility.rbac.common.PageResult;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.dict.dto.DictItemOptionVO;
 import cn.nihility.rbac.dict.entity.DictTypeEntity;
@@ -108,7 +108,7 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
         FormFieldDefinitionEntity entity = FormFieldDefinitionConvert.INSTANCE.toEntity(request);
         entity.setBizType(metadata.getBizType());
         entity.setFieldCode(metadata.getFieldCode());
-        if (!Objects.equals(entity.getControlType(), FormFieldControlType.DICT)) {
+        if (!FormFieldControlType.DICT_TYPES.contains(entity.getControlType())) {
             entity.setDictTypeId(null);
         }
         LocalDateTime now = LocalDateTime.now();
@@ -163,7 +163,7 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
             entity.setMetadataFieldId(request.getMetadataFieldId());
             entity.setFieldCode(rebindTarget.getFieldCode());
         }
-        if (!Objects.equals(entity.getControlType(), FormFieldControlType.DICT)) {
+        if (!FormFieldControlType.DICT_TYPES.contains(entity.getControlType())) {
             entity.setDictTypeId(null);
         }
         entity.setUpdateBy(DEFAULT_OPERATOR);
@@ -327,17 +327,18 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
     }
 
     /**
-     * 控件类型为下拉单选字典时，校验必须关联一个存在的字典类型；其余控件类型不做校验。
+     * 控件类型为下拉单选字典或多选字典下拉时，校验必须关联一个存在的字典类型；
+     * 其余控件类型不做校验。
      *
      * @param controlType 控件类型
      * @param dictTypeId  关联的字典类型 id
      */
     private void validateDictType(Integer controlType, Long dictTypeId) {
-        if (!Objects.equals(controlType, FormFieldControlType.DICT)) {
+        if (!FormFieldControlType.DICT_TYPES.contains(controlType)) {
             return;
         }
         if (dictTypeId == null || dictTypeMapper.selectById(dictTypeId) == null) {
-            throw new DictTypeRequiredException("控件类型为下拉单选字典时必须关联一个存在的字典类型");
+            throw new DictTypeRequiredException("控件类型为下拉单选字典或多选字典下拉时必须关联一个存在的字典类型");
         }
     }
 
@@ -422,15 +423,15 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
     }
 
     /**
-     * 控件类型为下拉单选字典时，解析其关联字典类型下的启用字典项作为可选项来源；
-     * 其余控件类型或未关联有效字典类型时返回空列表。
+     * 控件类型为下拉单选字典或多选字典下拉时，解析其关联字典类型下的启用字典项
+     * 作为可选项来源；其余控件类型或未关联有效字典类型时返回空列表。
      *
      * @param controlType 控件类型
      * @param dictTypeId  关联的字典类型 id
      * @return 字典下拉可选项列表
      */
     private List<FormFieldDictOptionVO> resolveDictOptions(Integer controlType, Long dictTypeId) {
-        if (!Objects.equals(controlType, FormFieldControlType.DICT) || dictTypeId == null) {
+        if (!FormFieldControlType.DICT_TYPES.contains(controlType) || dictTypeId == null) {
             return new ArrayList<>();
         }
         DictTypeEntity dictType = dictTypeMapper.selectById(dictTypeId);
@@ -485,6 +486,12 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
         }
         if (Objects.equals(controlType, FormFieldControlType.DICT)) {
             return "字典下拉";
+        }
+        if (Objects.equals(controlType, FormFieldControlType.DATE)) {
+            return "日期";
+        }
+        if (Objects.equals(controlType, FormFieldControlType.MULTI_DICT)) {
+            return "多选字典下拉";
         }
         return "文本框";
     }

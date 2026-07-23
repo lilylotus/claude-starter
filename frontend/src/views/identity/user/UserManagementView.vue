@@ -19,7 +19,9 @@ import type { OrgTreeNode } from '@/types/org'
 import type { DictItemOption } from '@/types/dict'
 import { useDynamicFormFields } from '@/composables/useDynamicFormFields'
 import {
+  FORM_FIELD_CONTROL_TYPE_DATE,
   FORM_FIELD_CONTROL_TYPE_DICT,
+  FORM_FIELD_CONTROL_TYPE_MULTI_DICT,
   FORM_FIELD_CONTROL_TYPE_NUMBER,
   FORM_FIELD_CONTROL_TYPE_TEXT,
   type FormFieldRenderItem,
@@ -99,7 +101,13 @@ const editingId = ref<number | null>(null)
 const submitting = ref(false)
 const formRef = ref<FormInstance>()
 
+// 新增一行任职记录的默认值：静态字段固定给空白/初值，ext1~ext10 按当前 bizType=POSITION
+// 动态字段定义的控件类型给出对应默认值（数字框 0、日期 null、多选字典下拉 []、其余空字符串），
+// 与 useDynamicFormFields.buildFormModel() 的默认值规则保持一致，避免多选/日期字段在新增行
+// 上被硬编码为空字符串导致类型不匹配
 function blankPosition(): UserPositionFormItem {
+  const fields = dialogMode.value === 'create' ? positionFields.createFields : positionFields.editFields
+  const extDefaults = positionFields.buildFormModel(fields.filter((f) => f.columnName.startsWith('ext')))
   return {
     orgId: null,
     positionType: '',
@@ -107,17 +115,8 @@ function blankPosition(): UserPositionFormItem {
     positionPhone: '',
     showOrder: 0,
     remark: '',
-    ext1: '',
-    ext2: '',
-    ext3: '',
-    ext4: '',
-    ext5: '',
-    ext6: '',
-    ext7: '',
-    ext8: '',
-    ext9: '',
-    ext10: '',
-  }
+    ...extDefaults,
+  } as UserPositionFormItem
 }
 
 // gender/positions 保持静态声明；其余字段（name/code/mobile/idCard/showOrder/remark/
@@ -179,6 +178,11 @@ async function openEditDialog(row: UserRow) {
   resetDynamicKeys(form, ['gender', 'positions'])
   Object.assign(form, userFields.buildFormModel(userFields.editFields, detail))
   form.gender = detail.gender
+  // ext1~ext10 的回填统一复用 positionFields.buildFormModel()（与 blankPosition() 的既有
+  // 做法一致），而不是手写映射，确保 MULTI_DICT 字段的逗号分隔字符串被正确 split 成数组，
+  // 避免两处实现出现不一致（见 design.md Open Questions）。openEditDialog 属于编辑路径，
+  // 用 editFields
+  const extFields = positionFields.editFields.filter((f) => f.columnName.startsWith('ext'))
   form.positions = detail.positions.map((position) => ({
     id: position.id,
     orgId: position.orgId,
@@ -187,16 +191,7 @@ async function openEditDialog(row: UserRow) {
     positionPhone: position.positionPhone,
     showOrder: position.showOrder,
     remark: position.remark,
-    ext1: position.ext1 ?? '',
-    ext2: position.ext2 ?? '',
-    ext3: position.ext3 ?? '',
-    ext4: position.ext4 ?? '',
-    ext5: position.ext5 ?? '',
-    ext6: position.ext6 ?? '',
-    ext7: position.ext7 ?? '',
-    ext8: position.ext8 ?? '',
-    ext9: position.ext9 ?? '',
-    ext10: position.ext10 ?? '',
+    ...positionFields.buildFormModel(extFields, position),
   }))
   dialogVisible.value = true
 }
@@ -212,11 +207,15 @@ async function submitForm() {
 
   submitting.value = true
   try {
-    // 上面的表单校验已确保每一行任职记录的 orgId 必填，此处已知非空
+    // 上面的表单校验已确保每一行任职记录的 orgId 必填，此处已知非空；顶层动态字段与每行
+    // 任职记录的动态字段（含 MULTI_DICT）都要先经 buildSubmitModel 把多选字典的数组值
+    // 序列化成逗号分隔字符串，避免把数组直接提交给后端导致 HttpMessageNotReadableException
+    const activeUserFields = dialogMode.value === 'create' ? userFields.createFields : userFields.editFields
+    const activePositionFields = dialogMode.value === 'create' ? positionFields.createFields : positionFields.editFields
     const payload = {
-      ...form,
+      ...userFields.buildSubmitModel(activeUserFields, form),
       positions: form.positions.map((position) => ({
-        ...position,
+        ...positionFields.buildSubmitModel(activePositionFields, position),
         orgId: position.orgId as number,
       })),
     } as unknown as UserFormRequest
@@ -313,6 +312,9 @@ async function handleDelete(row: UserRow) {
             <span v-if="col.controlType === FORM_FIELD_CONTROL_TYPE_DICT">
               {{ userFields.dictOptionLabel(col, (row as Record<string, unknown>)[col.columnName]) }}
             </span>
+            <span v-else-if="col.controlType === FORM_FIELD_CONTROL_TYPE_MULTI_DICT">
+              {{ userFields.dictOptionLabels(col, (row as Record<string, unknown>)[col.columnName]) }}
+            </span>
             <span v-else>{{ (row as Record<string, unknown>)[col.columnName] }}</span>
           </template>
         </el-table-column>
@@ -379,6 +381,25 @@ async function handleDelete(row: UserRow) {
               style="width: 100%"
               :disabled="!item.editable"
             />
+            <el-date-picker
+              v-else-if="item.controlType === FORM_FIELD_CONTROL_TYPE_DATE"
+              v-model="(form[item.columnName] as string | null)"
+              type="date"
+              value-format="YYYY-MM-DD"
+              style="width: 100%"
+              :placeholder="item.placeholder || `请选择${item.fieldName}`"
+              :disabled="!item.editable"
+            />
+            <el-select
+              v-else-if="item.controlType === FORM_FIELD_CONTROL_TYPE_MULTI_DICT"
+              v-model="(form[item.columnName] as string[])"
+              multiple
+              :placeholder="item.placeholder || `请选择${item.fieldName}`"
+              :disabled="!item.editable"
+              style="width: 100%"
+            >
+              <el-option v-for="opt in item.dictOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+            </el-select>
             <template v-else>
               <el-select
                 v-model="(form[item.columnName] as string)"
@@ -464,6 +485,25 @@ async function handleDelete(row: UserRow) {
                     style="width: 100%"
                     :disabled="!item.editable"
                   />
+                  <el-date-picker
+                    v-else-if="item.controlType === FORM_FIELD_CONTROL_TYPE_DATE"
+                    v-model="(position[item.columnName] as string | null)"
+                    type="date"
+                    value-format="YYYY-MM-DD"
+                    style="width: 100%"
+                    :placeholder="item.placeholder || `请选择${item.fieldName}`"
+                    :disabled="!item.editable"
+                  />
+                  <el-select
+                    v-else-if="item.controlType === FORM_FIELD_CONTROL_TYPE_MULTI_DICT"
+                    v-model="(position[item.columnName] as string[])"
+                    multiple
+                    :placeholder="item.placeholder || `请选择${item.fieldName}`"
+                    :disabled="!item.editable"
+                    style="width: 100%"
+                  >
+                    <el-option v-for="opt in item.dictOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+                  </el-select>
                   <template v-else>
                     <el-select
                       v-model="(position[item.columnName] as string)"

@@ -1,6 +1,6 @@
 package cn.nihility.rbac.formfield.service;
 
-import cn.nihility.rbac.common.PageResult;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.formfield.dto.FormFieldDefinitionCreateRequest;
 import cn.nihility.rbac.formfield.dto.FormFieldDefinitionUpdateRequest;
 import cn.nihility.rbac.formfield.dto.FormFieldDefinitionVO;
@@ -31,8 +31,8 @@ public interface FormFieldDefinitionService {
     FormFieldDefinitionVO getById(Long id);
 
     /**
-     * 创建字段定义，校验绑定的元数据字段可用性、字典下拉的 dictTypeId 必填性；
-     * fieldCode 取自所绑定元数据字段的当前值，不由请求提交。
+     * 创建字段定义，校验绑定的元数据字段可用性、字典下拉/多选字典下拉的
+     * dictTypeId 必填性；fieldCode 取自所绑定元数据字段的当前值，不由请求提交。
      *
      * @param request 创建请求
      * @return 创建后的字段定义详情
@@ -87,7 +87,8 @@ public interface FormFieldDefinitionService {
 
     /**
      * 构造指定业务对象类型的动态字段渲染元数据：全部启用状态的定义（含承重字段），
-     * 按显示序号降序排列；控件类型为字典下拉的定义内嵌其关联字典类型下的启用字典项。
+     * 按显示序号降序排列；控件类型为字典下拉或多选字典下拉的定义内嵌其关联字典类型
+     * 下的启用字典项。
      *
      * @param bizType 业务对象类型
      * @return 渲染元数据列表

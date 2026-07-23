@@ -45,8 +45,8 @@ public class FormFieldDefinitionVO {
     @Schema(description = "前端/DTO 使用的字段标识")
     private String fieldCode;
 
-    /** 控件类型：1=文本框，2=数字框，3=字典下拉。 */
-    @Schema(description = "控件类型：1=文本框，2=数字框，3=字典下拉")
+    /** 控件类型：1=文本框，2=数字框，3=字典下拉，4=日期，5=多选字典下拉。 */
+    @Schema(description = "控件类型：1=文本框，2=数字框，3=字典下拉，4=日期，5=多选字典下拉")
     private Integer controlType;
 
     /** 关联的字典类型 id。 */

@@ -10,7 +10,11 @@ import * as dictApi from '@/api/dict'
 import { POSITION_STATUS_ENABLED, type PositionRow } from '@/types/position'
 import type { DictItemOption } from '@/types/dict'
 import { useDynamicFormFields } from '@/composables/useDynamicFormFields'
-import { FORM_FIELD_CONTROL_TYPE_DICT, type FormFieldRenderItem } from '@/types/formField'
+import {
+  FORM_FIELD_CONTROL_TYPE_DICT,
+  FORM_FIELD_CONTROL_TYPE_MULTI_DICT,
+  type FormFieldRenderItem,
+} from '@/types/formField'
 
 const route = useRoute()
 const router = useRouter()
@@ -109,6 +113,9 @@ function goBack() {
           >
             <span v-if="item.controlType === FORM_FIELD_CONTROL_TYPE_DICT">
               {{ positionFields.dictOptionLabel(item, extFieldValue(item)) || '-' }}
+            </span>
+            <span v-else-if="item.controlType === FORM_FIELD_CONTROL_TYPE_MULTI_DICT">
+              {{ positionFields.dictOptionLabels(item, extFieldValue(item)) || '-' }}
             </span>
             <span v-else>{{ (extFieldValue(item) as string) || '-' }}</span>
           </el-descriptions-item>

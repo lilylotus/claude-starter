@@ -35,13 +35,13 @@ public class FormFieldDefinitionUpdateRequest {
     @Schema(description = "展示名称")
     private String fieldName;
 
-    /** 控件类型：1=文本框，2=数字框，3=字典下拉。 */
+    /** 控件类型：1=文本框，2=数字框，3=字典下拉，4=日期，5=多选字典下拉。 */
     @NotNull(message = "控件类型不能为空")
-    @Schema(description = "控件类型：1=文本框，2=数字框，3=字典下拉")
+    @Schema(description = "控件类型：1=文本框，2=数字框，3=字典下拉，4=日期，5=多选字典下拉")
     private Integer controlType;
 
-    /** 关联的字典类型 id，仅 controlType=3 时必填。 */
-    @Schema(description = "关联的字典类型 id，仅控件类型为字典下拉时必填")
+    /** 关联的字典类型 id，仅 controlType=3（字典下拉）或 controlType=5（多选字典下拉）时必填。 */
+    @Schema(description = "关联的字典类型 id，仅控件类型为字典下拉或多选字典下拉时必填")
     private Long dictTypeId;
 
     /** 是否要求同 bizType 下有效数据唯一。 */
