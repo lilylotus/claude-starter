@@ -6,6 +6,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.common.exception.BusinessException;
@@ -22,7 +24,9 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
 
@@ -136,6 +140,87 @@ class BatchImportServiceImplTest {
         assertThat(result.getFailList()).hasSize(1);
         assertThat(result.getFailList().get(0).getReason()).contains("ORG002");
         assertThat(result.getFailList().get(0).getRowNo()).isEqualTo(3);
+    }
+
+    /**
+     * ORG 场景下，子组织行排在其上级组织行之前（乱序文件）时，批量导入引擎应先完整
+     * 解析全部数据行，再按"上级组织编码"列的文件内依赖关系做拓扑排序，确保上级组织
+     * 行先于子组织行被 {@link ImportRowExecutor#processRow} 处理，即使其在文件里排
+     * 在后面（design.md 决策 2）。
+     */
+    @Test
+    void importExcel_shouldReorderOrgRows_whenChildRowBeforeParentRow() throws Exception {
+        when(importFieldConfigService.listActiveByBizType("ORG")).thenReturn(List.of(
+                buildConfig("code", "组织编码", true),
+                buildConfig("__parentCode", "上级组织编码", true)));
+
+        // 子组织行（ORG_CHILD，上级编码指向 ORG_PARENT）排在上级组织行（ORG_PARENT）之前。
+        byte[] content = buildWorkbook(List.of("组织编码", "上级组织编码"), List.of(
+                List.of("ORG_CHILD", "ORG_PARENT"),
+                List.of("ORG_PARENT", "0")));
+        MockMultipartFile file = new MockMultipartFile("file", "t.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content);
+
+        ImportResultVO result = batchImportService.importExcel("ORG", file);
+
+        assertThat(result.getSuccessCount()).isEqualTo(2);
+        assertThat(result.getFailList()).isEmpty();
+
+        InOrder inOrder = Mockito.inOrder(importRowExecutor);
+        inOrder.verify(importRowExecutor).processRow(eq("ORG"), argThatContainsCode("ORG_PARENT"), any());
+        inOrder.verify(importRowExecutor).processRow(eq("ORG"), argThatContainsCode("ORG_CHILD"), any());
+    }
+
+    /**
+     * ORG 场景下，两行的"上级组织编码"互相指向对方的组织编码，构成文件内部循环引用，
+     * 拓扑排序无法消解，两行均应直接判定失败，不进入 {@link ImportRowExecutor#processRow}
+     * （design.md 决策 2）。
+     */
+    @Test
+    void importExcel_shouldFailBothRows_whenOrgRowsFormCycle() throws Exception {
+        when(importFieldConfigService.listActiveByBizType("ORG")).thenReturn(List.of(
+                buildConfig("code", "组织编码", true),
+                buildConfig("__parentCode", "上级组织编码", true)));
+
+        byte[] content = buildWorkbook(List.of("组织编码", "上级组织编码"), List.of(
+                List.of("ORG_A", "ORG_B"),
+                List.of("ORG_B", "ORG_A")));
+        MockMultipartFile file = new MockMultipartFile("file", "t.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content);
+
+        ImportResultVO result = batchImportService.importExcel("ORG", file);
+
+        assertThat(result.getSuccessCount()).isZero();
+        assertThat(result.getFailList()).hasSize(2);
+        assertThat(result.getFailList())
+                .allSatisfy(item -> assertThat(item.getReason()).contains("循环引用"));
+        verify(importRowExecutor, never()).processRow(eq("ORG"), any(), any());
+    }
+
+    /**
+     * 非 ORG 场景（如 POSITION）不受拓扑排序影响，应维持原始文件行序逐行处理。
+     */
+    @Test
+    void importExcel_shouldKeepOriginalOrder_whenBizTypeNotOrg() throws Exception {
+        when(importFieldConfigService.listActiveByBizType("POSITION")).thenReturn(List.of(
+                buildConfig("__userCode", "人员编号", true),
+                buildConfig("__orgCode", "组织编码", true)));
+
+        byte[] content = buildWorkbook(List.of("人员编号", "组织编码"), List.of(
+                List.of("U002", "ORG002"),
+                List.of("U001", "ORG001")));
+        MockMultipartFile file = new MockMultipartFile("file", "t.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content);
+
+        ImportResultVO result = batchImportService.importExcel("POSITION", file);
+
+        assertThat(result.getSuccessCount()).isEqualTo(2);
+
+        InOrder inOrder = Mockito.inOrder(importRowExecutor);
+        inOrder.verify(importRowExecutor).processRow(eq("POSITION"),
+                org.mockito.ArgumentMatchers.argThat(map -> map != null && "U002".equals(map.get("__userCode"))), any());
+        inOrder.verify(importRowExecutor).processRow(eq("POSITION"),
+                org.mockito.ArgumentMatchers.argThat(map -> map != null && "U001".equals(map.get("__userCode"))), any());
     }
 
     /**

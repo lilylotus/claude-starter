@@ -12,7 +12,6 @@ import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.entity.OrgEntity;
 import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.user.constant.PositionStatus;
-import cn.nihility.rbac.user.constant.UserGender;
 import cn.nihility.rbac.user.constant.UserStatus;
 import cn.nihility.rbac.user.dto.UserCreateRequest;
 import cn.nihility.rbac.user.dto.UserPositionRequest;
@@ -425,7 +424,7 @@ public class UserServiceImpl implements UserService {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("姓名", entity.getName());
         snapshot.put("编码", entity.getCode());
-        snapshot.put("性别", genderLabel(entity.getGender()));
+        snapshot.put("性别", entity.getGender());
         snapshot.put("手机号", entity.getMobile());
         snapshot.put("身份证号", entity.getIdCard());
         snapshot.put("显示序号", entity.getShowOrder());
@@ -458,22 +457,6 @@ public class UserServiceImpl implements UserService {
         values.put("ext9", entity.getExt9());
         values.put("ext10", entity.getExt10());
         return values;
-    }
-
-    /**
-     * 把性别码值转换为中文文案，供操作日志快照使用。
-     *
-     * @param gender 性别码值
-     * @return 中文文案
-     */
-    private String genderLabel(Integer gender) {
-        if (Objects.equals(gender, UserGender.MALE)) {
-            return "男";
-        }
-        if (Objects.equals(gender, UserGender.FEMALE)) {
-            return "女";
-        }
-        return "未知";
     }
 
     /**

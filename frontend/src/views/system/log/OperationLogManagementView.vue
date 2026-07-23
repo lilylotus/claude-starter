@@ -4,6 +4,7 @@ import * as operationLogApi from '@/api/operationLog'
 import OperationLogDetailDialog from '@/components/OperationLogDetailDialog.vue'
 import {
   MODULE_OPTIONS,
+  OPERATION_SOURCE_IMPORT,
   OPERATION_TYPE_CREATE,
   OPERATION_TYPE_DELETE,
   OPERATION_TYPE_DISABLE,
@@ -157,10 +158,18 @@ function openDetailDialog(row: OperationLogRow) {
         <el-table-column prop="createTime" label="操作时间" width="170" />
         <el-table-column prop="module" label="操作模块" min-width="110" />
         <el-table-column prop="resourceName" label="资源类型" width="100" />
-        <el-table-column label="操作类型" width="100">
+        <el-table-column label="操作类型" width="160">
           <template #default="{ row }">
             <el-tag :type="operationTagType((row as OperationLogRow).operationType)">
               {{ (row as OperationLogRow).operationTypeLabel }}
+            </el-tag>
+            <el-tag
+              v-if="(row as OperationLogRow).operateSource === OPERATION_SOURCE_IMPORT"
+              type="info"
+              effect="plain"
+              style="margin-left: 6px"
+            >
+              Excel 导入
             </el-tag>
           </template>
         </el-table-column>

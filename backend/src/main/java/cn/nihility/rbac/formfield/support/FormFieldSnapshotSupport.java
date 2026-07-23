@@ -1,8 +1,6 @@
 package cn.nihility.rbac.formfield.support;
 
 import cn.nihility.rbac.dict.dto.DictItemOptionVO;
-import cn.nihility.rbac.dict.entity.DictTypeEntity;
-import cn.nihility.rbac.dict.mapper.DictTypeMapper;
 import cn.nihility.rbac.dict.service.DictItemService;
 import cn.nihility.rbac.formfield.constant.FormFieldControlType;
 import cn.nihility.rbac.formfield.dto.FormFieldDefinitionVO;
@@ -37,9 +35,6 @@ public class FormFieldSnapshotSupport {
 
     /** 多选字典下拉字段解析后展示文案的连接符，与前端 {@code dictOptionLabels()} 的展示风格一致。 */
     private static final String MULTI_DICT_LABEL_JOINER = "、";
-
-    /** 字典类型数据访问接口，用于按 {@code dictTypeId} 反查字典类型编码。 */
-    private final DictTypeMapper dictTypeMapper;
 
     /** 字典项业务逻辑接口，用于按字典类型编码查询启用字典项，解析编码到标签的映射。 */
     private final DictItemService dictItemService;
@@ -80,12 +75,12 @@ public class FormFieldSnapshotSupport {
      */
     private String resolveDisplayValue(FormFieldDefinitionVO definition, String rawValue) {
         Integer controlType = definition.getControlType();
-        Long dictTypeId = definition.getDictTypeId();
+        String dictTypeCode = definition.getDictTypeCode();
         if (rawValue == null || rawValue.isBlank() || !FormFieldControlType.DICT_TYPES.contains(controlType)
-                || dictTypeId == null) {
+                || dictTypeCode == null) {
             return rawValue;
         }
-        Map<String, String> labelByCode = resolveLabelByCode(dictTypeId);
+        Map<String, String> labelByCode = resolveLabelByCode(dictTypeCode);
         if (Objects.equals(controlType, FormFieldControlType.MULTI_DICT)) {
             return Arrays.stream(rawValue.split(MULTI_DICT_VALUE_DELIMITER))
                     .map(String::trim)
@@ -97,18 +92,13 @@ public class FormFieldSnapshotSupport {
     }
 
     /**
-     * 按字典类型 id 查询其编码，再按编码查询启用字典项，构造编码到标签的映射；
-     * 字典类型不存在时返回空 map，交由调用方回退展示原始编码。
+     * 按字典类型编码查询启用字典项，构造编码到标签的映射。
      *
-     * @param dictTypeId 字典类型 id
+     * @param dictTypeCode 字典类型编码
      * @return 字典项编码到标签的映射
      */
-    private Map<String, String> resolveLabelByCode(Long dictTypeId) {
-        DictTypeEntity dictType = dictTypeMapper.selectById(dictTypeId);
-        if (dictType == null) {
-            return Map.of();
-        }
-        List<DictItemOptionVO> options = dictItemService.getEnabledOptions(dictType.getCode());
+    private Map<String, String> resolveLabelByCode(String dictTypeCode) {
+        List<DictItemOptionVO> options = dictItemService.getEnabledOptions(dictTypeCode);
         return options.stream()
                 .collect(Collectors.toMap(
                         DictItemOptionVO::getCode, DictItemOptionVO::getLabel, (left, right) -> left));

@@ -11,7 +11,6 @@ import * as dictApi from '@/api/dict'
 import * as excelImportApi from '@/api/excelImport'
 import BatchImportDialog from '@/components/BatchImportDialog.vue'
 import {
-  USER_GENDER_OPTIONS,
   USER_STATUS_ENABLED,
   type UserFormRequest,
   type UserPositionFormItem,
@@ -32,8 +31,8 @@ import {
 const userStore = useUserStore()
 const router = useRouter()
 
-// 除性别（gender）、启停用状态（status）外的全部字段（含原有表字段与 ext1~ext10）
-// 统一按"表单字段定义"（bizType=USER）动态渲染，见 design.md 决策 12
+// 除启停用状态（status）外的全部字段（含原有表字段、性别 gender 与 ext1~ext10）
+// 统一按"表单字段定义"（bizType=USER）动态渲染，见 design.md 决策 1/12
 const userFields = useDynamicFormFields('USER')
 
 // 内嵌"任职信息"子表单同样接入"表单字段定义"（bizType=POSITION），与独立任职管理页面
@@ -73,10 +72,6 @@ function handleReset() {
 
 function handlePageChange(targetPage: number) {
   userStore.changePage(targetPage)
-}
-
-function genderLabel(gender: number): string {
-  return USER_GENDER_OPTIONS.find((opt) => opt.value === gender)?.label ?? '未知'
 }
 
 // ---- Excel 批量导入：下载模板 / 上传批量导入 ----
@@ -133,11 +128,12 @@ function blankPosition(): UserPositionFormItem {
   } as UserPositionFormItem
 }
 
-// gender/positions 保持静态声明；其余字段（name/code/mobile/idCard/showOrder/remark/
-// ext1~ext10）由 userFields 动态渲染驱动，key 为各自绑定的 columnName
-type UserForm = { gender: number; positions: UserPositionFormItem[] } & Record<string, unknown>
+// positions 保持静态声明（任职子表单是数组，不适合并入动态表单体系）；其余字段
+// （name/code/gender/mobile/idCard/showOrder/remark/ext1~ext10）由 userFields 动态
+// 渲染驱动，key 为各自绑定的 columnName
+type UserForm = { positions: UserPositionFormItem[] } & Record<string, unknown>
 
-const form = reactive<UserForm>({ gender: 0, positions: [] })
+const form = reactive<UserForm>({ positions: [] })
 
 // 保留 form 里指定 key（如 gender/positions），清空其余动态字段的 key，供每次打开弹窗前重置
 function resetDynamicKeys(target: Record<string, unknown>, keep: string[]) {
@@ -147,7 +143,6 @@ function resetDynamicKeys(target: Record<string, unknown>, keep: string[]) {
 }
 
 const rules = computed<FormRules>(() => ({
-  gender: [{ required: true, message: '请选择性别', trigger: 'change' }],
   ...(dialogMode.value === 'create' ? userFields.createRules : userFields.editRules),
 }))
 
@@ -177,9 +172,8 @@ async function openCreateDialog() {
   await fetchOrgTree()
   dialogMode.value = 'create'
   editingId.value = null
-  resetDynamicKeys(form, ['gender', 'positions'])
+  resetDynamicKeys(form, ['positions'])
   Object.assign(form, userFields.buildFormModel(userFields.createFields))
-  form.gender = 0
   form.positions = []
   dialogVisible.value = true
 }
@@ -189,9 +183,8 @@ async function openEditDialog(row: UserRow) {
   editingId.value = row.id
   const detail = await userApi.getUserById(row.id)
   await fetchOrgTree()
-  resetDynamicKeys(form, ['gender', 'positions'])
+  resetDynamicKeys(form, ['positions'])
   Object.assign(form, userFields.buildFormModel(userFields.editFields, detail))
-  form.gender = detail.gender
   // ext1~ext10 的回填统一复用 positionFields.buildFormModel()（与 blankPosition() 的既有
   // 做法一致），而不是手写映射，确保 MULTI_DICT 字段的逗号分隔字符串被正确 split 成数组，
   // 避免两处实现出现不一致（见 design.md Open Questions）。openEditDialog 属于编辑路径，
@@ -336,9 +329,6 @@ async function handleDelete(row: UserRow) {
             <span v-else>{{ (row as Record<string, unknown>)[col.columnName] }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="性别" width="80">
-          <template #default="{ row }">{{ genderLabel((row as UserRow).gender) }}</template>
-        </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
             <el-tag v-if="(row as UserRow).status === USER_STATUS_ENABLED" type="success">启用</el-tag>
@@ -375,11 +365,6 @@ async function handleDelete(row: UserRow) {
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="760px" @close="closeDialog">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
         <div class="user-form-grid">
-          <el-form-item label="性别" prop="gender">
-            <el-select v-model="form.gender" style="width: 100%">
-              <el-option v-for="opt in USER_GENDER_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
-            </el-select>
-          </el-form-item>
           <el-form-item
             v-for="item in (dialogMode === 'create' ? userFields.createFields : userFields.editFields)"
             :key="item.fieldCode"

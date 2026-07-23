@@ -49,9 +49,9 @@ public class FormFieldDefinitionVO {
     @Schema(description = "控件类型：1=文本框，2=数字框，3=字典下拉，4=日期，5=多选字典下拉")
     private Integer controlType;
 
-    /** 关联的字典类型 id。 */
-    @Schema(description = "关联的字典类型 id")
-    private Long dictTypeId;
+    /** 关联的字典类型编码。 */
+    @Schema(description = "关联的字典类型编码")
+    private String dictTypeCode;
 
     /** 关联的字典类型名称，供前端展示。 */
     @Schema(description = "关联的字典类型名称")

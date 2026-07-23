@@ -7,7 +7,7 @@ import { ArrowLeft } from '@element-plus/icons-vue'
 import OperationHistoryPanel from '@/components/OperationHistoryPanel.vue'
 import * as userApi from '@/api/user'
 import * as dictApi from '@/api/dict'
-import { USER_GENDER_OPTIONS, USER_STATUS_ENABLED, type UserPositionRow, type UserRow } from '@/types/user'
+import { USER_STATUS_ENABLED, type UserPositionRow, type UserRow } from '@/types/user'
 import type { DictItemOption } from '@/types/dict'
 import { useDynamicFormFields } from '@/composables/useDynamicFormFields'
 import {
@@ -44,9 +44,11 @@ function positionExtFieldValue(row: UserPositionRow, item: FormFieldRenderItem):
   return (row as unknown as Record<string, unknown>)[item.columnName]
 }
 
-function genderLabel(gender: number): string {
-  return USER_GENDER_OPTIONS.find((opt) => opt.value === gender)?.label ?? '未知'
-}
+// 性别对应的字段定义（bizType=USER 下 columnName=gender 的动态字段），用于把展示值
+// 转换为字典标签；与 mobile/idCard 等字段一致，性别本身仍手写在描述列表结构里
+// （详情页手机号/身份证号等固有字段同样是手写 el-descriptions-item，不经过 v-for 遍历，
+// 只有 ext1~ext10 走 v-for），故此处保持相同结构，只是取值方式改为走字典标签转换
+const genderField = computed(() => userFields.schema.find((item) => item.columnName === 'gender'))
 
 // ---- 任职类型下拉框选项（数据源为字典模块 position_type 字典类型下的启用项），
 // 用于把任职记录里的 positionType 编码翻译为中文标签 ----
@@ -108,7 +110,9 @@ function goBack() {
         <el-descriptions v-loading="loading" :column="2" border>
           <el-descriptions-item label="姓名">{{ detailData?.name }}</el-descriptions-item>
           <el-descriptions-item label="编号">{{ detailData?.code }}</el-descriptions-item>
-          <el-descriptions-item label="性别">{{ genderLabel(detailData?.gender ?? 0) }}</el-descriptions-item>
+          <el-descriptions-item label="性别">
+            {{ (genderField && detailData ? userFields.dictOptionLabel(genderField, detailData.gender) : '') || '-' }}
+          </el-descriptions-item>
           <el-descriptions-item label="手机号">{{ detailData?.mobile || '-' }}</el-descriptions-item>
           <el-descriptions-item label="身份证号">{{ detailData?.idCard || '-' }}</el-descriptions-item>
           <el-descriptions-item label="状态">

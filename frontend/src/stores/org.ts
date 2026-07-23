@@ -36,6 +36,12 @@ export const useOrgStore = defineStore('org', () => {
   // 更深层级的子节点由 el-tree 内部懒加载 store 维护，此处不重复镜像。
   const navTreeTopLevel = ref<OrgTreeNode[]>([])
   const navTreeLoading = ref(false)
+  // 批量导入完成后整体重置左侧导航树用的版本号：组件模板给 el-tree 绑定
+  // :key="orgStore.navTreeVersion"，每次批量导入完成后自增，触发 Vue 销毁重建
+  // 该组件实例，从而丢弃 el-tree 内部的懒加载缓存并收起所有已展开节点、重新从根节点
+  // 开始懒加载（详见 design.md 决策 1）。单条记录的新增/编辑/删除/启停用不使用这个
+  // 版本号，仍走 refreshNavTreeBranch 的局部刷新，不受影响
+  const navTreeVersion = ref(0)
 
   // 加载左侧组织树
   async function fetchTree() {
@@ -130,6 +136,7 @@ export const useOrgStore = defineStore('org', () => {
     total,
     navTreeTopLevel,
     navTreeLoading,
+    navTreeVersion,
     fetchTree,
     fetchChildren,
     changePage,

@@ -3,6 +3,7 @@ package cn.nihility.rbac.operationlog.service.impl;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.common.util.JacksonUtils;
+import cn.nihility.rbac.operationlog.constant.OperationSource;
 import cn.nihility.rbac.operationlog.constant.OperationType;
 import cn.nihility.rbac.operationlog.dto.OperationLogDetailVO;
 import cn.nihility.rbac.operationlog.dto.OperationLogFieldChangeVO;
@@ -42,6 +43,7 @@ public class OperationLogQueryServiceImpl implements OperationLogQueryService {
         for (int i = 0; i < records.size(); i++) {
             OperationLogVO vo = records.get(i);
             vo.setOperationTypeLabel(OperationType.label(vo.getOperationType()));
+            vo.setOperateSourceLabel(OperationSource.label(vo.getOperateSource()));
             vo.setChangeDetail(parseChangeDetail(resultPage.getRecords().get(i).getChangeDetail()));
         }
         return PageResult.of(records, resultPage);
@@ -59,6 +61,7 @@ public class OperationLogQueryServiceImpl implements OperationLogQueryService {
 
         OperationLogDetailVO vo = OperationLogConvert.INSTANCE.toDetailVO(entity);
         vo.setOperationTypeLabel(OperationType.label(entity.getOperationType()));
+        vo.setOperateSourceLabel(OperationSource.label(entity.getOperateSource()));
         vo.setChangeDetail(parseChangeDetail(entity.getChangeDetail()));
         return vo;
     }

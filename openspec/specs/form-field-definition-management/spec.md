@@ -71,19 +71,23 @@
 - **THEN** 系统将该定义 `status` 置为 `-1000`，其绑定的元数据字段此后出现在该 `bizType` 的"可用元数据字段"查询结果中
 
 ### Requirement: 字段定义的控件类型配置
-系统 SHALL 支持将字段定义的 `controlType` 配置为下拉单选字典、普通文本输入框、数字输入框、日期、多选字典下拉五种之一；配置为下拉单选字典或多选字典下拉时 SHALL 要求关联一个 `tab_dict_type` 字典类型（`dictTypeId`）；配置为日期时 SHALL NOT 要求关联字典类型。
+系统 SHALL 支持将字段定义的 `controlType` 配置为下拉单选字典、普通文本输入框、数字输入框、日期、多选字典下拉五种之一；配置为下拉单选字典或多选字典下拉时 SHALL 要求关联一个 `tab_dict_type` 字典类型，关联方式为字典类型编码（`dictTypeCode`，对应 `tab_dict_type.code`）而非主键 id——编码是稳定的业务标识，不会因数据迁移或环境切换导致关联失配；配置为日期时 SHALL NOT 要求关联字典类型。
 
 #### Scenario: 配置为下拉单选字典但未关联字典类型时拒绝保存
-- **WHEN** 创建或更新一条 `controlType` 为"下拉单选字典"的定义，但未提供 `dictTypeId`
+- **WHEN** 创建或更新一条 `controlType` 为"下拉单选字典"的定义，但未提供 `dictTypeCode`
 - **THEN** 系统拒绝保存，返回业务错误
 
 #### Scenario: 配置为多选字典下拉但未关联字典类型时拒绝保存
-- **WHEN** 创建或更新一条 `controlType` 为"多选字典下拉"的定义，但未提供 `dictTypeId`
+- **WHEN** 创建或更新一条 `controlType` 为"多选字典下拉"的定义，但未提供 `dictTypeCode`
 - **THEN** 系统拒绝保存，返回业务错误
 
 #### Scenario: 配置为文本框、数字框或日期时无需关联字典类型
-- **WHEN** 创建一条 `controlType` 为"文本输入框"、"数字输入框"或"日期"的定义，且未提供 `dictTypeId`
+- **WHEN** 创建一条 `controlType` 为"文本输入框"、"数字输入框"或"日期"的定义，且未提供 `dictTypeCode`
 - **THEN** 系统正常创建该定义
+
+#### Scenario: 关联的字典类型编码不存在时拒绝保存
+- **WHEN** 创建或更新一条 `controlType` 为"下拉单选字典"的定义，提供的 `dictTypeCode` 在当前未被逻辑删除的字典类型中不存在
+- **THEN** 系统拒绝保存，返回业务错误
 
 ### Requirement: 字段定义的展示与校验配置
 系统 SHALL 支持为每条字段定义独立配置：是否唯一、是否必填、是否列表展示、是否新增表单展示、是否编辑表单展示、是否可编辑、正则校验规则、输入提示文字；"是否新增表单展示"与"是否编辑表单展示"SHALL 可分别配置为不同的值；"是否可编辑"与"是否表单展示"是两个独立的开关，表单展示为真而可编辑为假时表示该字段在表单中只读展示。
@@ -97,7 +101,7 @@
 - **THEN** 编辑表单渲染元数据中包含该字段且标记为只读
 
 ### Requirement: 默认初始化四类业务对象的表单字段定义
-系统 SHALL 通过数据库迁移为组织、人员、任职、应用四类业务对象各自"可开放配置的原有表字段"预置启用状态的表单字段定义，绑定对应的元数据字段；`ext1`~`ext10` 对应的元数据字段默认不预置字段定义。
+系统 SHALL 通过数据库迁移为组织、人员、任职、应用四类业务对象各自"可开放配置的原有表字段"预置启用状态的表单字段定义，绑定对应的元数据字段；`ext1`~`ext10` 对应的元数据字段默认不预置字段定义。人员（`bizType=USER`）的 `gender`（性别）SHALL 一并预置为默认启用的字段定义，控件类型为字典下拉，绑定字典类型 `gender`。
 
 #### Scenario: 迁移完成后原有字段的默认渲染元数据即可查询到
 - **WHEN** 系统完成数据库迁移后，客户端调用 `GET /api/form-fields/render-schema?bizType=ORG`
@@ -106,6 +110,10 @@
 #### Scenario: 扩展字段默认无字段定义
 - **WHEN** 系统完成数据库迁移后，客户端调用 `GET /api/form-fields/render-schema?bizType=ORG`
 - **THEN** 返回结果中不包含任何绑定 `ext1`~`ext10` 元数据字段的定义，直到管理员手动新增
+
+#### Scenario: 迁移完成后人员性别字段的默认渲染元数据即可查询到
+- **WHEN** 系统完成数据库迁移后，客户端调用 `GET /api/form-fields/render-schema?bizType=USER`
+- **THEN** 返回结果中包含人员"性别"对应的字段定义，控件类型为字典下拉，可选项来自字典类型 `gender`，无需管理员额外配置
 
 ### Requirement: 表单字段定义管理接口
 系统 SHALL 提供字段定义的分页查询（按 `bizType` 过滤）、详情查询、新增、更新、启用/停用、逻辑删除接口，行为与项目内其他主数据（如组织、字典）的对应接口保持一致的状态语义（`2000`=启用、`3000`=停用、`-1000`=已逻辑删除）。
@@ -122,11 +130,11 @@
 - **THEN** 系统返回 `bizType=ORG` 下全部启用的字段定义，包含 `fieldCode`、`fieldName`、`controlType`、`isRequired`、`isUnique`、`showInList`、`showInCreate`、`showInEdit`、`editable`、`locked`（根据绑定的元数据字段是否为承重字段计算得出），按显示序号升序排列
 
 #### Scenario: 字典下拉字段的渲染元数据内嵌字典选项
-- **WHEN** 渲染元数据中某条定义 `controlType` 为"下拉单选字典"且 `dictTypeId` 指向一个存在的字典类型
+- **WHEN** 渲染元数据中某条定义 `controlType` 为"下拉单选字典"且 `dictTypeCode` 指向一个存在的字典类型
 - **THEN** 该条定义的返回结果中包含 `dictOptions` 数组，每项含 `label`、`value`，数据来源于该字典类型下的启用字典项
 
 #### Scenario: 多选字典下拉字段的渲染元数据内嵌字典选项
-- **WHEN** 渲染元数据中某条定义 `controlType` 为"多选字典下拉"且 `dictTypeId` 指向一个存在的字典类型
+- **WHEN** 渲染元数据中某条定义 `controlType` 为"多选字典下拉"且 `dictTypeCode` 指向一个存在的字典类型
 - **THEN** 该条定义的返回结果中同样包含 `dictOptions` 数组，每项含 `label`、`value`，数据来源于该字典类型下的启用字典项，供前端渲染为多选控件
 
 #### Scenario: 日期字段的渲染元数据不内嵌字典选项
@@ -251,3 +259,10 @@
 #### Scenario: 请求体 metadataFieldId 与当前值相同视为不改绑
 - **WHEN** 客户端调用 `PUT /api/form-fields/{id}`，请求体 `metadataFieldId` 与该定义当前绑定的值相同
 - **THEN** 系统正常保存其余属性的更新，不触发改绑校验，绑定关系与 `fieldCode` 均不变
+
+### Requirement: 人员性别字段可作为导入字段配置选择
+系统 SHALL 允许管理员在为 `bizType=USER` 新增或编辑"导入字段配置"时，从当前启用状态的表单字段定义中选中"性别"字段，与选中手机号、身份证号等其他字段的操作方式一致。
+
+#### Scenario: 导入字段配置的关联字段选择器包含性别
+- **WHEN** 管理员为 `bizType=USER` 新增一条导入字段配置，打开"关联字段"选择器
+- **THEN** 选择器列表中包含"性别"这一项，选中后可继续配置该列的 Excel 表头名称、是否主键、是否必填、显示序号

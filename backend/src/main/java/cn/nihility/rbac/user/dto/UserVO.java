@@ -34,9 +34,9 @@ public class UserVO {
     @Schema(description = "用户编号")
     private String code;
 
-    /** 性别：0=未知，1=男，2=女。 */
-    @Schema(description = "性别：0=未知，1=男，2=女")
-    private Integer gender;
+    /** 性别，取自字典类型 gender 下的字典项编码。 */
+    @Schema(description = "性别，取自字典类型 gender 下的字典项编码")
+    private String gender;
 
     /** 手机号。 */
     @Schema(description = "手机号")

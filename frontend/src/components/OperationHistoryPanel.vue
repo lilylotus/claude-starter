@@ -5,6 +5,7 @@
 import { ref, watch } from 'vue'
 import * as operationLogApi from '@/api/operationLog'
 import {
+  OPERATION_SOURCE_IMPORT,
   OPERATION_TYPE_CREATE,
   OPERATION_TYPE_DELETE,
   OPERATION_TYPE_DISABLE,
@@ -94,6 +95,9 @@ function operationTagType(type: number): 'success' | 'primary' | 'warning' | 'da
               <span class="history-timeline__time mono">{{ row.createTime }}</span>
               <el-tag :type="operationTagType(row.operationType)" size="small">
                 {{ row.operationTypeLabel }}
+              </el-tag>
+              <el-tag v-if="row.operateSource === OPERATION_SOURCE_IMPORT" type="info" size="small" effect="plain">
+                Excel 导入
               </el-tag>
               <span class="history-timeline__operator">{{ row.createBy }}</span>
             </header>

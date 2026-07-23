@@ -45,6 +45,14 @@ public class OperationLogVO {
     @Schema(description = "操作类型中文文案")
     private String operationTypeLabel;
 
+    /** 操作来源：0=界面操作，1=Excel导入。 */
+    @Schema(description = "操作来源：0=界面操作，1=Excel导入")
+    private Integer operateSource;
+
+    /** 操作来源中文文案。 */
+    @Schema(description = "操作来源中文文案")
+    private String operateSourceLabel;
+
     /** 被操作对象主键 id。 */
     @Schema(description = "被操作对象主键 id")
     private Long targetId;

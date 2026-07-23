@@ -12,6 +12,8 @@ import cn.nihility.rbac.excelimport.constant.OrgPseudoFieldCode;
 import cn.nihility.rbac.excelimport.constant.PositionPseudoFieldCode;
 import cn.nihility.rbac.excelimport.dto.ImportFieldConfigVO;
 import cn.nihility.rbac.formfield.constant.FormFieldBizType;
+import cn.nihility.rbac.operationlog.constant.OperationSource;
+import cn.nihility.rbac.operationlog.context.OperationSourceContext;
 import cn.nihility.rbac.org.constant.OrgStatus;
 import cn.nihility.rbac.org.dto.OrgCreateRequest;
 import cn.nihility.rbac.org.dto.OrgUpdateRequest;
@@ -92,6 +94,12 @@ public class ImportRowExecutor {
      * 处理一行 Excel 数据：先校验导入字段配置标记为必填的列是否均已提供非空值，
      * 再按 {@code bizType} 路由到对应的新增/更新流程。
      *
+     * 处理期间通过 {@link OperationSourceContext#mark(int)} 标记"当前操作来自 Excel
+     * 导入"，使本行内部触发的 {@code OperationLogRecorder} 写库时能落库正确的操作
+     * 来源；无论处理成功还是抛出异常，{@code finally} 块都会调用
+     * {@link OperationSourceContext#clear()} 清除标记，避免线程复用时误继承
+     * （fix-excel-import-followups design.md 决策 3）。
+     *
      * @param bizType   业务对象类型：ORG/USER/POSITION/APP
      * @param rowValues 本行数据，key 为 {@code fieldCode}，value 为单元格文本（已 trim，缺失列缺省不存在于该 map）
      * @param configs   当前 bizType 下启用的导入字段配置列表
@@ -99,12 +107,17 @@ public class ImportRowExecutor {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void processRow(String bizType, Map<String, String> rowValues, List<ImportFieldConfigVO> configs) {
         checkRequiredColumns(rowValues, configs);
-        switch (bizType) {
-            case FormFieldBizType.ORG -> processOrg(rowValues, configs);
-            case FormFieldBizType.USER -> processUser(rowValues);
-            case FormFieldBizType.APP -> processApp(rowValues, configs);
-            case FormFieldBizType.POSITION -> processPosition(rowValues, configs);
-            default -> throw new BusinessException("不支持的业务对象类型：" + bizType);
+        try {
+            OperationSourceContext.mark(OperationSource.IMPORT);
+            switch (bizType) {
+                case FormFieldBizType.ORG -> processOrg(rowValues, configs);
+                case FormFieldBizType.USER -> processUser(rowValues);
+                case FormFieldBizType.APP -> processApp(rowValues, configs);
+                case FormFieldBizType.POSITION -> processPosition(rowValues, configs);
+                default -> throw new BusinessException("不支持的业务对象类型：" + bizType);
+            }
+        } finally {
+            OperationSourceContext.clear();
         }
     }
 
@@ -372,6 +385,13 @@ public class ImportRowExecutor {
      * 伪字段（{@code __userCode}/{@code __orgCode}，由调用方另行解析）与目标对象上
      * 不存在的属性；属性赋值失败（如数值格式不合法）时判定该行失败。
      *
+     * <p>单元格文本为空白且目标属性类型不是 {@code String}（如 {@code showOrder} 这类
+     * 数值类型的原生列）时跳过本次设置，保留请求对象自身声明的 Java 默认值（如
+     * {@code showOrder} 默认 {@code 0}），避免 Spring 把空字符串隐式转换成 {@code null}
+     * 从而意外触发该属性上独立于"导入字段配置"必填开关之外的硬编码 {@code @NotNull}
+     * （design.md 决策 2）；目标属性类型就是 {@code String} 时（备注、扩展字段等）行为
+     * 不变，仍然显式设置为空字符串，保持"导入 = 整行覆盖"的既有语义。
+     *
      * @param target    待填充的 CreateRequest/UpdateRequest 实例
      * @param rowValues 本行数据
      */
@@ -383,6 +403,9 @@ public class ImportRowExecutor {
                 continue;
             }
             if (!wrapper.isWritableProperty(fieldCode)) {
+                continue;
+            }
+            if (!StringUtils.hasText(entry.getValue()) && wrapper.getPropertyType(fieldCode) != String.class) {
                 continue;
             }
             try {

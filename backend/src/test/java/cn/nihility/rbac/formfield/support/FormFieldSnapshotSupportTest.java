@@ -4,8 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.dict.dto.DictItemOptionVO;
-import cn.nihility.rbac.dict.entity.DictTypeEntity;
-import cn.nihility.rbac.dict.mapper.DictTypeMapper;
 import cn.nihility.rbac.dict.service.DictItemService;
 import cn.nihility.rbac.formfield.constant.FormFieldControlType;
 import cn.nihility.rbac.formfield.dto.FormFieldDefinitionVO;
@@ -26,10 +24,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class FormFieldSnapshotSupportTest {
 
-    /** 被测组件的字典类型数据访问依赖，使用 Mockito 打桩。 */
-    @Mock
-    private DictTypeMapper dictTypeMapper;
-
     /** 被测组件的字典项业务逻辑依赖，使用 Mockito 打桩。 */
     @Mock
     private DictItemService dictItemService;
@@ -42,7 +36,7 @@ class FormFieldSnapshotSupportTest {
      */
     @BeforeEach
     void setUp() {
-        formFieldSnapshotSupport = new FormFieldSnapshotSupport(dictTypeMapper, dictItemService);
+        formFieldSnapshotSupport = new FormFieldSnapshotSupport(dictItemService);
     }
 
     /**
@@ -63,8 +57,7 @@ class FormFieldSnapshotSupportTest {
      */
     @Test
     void appendExtFieldSnapshot_shouldResolveLabel_whenDictType() {
-        FormFieldDefinitionVO definition = buildDefinition("性别", "ext2", FormFieldControlType.DICT, 1L);
-        when(dictTypeMapper.selectById(1L)).thenReturn(DictTypeEntity.builder().id(1L).code("gender").build());
+        FormFieldDefinitionVO definition = buildDefinition("性别", "ext2", FormFieldControlType.DICT, "gender");
         when(dictItemService.getEnabledOptions("gender")).thenReturn(
                 List.of(DictItemOptionVO.builder().code("M").label("男").build(),
                         DictItemOptionVO.builder().code("F").label("女").build()));
@@ -81,8 +74,7 @@ class FormFieldSnapshotSupportTest {
      */
     @Test
     void appendExtFieldSnapshot_shouldFallbackToRawCode_whenDictItemNotFound() {
-        FormFieldDefinitionVO definition = buildDefinition("性别", "ext2", FormFieldControlType.DICT, 1L);
-        when(dictTypeMapper.selectById(1L)).thenReturn(DictTypeEntity.builder().id(1L).code("gender").build());
+        FormFieldDefinitionVO definition = buildDefinition("性别", "ext2", FormFieldControlType.DICT, "gender");
         when(dictItemService.getEnabledOptions("gender")).thenReturn(
                 List.of(DictItemOptionVO.builder().code("M").label("男").build()));
         Map<String, Object> snapshot = new LinkedHashMap<>();
@@ -98,8 +90,8 @@ class FormFieldSnapshotSupportTest {
      */
     @Test
     void appendExtFieldSnapshot_shouldResolveAndJoinLabels_whenMultiDictType() {
-        FormFieldDefinitionVO definition = buildDefinition("标签", "ext3", FormFieldControlType.MULTI_DICT, 2L);
-        when(dictTypeMapper.selectById(2L)).thenReturn(DictTypeEntity.builder().id(2L).code("tag_type").build());
+        FormFieldDefinitionVO definition = buildDefinition("标签", "ext3", FormFieldControlType.MULTI_DICT,
+                "tag_type");
         when(dictItemService.getEnabledOptions("tag_type")).thenReturn(
                 List.of(DictItemOptionVO.builder().code("A").label("标签A").build(),
                         DictItemOptionVO.builder().code("B").label("标签B").build()));
@@ -116,8 +108,8 @@ class FormFieldSnapshotSupportTest {
      */
     @Test
     void appendExtFieldSnapshot_shouldFallbackPerCode_whenSomeMultiDictItemsNotFound() {
-        FormFieldDefinitionVO definition = buildDefinition("标签", "ext3", FormFieldControlType.MULTI_DICT, 2L);
-        when(dictTypeMapper.selectById(2L)).thenReturn(DictTypeEntity.builder().id(2L).code("tag_type").build());
+        FormFieldDefinitionVO definition = buildDefinition("标签", "ext3", FormFieldControlType.MULTI_DICT,
+                "tag_type");
         when(dictItemService.getEnabledOptions("tag_type")).thenReturn(
                 List.of(DictItemOptionVO.builder().code("A").label("标签A").build()));
         Map<String, Object> snapshot = new LinkedHashMap<>();
@@ -128,11 +120,11 @@ class FormFieldSnapshotSupportTest {
     }
 
     /**
-     * {@code DICT}/{@code MULTI_DICT} 类型但未关联字典类型（{@code dictTypeId} 为空）时，
+     * {@code DICT}/{@code MULTI_DICT} 类型但未关联字典类型（{@code dictTypeCode} 为空）时，
      * 应原样展示存储值，不触发字典解析（沿用未配置字典的既有行为）。
      */
     @Test
-    void appendExtFieldSnapshot_shouldKeepRawValue_whenDictTypeIdMissing() {
+    void appendExtFieldSnapshot_shouldKeepRawValue_whenDictTypeCodeMissing() {
         FormFieldDefinitionVO definition = buildDefinition("标签", "ext3", FormFieldControlType.MULTI_DICT, null);
         Map<String, Object> snapshot = new LinkedHashMap<>();
 
@@ -156,19 +148,19 @@ class FormFieldSnapshotSupportTest {
     /**
      * 构造一条用于测试的字段定义视图对象，仅填充解析逻辑所需的字段。
      *
-     * @param fieldName   展示名称
-     * @param columnName  绑定的扩展列名
-     * @param controlType 控件类型
-     * @param dictTypeId  关联的字典类型 id
+     * @param fieldName    展示名称
+     * @param columnName   绑定的扩展列名
+     * @param controlType  控件类型
+     * @param dictTypeCode 关联的字典类型编码
      * @return 字段定义视图对象
      */
     private FormFieldDefinitionVO buildDefinition(String fieldName, String columnName, int controlType,
-            Long dictTypeId) {
+            String dictTypeCode) {
         return FormFieldDefinitionVO.builder()
                 .fieldName(fieldName)
                 .columnName(columnName)
                 .controlType(controlType)
-                .dictTypeId(dictTypeId)
+                .dictTypeCode(dictTypeCode)
                 .build();
     }
 }

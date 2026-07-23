@@ -31,6 +31,7 @@ INSERT INTO `tab_metadata_field`
      `update_by`, `update_time`)
 VALUES ('USER', 'tab_user', 'name', 'name', 'VARCHAR(64)', '用户姓名', 2000, 'admin', NOW(), 'admin', NOW()),
        ('USER', 'tab_user', 'code', 'code', 'VARCHAR(64)', '用户编号', 2000, 'admin', NOW(), 'admin', NOW()),
+       ('USER', 'tab_user', 'gender', 'gender', 'VARCHAR(64)', '性别', 2000, 'admin', NOW(), 'admin', NOW()),
        ('USER', 'tab_user', 'mobile', 'mobile', 'VARCHAR(20)', '手机号', 2000, 'admin', NOW(), 'admin', NOW()),
        ('USER', 'tab_user', 'id_card', 'idCard', 'VARCHAR(18)', '身份证号', 2000, 'admin', NOW(), 'admin', NOW()),
        ('USER', 'tab_user', 'show_order', 'showOrder', 'INT', '显示序号', 2000, 'admin', NOW(), 'admin', NOW()),

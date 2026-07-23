@@ -99,7 +99,7 @@ interface FieldDialogForm {
   fieldName: string
   fieldCode: string
   controlType: number
-  dictTypeId: number | null
+  dictTypeCode: string | null
   isUnique: boolean
   isRequired: boolean
   showInList: boolean
@@ -117,7 +117,7 @@ function blankForm(): FieldDialogForm {
     fieldName: '',
     fieldCode: '',
     controlType: 1,
-    dictTypeId: null,
+    dictTypeCode: null,
     isUnique: false,
     isRequired: false,
     showInList: true,
@@ -137,7 +137,7 @@ function isDictLinkedControlType(controlType: number): boolean {
   return controlType === FORM_FIELD_CONTROL_TYPE_DICT || controlType === FORM_FIELD_CONTROL_TYPE_MULTI_DICT
 }
 
-function validateDictType(_rule: unknown, value: number | null, callback: (error?: Error) => void) {
+function validateDictType(_rule: unknown, value: string | null, callback: (error?: Error) => void) {
   if (!isDictLinkedControlType(form.controlType) || value) {
     callback()
     return
@@ -149,7 +149,7 @@ const rules: FormRules<FieldDialogForm> = {
   metadataFieldId: [{ required: true, message: '请选择要绑定的元数据字段', trigger: 'change' }],
   fieldName: [{ required: true, message: '请输入展示名称', trigger: 'blur' }],
   controlType: [{ required: true, message: '请选择控件类型', trigger: 'change' }],
-  dictTypeId: [{ validator: validateDictType, trigger: 'change' }],
+  dictTypeCode: [{ validator: validateDictType, trigger: 'change' }],
 }
 
 const dialogTitle = computed(() => (dialogMode.value === 'create' ? '新增字段定义' : '编辑字段定义'))
@@ -174,7 +174,7 @@ async function openEditDialog(row: FormFieldDefinition) {
   form.fieldName = row.fieldName
   form.fieldCode = row.fieldCode
   form.controlType = row.controlType
-  form.dictTypeId = row.dictTypeId
+  form.dictTypeCode = row.dictTypeCode
   form.isUnique = row.isUnique
   form.isRequired = row.isRequired
   form.showInList = row.showInList
@@ -211,7 +211,7 @@ async function submitForm() {
       metadataFieldId: form.metadataFieldId as number,
       fieldName: form.fieldName,
       controlType: form.controlType,
-      dictTypeId: isDictLinkedControlType(form.controlType) ? form.dictTypeId : null,
+      dictTypeCode: isDictLinkedControlType(form.controlType) ? form.dictTypeCode : null,
       isUnique: form.isUnique,
       isRequired: form.isRequired,
       showInList: form.showInList,
@@ -364,9 +364,9 @@ async function handleDelete(row: FormFieldDefinition) {
             <el-option v-for="opt in FORM_FIELD_CONTROL_TYPE_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="isDictLinkedControlType(form.controlType)" label="字典类型" prop="dictTypeId">
-          <el-select v-model="form.dictTypeId" placeholder="请选择关联的字典类型" style="width: 100%">
-            <el-option v-for="opt in dictTypeOptions" :key="opt.id" :label="opt.name" :value="opt.id" />
+        <el-form-item v-if="isDictLinkedControlType(form.controlType)" label="字典类型" prop="dictTypeCode">
+          <el-select v-model="form.dictTypeCode" placeholder="请选择关联的字典类型" style="width: 100%">
+            <el-option v-for="opt in dictTypeOptions" :key="opt.id" :label="opt.name" :value="opt.code" />
           </el-select>
         </el-form-item>
 

@@ -3,6 +3,7 @@ package cn.nihility.rbac.operationlog.service.impl;
 import cn.nihility.rbac.common.util.JacksonUtils;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.constant.OperationType;
+import cn.nihility.rbac.operationlog.context.OperationSourceContext;
 import cn.nihility.rbac.operationlog.dto.OperationLogFieldChangeVO;
 import cn.nihility.rbac.operationlog.entity.OperationLogEntity;
 import cn.nihility.rbac.operationlog.mapper.OperationLogMapper;
@@ -101,6 +102,7 @@ public class OperationLogRecorderImpl implements OperationLogRecorder {
                 .resourceType(resourceType)
                 .resourceName(OperationLogResourceType.resourceName(resourceType))
                 .operationType(operationType)
+                .operateSource(OperationSourceContext.currentOrDefault())
                 .targetId(targetId)
                 .targetName(targetName)
                 .changeDetail(toJson(changes))

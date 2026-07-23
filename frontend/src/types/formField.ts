@@ -35,7 +35,7 @@ export interface FormFieldDefinition {
   fieldName: string
   fieldCode: string
   controlType: number
-  dictTypeId: number | null
+  dictTypeCode: string | null
   dictTypeName: string | null
   isUnique: boolean
   isRequired: boolean
@@ -87,7 +87,7 @@ export interface FormFieldRenderItem {
 export interface FormFieldDefinitionFormFields {
   fieldName: string
   controlType: number
-  dictTypeId: number | null
+  dictTypeCode: string | null
   isUnique: boolean
   isRequired: boolean
   showInList: boolean

@@ -39,6 +39,9 @@ public class OperationLogEntity {
     /** 操作类型：1=新增，2=编辑，3=启用，4=停用，5=删除。 */
     private Integer operationType;
 
+    /** 操作来源：0=界面操作，1=Excel导入。 */
+    private Integer operateSource;
+
     /** 被操作对象主键 id。 */
     private Long targetId;
 

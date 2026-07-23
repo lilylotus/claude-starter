@@ -2,6 +2,7 @@ package cn.nihility.rbac.formfield.service.impl;
 
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.dict.constant.DictStatus;
 import cn.nihility.rbac.dict.dto.DictItemOptionVO;
 import cn.nihility.rbac.dict.entity.DictTypeEntity;
 import cn.nihility.rbac.dict.mapper.DictTypeMapper;
@@ -56,7 +57,7 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
     /** 元数据字段数据访问接口，直接跨模块注入，用于校验绑定关系、解析列名/锁定判定。 */
     private final MetadataFieldMapper metadataFieldMapper;
 
-    /** 字典类型数据访问接口，直接跨模块注入，仅用于按 id 解析字典类型编码/名称。 */
+    /** 字典类型数据访问接口，直接跨模块注入，用于按编码校验字典类型是否存在、批量解析名称。 */
     private final DictTypeMapper dictTypeMapper;
 
     /** 字典项业务逻辑接口，用于按字典类型编码查询启用状态的字典项作为下拉选项来源。 */
@@ -103,13 +104,13 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
         if (formFieldDefinitionMapper.existsActiveByMetadataFieldId(metadata.getId())) {
             throw new MetadataFieldAlreadyBoundException("该元数据字段已被其他表单字段定义绑定");
         }
-        validateDictType(request.getControlType(), request.getDictTypeId());
+        validateDictType(request.getControlType(), request.getDictTypeCode());
 
         FormFieldDefinitionEntity entity = FormFieldDefinitionConvert.INSTANCE.toEntity(request);
         entity.setBizType(metadata.getBizType());
         entity.setFieldCode(metadata.getFieldCode());
         if (!FormFieldControlType.DICT_TYPES.contains(entity.getControlType())) {
-            entity.setDictTypeId(null);
+            entity.setDictTypeCode(null);
         }
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(FormFieldStatus.ENABLED);
@@ -154,7 +155,7 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
             rebindTarget = validateRebindTarget(entity, request.getMetadataFieldId());
         }
 
-        validateDictType(request.getControlType(), request.getDictTypeId());
+        validateDictType(request.getControlType(), request.getDictTypeCode());
 
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
@@ -164,7 +165,7 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
             entity.setFieldCode(rebindTarget.getFieldCode());
         }
         if (!FormFieldControlType.DICT_TYPES.contains(entity.getControlType())) {
-            entity.setDictTypeId(null);
+            entity.setDictTypeCode(null);
         }
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
@@ -263,7 +264,7 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
                     .validateRegex(vo.getValidateRegex())
                     .placeholder(vo.getPlaceholder())
                     .showOrder(vo.getShowOrder())
-                    .dictOptions(resolveDictOptions(vo.getControlType(), vo.getDictTypeId()))
+                    .dictOptions(resolveDictOptions(vo.getControlType(), vo.getDictTypeCode()))
                     .build());
         }
         return result;
@@ -327,17 +328,23 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
     }
 
     /**
-     * 控件类型为下拉单选字典或多选字典下拉时，校验必须关联一个存在的字典类型；
-     * 其余控件类型不做校验。
+     * 控件类型为下拉单选字典或多选字典下拉时，校验必须关联一个存在且未被逻辑删除的
+     * 字典类型；其余控件类型不做校验。
      *
-     * @param controlType 控件类型
-     * @param dictTypeId  关联的字典类型 id
+     * @param controlType  控件类型
+     * @param dictTypeCode 关联的字典类型编码
      */
-    private void validateDictType(Integer controlType, Long dictTypeId) {
+    private void validateDictType(Integer controlType, String dictTypeCode) {
         if (!FormFieldControlType.DICT_TYPES.contains(controlType)) {
             return;
         }
-        if (dictTypeId == null || dictTypeMapper.selectById(dictTypeId) == null) {
+        if (!StringUtils.hasText(dictTypeCode)) {
+            throw new DictTypeRequiredException("控件类型为下拉单选字典或多选字典下拉时必须关联一个存在的字典类型");
+        }
+        Long count = dictTypeMapper.selectCount(new LambdaQueryWrapper<DictTypeEntity>()
+                .eq(DictTypeEntity::getCode, dictTypeCode)
+                .ne(DictTypeEntity::getStatus, DictStatus.DELETED));
+        if (count == null || count == 0) {
             throw new DictTypeRequiredException("控件类型为下拉单选字典或多选字典下拉时必须关联一个存在的字典类型");
         }
     }
@@ -369,7 +376,7 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
         }
 
         Map<Long, MetadataFieldEntity> metadataMap = fetchMetadataMap(entities);
-        Map<Long, String> dictTypeNameMap = fetchDictTypeNameMap(entities);
+        Map<String, String> dictTypeNameMap = fetchDictTypeNameMap(entities);
 
         for (int i = 0; i < vos.size(); i++) {
             FormFieldDefinitionVO vo = vos.get(i);
@@ -379,8 +386,8 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
             vo.setColumnName(columnName);
             vo.setLocked(LockedFormFields.isLocked(entity.getBizType(), columnName));
             vo.setFieldCode(metadata != null ? metadata.getFieldCode() : entity.getFieldCode());
-            if (entity.getDictTypeId() != null) {
-                vo.setDictTypeName(dictTypeNameMap.get(entity.getDictTypeId()));
+            if (entity.getDictTypeCode() != null) {
+                vo.setDictTypeName(dictTypeNameMap.get(entity.getDictTypeCode()));
             }
         }
         return vos;
@@ -403,42 +410,39 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
     }
 
     /**
-     * 按关联的字典类型 id 批量查询字典类型名称，key 为字典类型 id。
+     * 按关联的字典类型编码批量查询字典类型名称，key 为字典类型编码。
      *
      * @param entities 表单字段定义实体列表
-     * @return 字典类型 id -> 字典类型名称
+     * @return 字典类型编码 -> 字典类型名称
      */
-    private Map<Long, String> fetchDictTypeNameMap(List<FormFieldDefinitionEntity> entities) {
-        List<Long> dictTypeIds = entities.stream()
-                .map(FormFieldDefinitionEntity::getDictTypeId)
+    private Map<String, String> fetchDictTypeNameMap(List<FormFieldDefinitionEntity> entities) {
+        List<String> dictTypeCodes = entities.stream()
+                .map(FormFieldDefinitionEntity::getDictTypeCode)
                 .filter(Objects::nonNull)
                 .distinct()
                 .toList();
-        if (dictTypeIds.isEmpty()) {
+        if (dictTypeCodes.isEmpty()) {
             return Map.of();
         }
-        List<DictTypeEntity> dictTypes = dictTypeMapper.selectByIds(dictTypeIds);
+        List<DictTypeEntity> dictTypes = dictTypeMapper.selectList(new LambdaQueryWrapper<DictTypeEntity>()
+                .in(DictTypeEntity::getCode, dictTypeCodes));
         return dictTypes.stream()
-                .collect(Collectors.toMap(DictTypeEntity::getId, DictTypeEntity::getName, (left, right) -> left));
+                .collect(Collectors.toMap(DictTypeEntity::getCode, DictTypeEntity::getName, (left, right) -> left));
     }
 
     /**
      * 控件类型为下拉单选字典或多选字典下拉时，解析其关联字典类型下的启用字典项
-     * 作为可选项来源；其余控件类型或未关联有效字典类型时返回空列表。
+     * 作为可选项来源；其余控件类型或未关联字典类型编码时返回空列表。
      *
-     * @param controlType 控件类型
-     * @param dictTypeId  关联的字典类型 id
+     * @param controlType  控件类型
+     * @param dictTypeCode 关联的字典类型编码
      * @return 字典下拉可选项列表
      */
-    private List<FormFieldDictOptionVO> resolveDictOptions(Integer controlType, Long dictTypeId) {
-        if (!FormFieldControlType.DICT_TYPES.contains(controlType) || dictTypeId == null) {
+    private List<FormFieldDictOptionVO> resolveDictOptions(Integer controlType, String dictTypeCode) {
+        if (!FormFieldControlType.DICT_TYPES.contains(controlType) || !StringUtils.hasText(dictTypeCode)) {
             return new ArrayList<>();
         }
-        DictTypeEntity dictType = dictTypeMapper.selectById(dictTypeId);
-        if (dictType == null) {
-            return new ArrayList<>();
-        }
-        List<DictItemOptionVO> options = dictItemService.getEnabledOptions(dictType.getCode());
+        List<DictItemOptionVO> options = dictItemService.getEnabledOptions(dictTypeCode);
         return options.stream()
                 .map(option -> FormFieldDictOptionVO.builder()
                         .label(option.getLabel())

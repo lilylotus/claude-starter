@@ -19,10 +19,10 @@ public final class FormFieldControlType {
     /** 日期，不依赖字典类型。 */
     public static final int DATE = 4;
 
-    /** 多选字典下拉，与 {@link #DICT} 同样依赖 {@code dictTypeId}，区别仅在于前端渲染为多选控件。 */
+    /** 多选字典下拉，与 {@link #DICT} 同样依赖 {@code dictTypeCode}，区别仅在于前端渲染为多选控件。 */
     public static final int MULTI_DICT = 5;
 
-    /** 依赖字典类型（要求 {@code dictTypeId} 必填）的控件类型集合，包含 {@link #DICT}、{@link #MULTI_DICT}。 */
+    /** 依赖字典类型（要求 {@code dictTypeCode} 必填）的控件类型集合，包含 {@link #DICT}、{@link #MULTI_DICT}。 */
     public static final Set<Integer> DICT_TYPES = Set.of(DICT, MULTI_DICT);
 
     /**

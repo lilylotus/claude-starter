@@ -10,9 +10,11 @@ import org.mapstruct.factory.Mappers;
 
 /**
  * 操作日志实体与各类视图对象之间的 MapStruct 转换器，不接入 Spring 容器，通过
- * {@link #INSTANCE} 静态创建单例调用。{@code operationTypeLabel} 由
- * {@code OperationType.label(int)} 计算，{@code changeDetail} 由持久化的 JSON
- * 字符串反序列化得到，均不在本转换器内处理，转换后由调用方另行赋值。
+ * {@link #INSTANCE} 静态创建单例调用。{@code operationTypeLabel}/
+ * {@code operateSourceLabel} 分别由 {@code OperationType.label(int)}/
+ * {@code OperationSource.label(int)} 计算，{@code changeDetail} 由持久化的 JSON
+ * 字符串反序列化得到，均不在本转换器内处理，转换后由调用方另行赋值；
+ * {@code operateSource} 字段名在 entity/VO 间完全一致，按同名字段默认映射。
  */
 @Mapper
 public interface OperationLogConvert {
@@ -21,12 +23,14 @@ public interface OperationLogConvert {
     OperationLogConvert INSTANCE = Mappers.getMapper(OperationLogConvert.class);
 
     /**
-     * 实体转列表行视图对象，{@code operationTypeLabel}/{@code changeDetail} 由调用方另行赋值。
+     * 实体转列表行视图对象，{@code operationTypeLabel}/{@code operateSourceLabel}/
+     * {@code changeDetail} 由调用方另行赋值。
      *
      * @param entity 操作日志实体
      * @return 列表行视图对象
      */
     @Mapping(target = "operationTypeLabel", ignore = true)
+    @Mapping(target = "operateSourceLabel", ignore = true)
     @Mapping(target = "changeDetail", ignore = true)
     OperationLogVO toVO(OperationLogEntity entity);
 
@@ -39,12 +43,14 @@ public interface OperationLogConvert {
     List<OperationLogVO> toVOList(List<OperationLogEntity> entities);
 
     /**
-     * 实体转详情视图对象，{@code operationTypeLabel}/{@code changeDetail} 由调用方另行赋值。
+     * 实体转详情视图对象，{@code operationTypeLabel}/{@code operateSourceLabel}/
+     * {@code changeDetail} 由调用方另行赋值。
      *
      * @param entity 操作日志实体
      * @return 详情视图对象
      */
     @Mapping(target = "operationTypeLabel", ignore = true)
+    @Mapping(target = "operateSourceLabel", ignore = true)
     @Mapping(target = "changeDetail", ignore = true)
     OperationLogDetailVO toDetailVO(OperationLogEntity entity);
 }

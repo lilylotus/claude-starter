@@ -89,9 +89,12 @@ async function handleDownloadTemplate() {
   await excelImportApi.downloadImportTemplate('ORG')
 }
 
+// 批量导入一次可能在文件里任意多个不同父组织下新增/更新组织，局部刷新
+// （refreshNavTreeAfterMutation）覆盖不到；改为右侧表格仍局部刷新，左侧导航树整体
+// 重置（navTreeVersion++ 触发 el-tree 的 :key 变化、销毁重建，见 design.md 决策 1）
 async function handleImported() {
   await orgStore.refreshAfterMutation()
-  await refreshNavTreeAfterMutation()
+  orgStore.navTreeVersion++
 }
 
 // ---- 上级组织选择（新增/编辑弹窗内的 el-tree-select 数据源）----
@@ -270,6 +273,7 @@ async function handleDelete(row: OrgRow) {
         <h2 class="org-panel__title">组织架构</h2>
       </header>
       <el-tree
+        :key="orgStore.navTreeVersion"
         ref="treeRef"
         v-loading="orgStore.navTreeLoading"
         class="org-tree"

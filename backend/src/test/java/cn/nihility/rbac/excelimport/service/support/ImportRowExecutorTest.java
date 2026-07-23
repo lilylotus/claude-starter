@@ -14,6 +14,8 @@ import cn.nihility.rbac.app.service.AppService;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.excelimport.dto.ImportFieldConfigVO;
 import cn.nihility.rbac.formfield.constant.FormFieldBizType;
+import cn.nihility.rbac.operationlog.constant.OperationSource;
+import cn.nihility.rbac.operationlog.context.OperationSourceContext;
 import cn.nihility.rbac.org.constant.OrgStatus;
 import cn.nihility.rbac.org.dto.OrgCreateRequest;
 import cn.nihility.rbac.org.dto.OrgUpdateRequest;
@@ -33,6 +35,7 @@ import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -94,6 +97,14 @@ class ImportRowExecutorTest {
         Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
         importRowExecutor = new ImportRowExecutor(validator, orgMapper, orgService, userMapper, userService,
                 appMapper, appService, userPositionMapper, positionService);
+    }
+
+    /**
+     * 每个用例执行后清理线程绑定的操作来源标记，避免影响后续用例。
+     */
+    @AfterEach
+    void tearDown() {
+        OperationSourceContext.clear();
     }
 
     /**
@@ -317,6 +328,51 @@ class ImportRowExecutorTest {
     }
 
     /**
+     * 数值类型属性（{@code showOrder}）在导入字段配置中标记为非必填、Excel 对应单元格
+     * 留空时，新增流程应正常成功，落地的 {@code showOrder} 为请求对象自身声明的 Java
+     * 默认值 {@code 0}，不再触发该属性上独立于配置之外的硬编码 {@code @NotNull}
+     * （design.md 决策 2）。
+     */
+    @Test
+    void processRow_shouldCreateOrg_whenShowOrderBlank_andNotRequired() {
+        List<ImportFieldConfigVO> configs = List.of(
+                buildConfig("code", "组织编码", true),
+                buildConfig("__parentCode", "上级组织编码", true),
+                buildConfig("showOrder", "显示序号", false));
+        when(orgMapper.selectList(any())).thenReturn(List.of());
+        Map<String, String> rowValues = Map.of(
+                "code", "ORG001", "name", "测试组织", "__parentCode", "0", "showOrder", "");
+
+        importRowExecutor.processRow(FormFieldBizType.ORG, rowValues, configs);
+
+        ArgumentCaptor<OrgCreateRequest> captor = ArgumentCaptor.forClass(OrgCreateRequest.class);
+        verify(orgService).create(captor.capture());
+        assertThat(captor.getValue().getShowOrder()).isEqualTo(0);
+    }
+
+    /**
+     * 字符串类型属性（{@code remark}）留空时仍然显式设置为空字符串，既有"导入 = 整行
+     * 覆盖"的语义不受本次数值类型修复影响（design.md 决策 2 明确不改变字符串字段的
+     * 既有行为）。
+     */
+    @Test
+    void processRow_shouldSetRemarkEmpty_whenBlank() {
+        List<ImportFieldConfigVO> configs = List.of(
+                buildConfig("code", "组织编码", true),
+                buildConfig("__parentCode", "上级组织编码", true),
+                buildConfig("remark", "备注", false));
+        when(orgMapper.selectList(any())).thenReturn(List.of());
+        Map<String, String> rowValues = Map.of(
+                "code", "ORG001", "name", "测试组织", "__parentCode", "0", "remark", "");
+
+        importRowExecutor.processRow(FormFieldBizType.ORG, rowValues, configs);
+
+        ArgumentCaptor<OrgCreateRequest> captor = ArgumentCaptor.forClass(OrgCreateRequest.class);
+        verify(orgService).create(captor.capture());
+        assertThat(captor.getValue().getRemark()).isEqualTo("");
+    }
+
+    /**
      * 人员编号列取值在未删除的用户中不存在匹配记录时，应判定该行失败，明确提示是
      * 人员编号无法匹配，不触及组织匹配与任职记录查询。
      */
@@ -410,6 +466,50 @@ class ImportRowExecutorTest {
         verify(positionService).update(eq(9L), captor.capture());
         assertThat(captor.getValue().getOrgId()).isEqualTo(2L);
         assertThat(captor.getValue().getPositionType()).isEqualTo("primary");
+    }
+
+    /**
+     * 处理期间（真正调用组织模块 create/update 的窗口内）应能观察到线程级操作来源
+     * 标记已被置为 {@link OperationSource#IMPORT}，处理成功返回后标记应被清除，
+     * 恢复为默认值 {@link OperationSource#MANUAL}（design.md 决策 3）。
+     */
+    @Test
+    void processRow_shouldMarkImportSourceDuringProcessing_andClearAfterSuccess() {
+        List<ImportFieldConfigVO> configs = orgConfigs();
+        when(orgMapper.selectList(any())).thenReturn(List.of());
+        Map<String, String> rowValues = Map.of("code", "ORG001", "name", "测试组织", "__parentCode", "0");
+
+        int[] capturedSourceDuringProcessing = {-1};
+        org.mockito.Mockito.doAnswer(invocation -> {
+            capturedSourceDuringProcessing[0] = OperationSourceContext.currentOrDefault();
+            return null;
+        }).when(orgService).create(any());
+
+        assertThat(OperationSourceContext.currentOrDefault()).isEqualTo(OperationSource.MANUAL);
+
+        importRowExecutor.processRow(FormFieldBizType.ORG, rowValues, configs);
+
+        assertThat(capturedSourceDuringProcessing[0]).isEqualTo(OperationSource.IMPORT);
+        assertThat(OperationSourceContext.currentOrDefault()).isEqualTo(OperationSource.MANUAL);
+    }
+
+    /**
+     * 处理过程中抛出异常（如组织编码匹配到多条已存在记录）时，{@code finally} 块仍应
+     * 清除线程级操作来源标记，恢复为默认值，避免线程复用时误继承标记
+     * （design.md 决策 3）。
+     */
+    @Test
+    void processRow_shouldClearImportSource_whenProcessingThrows() {
+        List<ImportFieldConfigVO> configs = orgConfigs();
+        OrgEntity match1 = OrgEntity.builder().id(5L).code("ORG001").status(OrgStatus.ENABLED).build();
+        OrgEntity match2 = OrgEntity.builder().id(6L).code("ORG001").status(OrgStatus.ENABLED).build();
+        when(orgMapper.selectList(any())).thenReturn(List.of(match1, match2));
+        Map<String, String> rowValues = Map.of("code", "ORG001", "name", "测试组织", "__parentCode", "0");
+
+        assertThatThrownBy(() -> importRowExecutor.processRow(FormFieldBizType.ORG, rowValues, configs))
+                .isInstanceOf(BusinessException.class);
+
+        assertThat(OperationSourceContext.currentOrDefault()).isEqualTo(OperationSource.MANUAL);
     }
 
     /**

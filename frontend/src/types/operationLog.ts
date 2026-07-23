@@ -25,6 +25,11 @@ export const OPERATION_TYPE_OPTIONS: { value: number; label: string }[] = [
   { value: OPERATION_TYPE_DELETE, label: '删除' },
 ]
 
+// 操作来源：0=界面操作，1=Excel 导入，与后端
+// cn.nihility.rbac.operationlog.constant.OperationSource 一一对应
+export const OPERATION_SOURCE_MANUAL = 0
+export const OPERATION_SOURCE_IMPORT = 1
+
 // 模块下拉选项，前端硬编码，9 个业务模块中文名（字典类型/字典项同属"字典管理"模块）
 export const MODULE_OPTIONS: string[] = [
   '组织管理',
@@ -81,6 +86,8 @@ export interface OperationLogRow {
   resourceName: string
   operationType: number
   operationTypeLabel: string
+  operateSource: number
+  operateSourceLabel: string
   targetId: number
   targetName: string
   operateIp: string | null

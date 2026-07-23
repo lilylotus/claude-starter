@@ -1,6 +1,5 @@
 package cn.nihility.rbac.user.dto;
 
-import cn.nihility.rbac.user.constant.UserGender;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -32,10 +31,10 @@ public class UserCreateRequest {
     @Schema(description = "用户编号")
     private String code;
 
-    /** 性别：0=未知，1=男，2=女。 */
-    @NotNull(message = "性别不能为空")
-    @Schema(description = "性别：0=未知，1=男，2=女", defaultValue = "0")
-    private Integer gender = UserGender.UNKNOWN;
+    /** 性别，取自字典类型 gender 下的字典项编码。 */
+    @Size(max = 64, message = "性别长度不能超过 64 个字符")
+    @Schema(description = "性别，取自字典类型 gender 下的字典项编码", defaultValue = "unknown")
+    private String gender = "unknown";
 
     /** 手机号，可选，仅做基础格式校验，不做唯一性约束。 */
     @Pattern(regexp = "^$|^1\\d{10}$", message = "手机号格式不正确")

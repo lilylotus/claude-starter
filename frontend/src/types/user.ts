@@ -5,17 +5,6 @@
 export const USER_STATUS_ENABLED = 2000
 export const USER_STATUS_DISABLED = 3000
 
-// 性别常量：0 = 未知，1 = 男，2 = 女，对应后端 UserGender 常量类。
-export const USER_GENDER_UNKNOWN = 0
-export const USER_GENDER_MALE = 1
-export const USER_GENDER_FEMALE = 2
-
-export const USER_GENDER_OPTIONS: Array<{ value: number; label: string }> = [
-  { value: USER_GENDER_UNKNOWN, label: '未知' },
-  { value: USER_GENDER_MALE, label: '男' },
-  { value: USER_GENDER_FEMALE, label: '女' },
-]
-
 // 用户名下的一条任职记录，来自 GET /api/users/{id} 详情接口内嵌的 positions 数组
 // （分页列表接口不填充该字段，避免 N+1）
 export interface UserPositionRow {
@@ -52,7 +41,9 @@ export interface UserRow {
   id: number
   name: string
   code: string
-  gender: number
+  // 性别：字典类型 gender 下的字典项编码（如 unknown/male/female），是否展示/可编辑
+  // 由"表单字段定义"（bizType=USER）驱动，与 mobile/idCard 等字段走同一套动态渲染逻辑
+  gender: string
   mobile: string
   idCard: string
   showOrder: number
@@ -110,7 +101,7 @@ export interface UserPositionFormItem {
 export interface UserFormRequest {
   name: string
   code: string
-  gender: number
+  gender: string
   mobile: string
   idCard: string
   showOrder: number

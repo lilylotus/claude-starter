@@ -32,7 +32,7 @@ public interface FormFieldDefinitionService {
 
     /**
      * 创建字段定义，校验绑定的元数据字段可用性、字典下拉/多选字典下拉的
-     * dictTypeId 必填性；fieldCode 取自所绑定元数据字段的当前值，不由请求提交。
+     * dictTypeCode 必填性；fieldCode 取自所绑定元数据字段的当前值，不由请求提交。
      *
      * @param request 创建请求
      * @return 创建后的字段定义详情

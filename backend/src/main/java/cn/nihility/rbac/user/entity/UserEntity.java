@@ -31,8 +31,8 @@ public class UserEntity {
     /** 用户编号，未删除范围内唯一。 */
     private String code;
 
-    /** 性别：0=未知，1=男，2=女。 */
-    private Integer gender;
+    /** 性别，取自字典类型 gender 下的字典项编码。 */
+    private String gender;
 
     /** 手机号，不做唯一性约束。 */
     private String mobile;
