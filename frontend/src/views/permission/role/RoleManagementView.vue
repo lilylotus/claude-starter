@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useRoleStore } from '@/stores/role'
+import { PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import * as roleApi from '@/api/role'
 import { ROLE_STATUS_ENABLED, type RoleFormRequest, type RoleRow } from '@/types/role'
 
@@ -161,11 +162,13 @@ async function handleDelete(row: RoleRow) {
       <el-pagination
         class="role-pagination"
         background
-        layout="prev, pager, next, total"
+        layout="sizes, prev, pager, next, total"
+        :page-sizes="[...PAGE_SIZE_OPTIONS]"
         :current-page="roleStore.page"
         :page-size="roleStore.pageSize"
         :total="roleStore.total"
         @current-change="handlePageChange"
+        @size-change="roleStore.changePageSize"
       />
     </section>
 

@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules, TreeInstance } from 'element-plus'
 import type Node from 'element-plus/es/components/tree/src/model/node'
 import { useMenuStore } from '@/stores/menu'
+import { PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import * as menuApi from '@/api/menu'
 import {
   MENU_RESOURCE_TYPE_LABELS,
@@ -292,11 +293,13 @@ async function handleDelete(row: MenuResourceRow) {
       <el-pagination
         class="menu-pagination"
         background
-        layout="prev, pager, next, total"
+        layout="sizes, prev, pager, next, total"
+        :page-sizes="[...PAGE_SIZE_OPTIONS]"
         :current-page="menuStore.page"
         :page-size="menuStore.pageSize"
         :total="menuStore.total"
         @current-change="handlePageChange"
+        @size-change="menuStore.changePageSize"
       />
     </section>
 

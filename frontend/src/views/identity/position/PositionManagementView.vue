@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import type Node from 'element-plus/es/components/tree/src/model/node'
 import { usePositionStore } from '@/stores/position'
+import { PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import * as positionApi from '@/api/position'
 import * as orgApi from '@/api/org'
 import * as userApi from '@/api/user'
@@ -358,11 +359,13 @@ async function handleDelete(row: PositionRow) {
         <el-pagination
           class="position-pagination"
           background
-          layout="prev, pager, next, total"
+          layout="sizes, prev, pager, next, total"
+          :page-sizes="[...PAGE_SIZE_OPTIONS]"
           :current-page="positionStore.page"
           :page-size="positionStore.pageSize"
           :total="positionStore.total"
           @current-change="handlePageChange"
+          @size-change="positionStore.changePageSize"
         />
       </template>
     </section>

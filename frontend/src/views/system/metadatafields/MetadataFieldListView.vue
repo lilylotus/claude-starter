@@ -3,6 +3,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import * as metadataFieldApi from '@/api/metadataField'
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import {
   FORM_FIELD_BIZ_TYPE_OPTIONS,
   METADATA_FIELD_STATUS_ENABLED,
@@ -20,7 +21,7 @@ const activeBizType = ref<FormFieldBizType>('ORG')
 const list = ref<MetadataField[]>([])
 const listLoading = ref(false)
 const page = ref(1)
-const pageSize = ref(10)
+const pageSize = ref(DEFAULT_PAGE_SIZE)
 const total = ref(0)
 
 async function fetchPage(targetPage?: number) {
@@ -51,6 +52,12 @@ function handleTabChange() {
 
 function handlePageChange(targetPage: number) {
   fetchPage(targetPage)
+}
+
+function handleSizeChange(newSize: number) {
+  pageSize.value = newSize
+  page.value = 1
+  fetchPage()
 }
 
 // ---- 编辑弹窗：字段名称 + 字段标识 ----
@@ -164,11 +171,13 @@ async function toggleStatus(row: MetadataField) {
     <el-pagination
       class="metadata-field-pagination"
       background
-      layout="prev, pager, next, total"
+      layout="sizes, prev, pager, next, total"
+      :page-sizes="[...PAGE_SIZE_OPTIONS]"
       :current-page="page"
       :page-size="pageSize"
       :total="total"
       @current-change="handlePageChange"
+      @size-change="handleSizeChange"
     />
 
     <el-dialog v-model="editDialogVisible" title="编辑元数据字段" width="480px" @close="closeEditDialog">

@@ -4,6 +4,7 @@ import type { OrgTreeNode } from '@/types/org'
 import type { PositionRow } from '@/types/position'
 import * as orgApi from '@/api/org'
 import * as positionApi from '@/api/position'
+import { DEFAULT_PAGE_SIZE } from '@/constants/pagination'
 
 // 任职管理 store：维护左侧组织树（懒加载，仅用于导航选择组织，复用组织管理树接口）、
 // 当前选中的组织 id、右侧任职记录分页列表状态。
@@ -27,7 +28,7 @@ export const usePositionStore = defineStore('position', () => {
   const listLoading = ref(false)
 
   const page = ref(1)
-  const pageSize = ref(10)
+  const pageSize = ref(DEFAULT_PAGE_SIZE)
   const total = ref(0)
 
   // 加载当前选中组织下的任职记录分页数据；不传 targetPage 时使用当前 page；
@@ -58,6 +59,12 @@ export const usePositionStore = defineStore('position', () => {
     await fetchPage(targetPage)
   }
 
+  // 切换每页条数：设置新的 pageSize 后重置到第一页重新查询，保持当前 selectedOrgId 不变
+  async function changePageSize(newSize: number) {
+    pageSize.value = newSize
+    await fetchPage(1)
+  }
+
   // 增/改/启停用/删除之后调用：刷新当前分页；若刷新后当前页超出新的总页数，
   // 则自动回退到最后一页。任职记录的增删改不影响左侧组织树，无需联动刷新。
   async function refreshAfterMutation() {
@@ -80,6 +87,7 @@ export const usePositionStore = defineStore('position', () => {
     fetchPage,
     selectNode,
     changePage,
+    changePageSize,
     refreshAfterMutation,
   }
 })

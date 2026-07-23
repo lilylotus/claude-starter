@@ -5,6 +5,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import * as formFieldApi from '@/api/formField'
 import * as metadataFieldApi from '@/api/metadataField'
 import * as dictApi from '@/api/dict'
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import {
   FORM_FIELD_BIZ_TYPE_OPTIONS,
   type FormFieldBizType,
@@ -33,7 +34,7 @@ const activeBizType = ref<FormFieldBizType>('ORG')
 const list = ref<FormFieldDefinition[]>([])
 const listLoading = ref(false)
 const page = ref(1)
-const pageSize = ref(10)
+const pageSize = ref(DEFAULT_PAGE_SIZE)
 const total = ref(0)
 
 async function fetchPage(targetPage?: number) {
@@ -64,6 +65,12 @@ function handleTabChange() {
 
 function handlePageChange(targetPage: number) {
   fetchPage(targetPage)
+}
+
+function handleSizeChange(newSize: number) {
+  pageSize.value = newSize
+  page.value = 1
+  fetchPage()
 }
 
 function controlTypeLabel(controlType: number): string {
@@ -329,11 +336,13 @@ async function handleDelete(row: FormFieldDefinition) {
     <el-pagination
       class="form-field-pagination"
       background
-      layout="prev, pager, next, total"
+      layout="sizes, prev, pager, next, total"
+      :page-sizes="[...PAGE_SIZE_OPTIONS]"
       :current-page="page"
       :page-size="pageSize"
       :total="total"
       @current-change="handlePageChange"
+      @size-change="handleSizeChange"
     />
 
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="560px" top="5vh" @close="closeDialog">

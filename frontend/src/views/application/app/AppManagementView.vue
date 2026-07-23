@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useAppStore } from '@/stores/app'
+import { PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import * as appApi from '@/api/app'
 import * as orgApi from '@/api/org'
 import * as userApi from '@/api/user'
@@ -275,11 +276,13 @@ async function handleDelete(row: AppRow) {
       <el-pagination
         class="app-pagination"
         background
-        layout="prev, pager, next, total"
+        layout="sizes, prev, pager, next, total"
+        :page-sizes="[...PAGE_SIZE_OPTIONS]"
         :current-page="appStore.page"
         :page-size="appStore.pageSize"
         :total="appStore.total"
         @current-change="handlePageChange"
+        @size-change="appStore.changePageSize"
       />
     </section>
 

@@ -667,7 +667,8 @@ VALUES ('USER', 'tab_user', 'name', 'name', 'VARCHAR(64)', '用户姓名', 2000,
 INSERT INTO `tab_metadata_field`
     (`biz_type`, `table_name`, `column_name`, `field_code`, `column_type`, `field_name`, `status`, `create_by`, `create_time`,
      `update_by`, `update_time`)
-VALUES ('POSITION', 'tab_user_position', 'position_address', 'positionAddress', 'VARCHAR(255)', '任职地址', 2000, 'admin', NOW(), 'admin', NOW()),
+VALUES ('POSITION', 'tab_user_position', 'position_type', 'positionType', 'VARCHAR(64)', '任职类型', 2000, 'admin', NOW(), 'admin', NOW()),
+       ('POSITION', 'tab_user_position', 'position_address', 'positionAddress', 'VARCHAR(255)', '任职地址', 2000, 'admin', NOW(), 'admin', NOW()),
        ('POSITION', 'tab_user_position', 'position_phone', 'positionPhone', 'VARCHAR(20)', '任职电话', 2000, 'admin', NOW(), 'admin', NOW()),
        ('POSITION', 'tab_user_position', 'show_order', 'showOrder', 'INT', '显示序号', 2000, 'admin', NOW(), 'admin', NOW()),
        ('POSITION', 'tab_user_position', 'remark', 'remark', 'VARCHAR(255)', '备注', 2000, 'admin', NOW(), 'admin', NOW()),
@@ -784,7 +785,10 @@ INSERT INTO `tab_form_field_definition`
     (`biz_type`, `metadata_field_id`, `field_name`, `field_code`, `control_type`, `dict_type_code`, `is_unique`,
      `is_required`, `show_in_list`, `show_in_create`, `show_in_edit`, `editable`, `validate_regex`, `placeholder`,
      `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES ('POSITION', (SELECT `id`
+VALUES ('POSITION', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user_position' AND `column_name` = 'position_type'),
+        '任职类型', 'positionType', 3, 'position_type', 0, 1, 1, 1, 1,
+        1, NULL, NULL, 1, 2000, 'admin', NOW(), 'admin', NOW()),
+    ('POSITION', (SELECT `id`
                      FROM `tab_metadata_field`
                      WHERE `table_name` = 'tab_user_position'
                        AND `column_name` = 'position_address'), '任职地址', 'positionAddress', 1, NULL, 0, 0, 1, 1, 1,
@@ -864,7 +868,7 @@ VALUES ('POSITION', NULL, '__userCode', '人员编号', 1, 1, 1, 2000, 'admin', 
 INSERT INTO `tab_import_field_config`
     (`biz_type`, `form_field_definition_id`, `field_code`, `excel_header_name`, `is_primary_key`, `is_required`,
      `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES ('APP', NULL, '__ownerCode', '负责人编号', 1, 1, 1, 2000, 'admin', NOW(), 'admin', NOW()),
+VALUES ('APP', NULL, '__ownerCode', '负责人编码', 1, 1, 1, 2000, 'admin', NOW(), 'admin', NOW()),
        ('APP', NULL, '__orgCode', '组织编码', 1, 1, 2, 2000, 'admin', NOW(), 'admin', NOW());
 
 -- ORG 的 parentId 同理是选择器（树形选择器）而非展示字段。__parentCode（表头"上级

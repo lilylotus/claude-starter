@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { usePermissionStore } from '@/stores/permission'
+import { PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import * as permissionApi from '@/api/permission'
 import { PERMISSION_STATUS_ENABLED, type PermissionFormRequest, type PermissionRow } from '@/types/permission'
 
@@ -161,11 +162,13 @@ async function handleDelete(row: PermissionRow) {
       <el-pagination
         class="permission-pagination"
         background
-        layout="prev, pager, next, total"
+        layout="sizes, prev, pager, next, total"
+        :page-sizes="[...PAGE_SIZE_OPTIONS]"
         :current-page="permissionStore.page"
         :page-size="permissionStore.pageSize"
         :total="permissionStore.total"
         @current-change="handlePageChange"
+        @size-change="permissionStore.changePageSize"
       />
     </section>
 

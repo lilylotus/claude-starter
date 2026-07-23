@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { MenuResourceRow, MenuResourceTreeNode } from '@/types/menuResource'
 import * as menuApi from '@/api/menu'
+import { DEFAULT_PAGE_SIZE } from '@/constants/pagination'
 
 // 菜单管理（资源）store：维护左侧资源树、当前选中节点、右侧子节点表格数据（含分页状态）。
 // 结构照抄 stores/org.ts，两套“左树右表懒加载 + 按需加载全量树”状态互不影响，见该文件注释。
@@ -16,7 +17,7 @@ export const useMenuStore = defineStore('menu', () => {
   const childrenLoading = ref(false)
 
   const page = ref(1)
-  const pageSize = ref(10)
+  const pageSize = ref(DEFAULT_PAGE_SIZE)
   const total = ref(0)
 
   const navTreeTopLevel = ref<MenuResourceTreeNode[]>([])
@@ -74,6 +75,12 @@ export const useMenuStore = defineStore('menu', () => {
     await fetchChildren(currentParentId.value, targetPage)
   }
 
+  // 切换每页条数：设置新的 pageSize 后重置到第一页重新查询，保持当前 parentId 不变
+  async function changePageSize(newSize: number) {
+    pageSize.value = newSize
+    await fetchChildren(currentParentId.value, 1)
+  }
+
   // 选中左侧树节点：记录 selectedId/selectedName，重置为第一页并加载其直接子节点
   async function selectNode(id: number, name: string) {
     selectedId.value = id
@@ -112,6 +119,7 @@ export const useMenuStore = defineStore('menu', () => {
     fetchTree,
     fetchChildren,
     changePage,
+    changePageSize,
     selectNode,
     clearSelection,
     refreshAfterMutation,

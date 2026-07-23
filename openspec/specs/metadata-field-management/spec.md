@@ -82,7 +82,7 @@
 - **THEN** 系统返回该记录的完整信息，包含 `tableName`、`columnName`、`columnType`、`fieldCode`、`fieldName`、`status`
 
 ### Requirement: 元数据配置前端界面
-系统 SHALL 在"系统管理"菜单下提供"元数据配置"页面（路径 `/system/metadata-fields`），支持按业务对象类型（组织/人员/任职/应用）切换查看对应的元数据字段列表，支持编辑字段名称、字段标识与状态，支持查看字段详情（含字段标识）；页面 SHALL NOT 提供新增或删除元数据字段的入口。
+系统 SHALL 在"系统管理"菜单下提供"元数据配置"页面（路径 `/system/metadata-fields`），支持按业务对象类型（组织/人员/任职/应用）切换查看对应的元数据字段列表，支持编辑字段名称、字段标识与状态，支持查看字段详情（含字段标识）；页面 SHALL NOT 提供新增或删除元数据字段的入口。元数据字段列表下方的分页控件 SHALL 在页码按钮前提供每页条数下拉选择器，可选值为 10/20/50/100，默认 10；用户切换每页条数后，系统 SHALL 按当前业务对象类型从第一页重新查询并展示。
 
 #### Scenario: 切换业务对象类型查看元数据字段列表
 - **WHEN** 用户在元数据配置页面切换到"任职"分类
@@ -99,6 +99,10 @@
 #### Scenario: 查看元数据字段详情包含字段标识
 - **WHEN** 用户在元数据配置页面点击某条记录的"详情"
 - **THEN** 页面展示该记录的表名称、字段列名、字段类型、字段标识、字段名称、状态等完整信息
+
+#### Scenario: 切换每页条数重新加载元数据字段列表
+- **WHEN** 用户在元数据字段列表下方的分页控件中选择 20/50/100 中的某个每页条数
+- **THEN** 系统按当前业务对象类型与新的每页条数从第一页重新查询并展示元数据字段列表，默认每页条数保持 10 不变
 
 ### Requirement: 元数据字段目录的字段标识可编辑
 系统 SHALL 为 `tab_metadata_field` 提供字段标识（`fieldCode`）属性，用于在"表单字段定义"选择/切换绑定的元数据字段时自动带出对应的字段标识。`fieldCode` SHALL 通过数据库迁移预置初始值，存量数据 SHALL 按 `columnName` 的下划线转驼峰规则回填（如 `id_card` → `idCard`、`show_order` → `showOrder`），回填结果 SHALL 与 `tab_form_field_definition` 中已绑定该元数据字段的定义当时的 `fieldCode` 保持一致。与 `tableName`/`columnName`/`columnType` 不同，`fieldCode` SHALL 可通过更新元数据字段的接口修改（与 `fieldName` 同等对待），且 SHALL 保证在同一 `bizType` 下唯一。

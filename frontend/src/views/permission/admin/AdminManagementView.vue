@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useAdminStore } from '@/stores/admin'
+import { PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import * as adminApi from '@/api/admin'
 import * as orgApi from '@/api/org'
 import * as userApi from '@/api/user'
@@ -282,11 +283,13 @@ async function handleDelete(row: AdminRow) {
       <el-pagination
         class="admin-pagination"
         background
-        layout="prev, pager, next, total"
+        layout="sizes, prev, pager, next, total"
+        :page-sizes="[...PAGE_SIZE_OPTIONS]"
         :current-page="adminStore.page"
         :page-size="adminStore.pageSize"
         :total="adminStore.total"
         @current-change="handlePageChange"
+        @size-change="adminStore.changePageSize"
       />
     </section>
 

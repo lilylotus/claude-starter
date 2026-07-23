@@ -6,6 +6,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import { useDictStore } from '@/stores/dict'
 import * as dictApi from '@/api/dict'
+import { PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import {
   DICT_STATUS_ENABLED,
   type DictItemFormRequest,
@@ -316,11 +317,13 @@ async function handleDeleteItem(row: DictItemRow) {
       <el-pagination
         class="dict-pagination"
         background
-        layout="prev, pager, next, total"
+        layout="sizes, prev, pager, next, total"
+        :page-sizes="[...PAGE_SIZE_OPTIONS]"
         :current-page="dictStore.typesPage"
         :page-size="dictStore.typesPageSize"
         :total="dictStore.typesTotal"
         @current-change="handleTypesPageChange"
+        @size-change="dictStore.changeTypesPageSize"
       />
     </section>
 
@@ -362,11 +365,13 @@ async function handleDeleteItem(row: DictItemRow) {
       <el-pagination
         class="dict-pagination"
         background
-        layout="prev, pager, next, total"
+        layout="sizes, prev, pager, next, total"
+        :page-sizes="[...PAGE_SIZE_OPTIONS]"
         :current-page="dictStore.itemsPage"
         :page-size="dictStore.itemsPageSize"
         :total="dictStore.itemsTotal"
         @current-change="handleItemsPageChange"
+        @size-change="dictStore.changeItemsPageSize"
       />
     </section>
 

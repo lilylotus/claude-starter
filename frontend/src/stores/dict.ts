@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { DictItemRow, DictTypeRow } from '@/types/dict'
 import * as dictApi from '@/api/dict'
+import { DEFAULT_PAGE_SIZE } from '@/constants/pagination'
 
 // 字典管理 store：维护左侧字典类型分页列表、当前选中的字典类型、右侧字典项分页列表。
 // 与组织管理的树形结构不同，字典类型之间没有层级关系，左侧就是一个普通分页列表；
@@ -14,7 +15,7 @@ export const useDictStore = defineStore('dict', () => {
   const typesLoading = ref(false)
   const typesKeyword = ref('')
   const typesPage = ref(1)
-  const typesPageSize = ref(10)
+  const typesPageSize = ref(DEFAULT_PAGE_SIZE)
   const typesTotal = ref(0)
 
   // ---- 右侧：当前选中的字典类型 + 其字典项分页列表 ----
@@ -24,7 +25,7 @@ export const useDictStore = defineStore('dict', () => {
   const items = ref<DictItemRow[]>([])
   const itemsLoading = ref(false)
   const itemsPage = ref(1)
-  const itemsPageSize = ref(10)
+  const itemsPageSize = ref(DEFAULT_PAGE_SIZE)
   const itemsTotal = ref(0)
 
   // 加载字典类型分页列表；不传 targetPage 时使用当前 page
@@ -57,6 +58,13 @@ export const useDictStore = defineStore('dict', () => {
     return fetchTypes(targetPage)
   }
 
+  // 切换左侧字典类型每页条数：设置新的 typesPageSize 后重置到第一页重新查询，
+  // 与右侧字典项分页状态相互独立，不影响 itemsPage/itemsPageSize
+  function changeTypesPageSize(newSize: number) {
+    typesPageSize.value = newSize
+    return fetchTypes(1)
+  }
+
   // 加载当前选中字典类型下的字典项分页列表；不传 targetPage 时使用当前 page；
   // 未选中任何字典类型时不发起请求
   async function fetchItems(targetPage?: number) {
@@ -81,6 +89,13 @@ export const useDictStore = defineStore('dict', () => {
   // 切换右侧分页页码
   function changeItemsPage(targetPage: number) {
     return fetchItems(targetPage)
+  }
+
+  // 切换右侧字典项每页条数：设置新的 itemsPageSize 后重置到第一页重新查询，
+  // 与左侧字典类型分页状态相互独立，不影响 typesPage/typesPageSize
+  function changeItemsPageSize(newSize: number) {
+    itemsPageSize.value = newSize
+    return fetchItems(1)
   }
 
   // 选中左侧某一行字典类型：记录 id/name，重置右侧为第一页并加载其字典项
@@ -145,8 +160,10 @@ export const useDictStore = defineStore('dict', () => {
     fetchTypes,
     searchTypes,
     changeTypesPage,
+    changeTypesPageSize,
     fetchItems,
     changeItemsPage,
+    changeItemsPageSize,
     selectType,
     clearSelection,
     refreshAfterTypeMutation,

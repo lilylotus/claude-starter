@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import * as operationLogApi from '@/api/operationLog'
 import OperationLogDetailDialog from '@/components/OperationLogDetailDialog.vue'
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import {
   MODULE_OPTIONS,
   OPERATION_SOURCE_IMPORT,
@@ -30,7 +31,7 @@ const dateRange = ref<[string, string] | null>(null)
 const list = ref<OperationLogRow[]>([])
 const listLoading = ref(false)
 const page = ref(1)
-const pageSize = ref(10)
+const pageSize = ref(DEFAULT_PAGE_SIZE)
 const total = ref(0)
 
 async function fetchList() {
@@ -76,6 +77,12 @@ function handleReset() {
 
 function handlePageChange(targetPage: number) {
   page.value = targetPage
+  fetchList()
+}
+
+function handleSizeChange(newSize: number) {
+  pageSize.value = newSize
+  page.value = 1
   fetchList()
 }
 
@@ -188,11 +195,13 @@ function openDetailDialog(row: OperationLogRow) {
       <el-pagination
         class="log-pagination"
         background
-        layout="prev, pager, next, total"
+        layout="sizes, prev, pager, next, total"
+        :page-sizes="[...PAGE_SIZE_OPTIONS]"
         :current-page="page"
         :page-size="pageSize"
         :total="total"
         @current-change="handlePageChange"
+        @size-change="handleSizeChange"
       />
     </section>
 

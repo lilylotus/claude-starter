@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { OrgRow, OrgTreeNode } from '@/types/org'
 import * as orgApi from '@/api/org'
+import { DEFAULT_PAGE_SIZE } from '@/constants/pagination'
 
 // 组织管理 store：维护左侧组织树、当前选中节点、右侧子节点表格数据（含分页状态）。
 export const useOrgStore = defineStore('org', () => {
@@ -22,7 +23,7 @@ export const useOrgStore = defineStore('org', () => {
   const childrenLoading = ref(false)
 
   const page = ref(1)
-  const pageSize = ref(10)
+  const pageSize = ref(DEFAULT_PAGE_SIZE)
   const total = ref(0)
 
   // ---- 左侧导航树（懒加载） ----
@@ -100,6 +101,12 @@ export const useOrgStore = defineStore('org', () => {
     await fetchChildren(currentParentId.value, targetPage)
   }
 
+  // 切换每页条数：设置新的 pageSize 后重置到第一页重新查询，保持当前 parentId 不变
+  async function changePageSize(newSize: number) {
+    pageSize.value = newSize
+    await fetchChildren(currentParentId.value, 1)
+  }
+
   // 选中左侧树节点：记录 selectedId/selectedName，重置为第一页并加载其直接子节点
   async function selectNode(id: number, name: string) {
     selectedId.value = id
@@ -140,6 +147,7 @@ export const useOrgStore = defineStore('org', () => {
     fetchTree,
     fetchChildren,
     changePage,
+    changePageSize,
     selectNode,
     clearSelection,
     refreshAfterMutation,

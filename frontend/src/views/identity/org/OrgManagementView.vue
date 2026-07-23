@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules, TreeInstance } from 'element-plus'
 import type Node from 'element-plus/es/components/tree/src/model/node'
 import { useOrgStore } from '@/stores/org'
+import { PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import * as orgApi from '@/api/org'
 import * as excelImportApi from '@/api/excelImport'
 import BatchImportDialog from '@/components/BatchImportDialog.vue'
@@ -350,11 +351,13 @@ async function handleDelete(row: OrgRow) {
       <el-pagination
         class="org-pagination"
         background
-        layout="prev, pager, next, total"
+        layout="sizes, prev, pager, next, total"
+        :page-sizes="[...PAGE_SIZE_OPTIONS]"
         :current-page="orgStore.page"
         :page-size="orgStore.pageSize"
         :total="orgStore.total"
         @current-change="handlePageChange"
+        @size-change="orgStore.changePageSize"
       />
     </section>
 

@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import * as importFieldConfigApi from '@/api/importFieldConfig'
 import * as formFieldApi from '@/api/formField'
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import { FORM_FIELD_BIZ_TYPE_OPTIONS, type FormFieldBizType } from '@/types/metadataField'
 import { FORM_FIELD_STATUS_ENABLED, type FormFieldDefinition } from '@/types/formField'
 import type { ImportFieldConfig } from '@/types/importFieldConfig'
@@ -21,7 +22,7 @@ const activeBizType = ref<FormFieldBizType>('ORG')
 const list = ref<ImportFieldConfig[]>([])
 const listLoading = ref(false)
 const page = ref(1)
-const pageSize = ref(10)
+const pageSize = ref(DEFAULT_PAGE_SIZE)
 const total = ref(0)
 
 async function fetchPage(targetPage?: number) {
@@ -52,6 +53,12 @@ function handleTabChange() {
 
 function handlePageChange(targetPage: number) {
   fetchPage(targetPage)
+}
+
+function handleSizeChange(newSize: number) {
+  pageSize.value = newSize
+  page.value = 1
+  fetchPage()
 }
 
 // ---- "关联字段"选择器数据源：当前业务对象类型下状态为启用的表单字段定义 ----
@@ -250,11 +257,13 @@ async function handleDelete(row: ImportFieldConfig) {
     <el-pagination
       class="import-field-config-pagination"
       background
-      layout="prev, pager, next, total"
+      layout="sizes, prev, pager, next, total"
+      :page-sizes="[...PAGE_SIZE_OPTIONS]"
       :current-page="page"
       :page-size="pageSize"
       :total="total"
       @current-change="handlePageChange"
+      @size-change="handleSizeChange"
     />
 
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="520px" top="8vh" @close="closeDialog">

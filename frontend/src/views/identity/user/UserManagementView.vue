@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { Search } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
+import { PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import * as userApi from '@/api/user'
 import * as orgApi from '@/api/org'
 import * as dictApi from '@/api/dict'
@@ -354,11 +355,13 @@ async function handleDelete(row: UserRow) {
       <el-pagination
         class="user-pagination"
         background
-        layout="prev, pager, next, total"
+        layout="sizes, prev, pager, next, total"
+        :page-sizes="[...PAGE_SIZE_OPTIONS]"
         :current-page="userStore.page"
         :page-size="userStore.pageSize"
         :total="userStore.total"
         @current-change="handlePageChange"
+        @size-change="userStore.changePageSize"
       />
     </section>
 
