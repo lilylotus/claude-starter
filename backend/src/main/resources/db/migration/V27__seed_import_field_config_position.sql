@@ -12,5 +12,5 @@
 INSERT INTO `tab_import_field_config`
     (`biz_type`, `form_field_definition_id`, `field_code`, `excel_header_name`, `is_primary_key`, `is_required`,
      `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES ('POSITION', NULL, '__userCode', '人员编号', 1, 1, 200, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('POSITION', NULL, '__orgCode', '组织编码', 1, 1, 190, 2000, 'admin', NOW(), 'admin', NOW());
+VALUES ('POSITION', NULL, '__userCode', '人员编号', 1, 1, 1, 2000, 'admin', NOW(), 'admin', NOW()),
+       ('POSITION', NULL, '__orgCode', '组织编码', 1, 1, 2, 2000, 'admin', NOW(), 'admin', NOW());
