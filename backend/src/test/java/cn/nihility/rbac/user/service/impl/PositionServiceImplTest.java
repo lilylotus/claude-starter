@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.dict.service.DictItemService;
 import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
 import cn.nihility.rbac.formfield.support.FormFieldSnapshotSupport;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
@@ -69,6 +70,10 @@ class PositionServiceImplTest {
     @Mock
     private FormFieldSnapshotSupport formFieldSnapshotSupport;
 
+    /** 被测服务的字典项业务逻辑依赖，使用 Mockito 打桩。 */
+    @Mock
+    private DictItemService dictItemService;
+
     /** 被测服务实例。 */
     private PositionServiceImpl positionService;
 
@@ -79,14 +84,14 @@ class PositionServiceImplTest {
      * 已打桩的 {@code formFieldDefinitionService}/{@code userPositionMapper} 构造真实实例，
      * 不额外 mock；{@link PositionLogSnapshotSupport} 同理，直接用已打桩的
      * {@code userMapper}/{@code orgMapper}/{@code formFieldDefinitionService}/
-     * {@code formFieldSnapshotSupport} 构造真实实例。
+     * {@code formFieldSnapshotSupport}/{@code dictItemService} 构造真实实例。
      */
     @BeforeEach
     void setUp() {
         PositionDynamicFieldSupport positionDynamicFieldSupport =
                 new PositionDynamicFieldSupport(formFieldDefinitionService, userPositionMapper);
         PositionLogSnapshotSupport positionLogSnapshotSupport = new PositionLogSnapshotSupport(userMapper, orgMapper,
-                formFieldDefinitionService, formFieldSnapshotSupport);
+                formFieldDefinitionService, formFieldSnapshotSupport, dictItemService);
         positionService = new PositionServiceImpl(userPositionMapper, operationLogRecorder,
                 positionDynamicFieldSupport, positionLogSnapshotSupport);
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());

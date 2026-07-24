@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.dict.service.DictItemService;
 import cn.nihility.rbac.formfield.constant.FormFieldBizType;
 import cn.nihility.rbac.formfield.constant.FormFieldControlType;
 import cn.nihility.rbac.formfield.dto.FormFieldDefinitionVO;
@@ -72,6 +73,10 @@ class UserServiceImplTest {
     @Mock
     private FormFieldSnapshotSupport formFieldSnapshotSupport;
 
+    /** 被测服务的字典项业务逻辑依赖，使用 Mockito 打桩。 */
+    @Mock
+    private DictItemService dictItemService;
+
     /** 被测服务实例。 */
     private UserServiceImpl userService;
 
@@ -83,7 +88,7 @@ class UserServiceImplTest {
      * {@code formFieldDefinitionService}/{@code userPositionMapper} 构造真实实例，不额外 mock；
      * {@link PositionLogSnapshotSupport} 同理，直接用已打桩的
      * {@code userMapper}/{@code orgMapper}/{@code formFieldDefinitionService}/
-     * {@code formFieldSnapshotSupport} 构造真实实例，
+     * {@code formFieldSnapshotSupport}/{@code dictItemService} 构造真实实例，
      * 用于验证 {@code syncPositions} 新增/更新/物理删除分支追加的操作日志记录调用。
      */
     @BeforeEach
@@ -91,9 +96,9 @@ class UserServiceImplTest {
         PositionDynamicFieldSupport positionDynamicFieldSupport =
                 new PositionDynamicFieldSupport(formFieldDefinitionService, userPositionMapper);
         PositionLogSnapshotSupport positionLogSnapshotSupport = new PositionLogSnapshotSupport(userMapper, orgMapper,
-                formFieldDefinitionService, formFieldSnapshotSupport);
+                formFieldDefinitionService, formFieldSnapshotSupport, dictItemService);
         userService = new UserServiceImpl(userMapper, userPositionMapper, orgMapper, operationLogRecorder,
-                formFieldDefinitionService, formFieldSnapshotSupport, positionDynamicFieldSupport,
+                formFieldDefinitionService, formFieldSnapshotSupport, dictItemService, positionDynamicFieldSupport,
                 positionLogSnapshotSupport);
         lenient().when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());

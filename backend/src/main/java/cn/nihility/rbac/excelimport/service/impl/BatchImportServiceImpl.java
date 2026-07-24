@@ -2,6 +2,7 @@ package cn.nihility.rbac.excelimport.service.impl;
 
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.excelimport.constant.ImportBizTypes;
+import cn.nihility.rbac.excelimport.constant.ImportLimits;
 import cn.nihility.rbac.excelimport.constant.OrgPseudoFieldCode;
 import cn.nihility.rbac.excelimport.dto.ImportFailItemVO;
 import cn.nihility.rbac.excelimport.dto.ImportFieldConfigVO;
@@ -39,9 +40,6 @@ import org.springframework.web.multipart.MultipartFile;
 @RequiredArgsConstructor
 public class BatchImportServiceImpl implements BatchImportService {
 
-    /** 单次上传允许处理的最大数据行数（不含表头行），超出拒绝并提示分批上传。 */
-    private static final int MAX_ROW_COUNT = 1000;
-
     /** 导入字段配置业务逻辑接口，用于查询启用状态的导入字段配置驱动表头匹配。 */
     private final ImportFieldConfigService importFieldConfigService;
 
@@ -77,8 +75,8 @@ public class BatchImportServiceImpl implements BatchImportService {
             validateRequiredHeaders(configs, columnFieldCodeMap);
 
             List<Row> dataRows = collectDataRows(sheet, headerRow.getRowNum(), dataFormatter);
-            if (dataRows.size() > MAX_ROW_COUNT) {
-                throw new BusinessException("单次上传行数超过上限 " + MAX_ROW_COUNT + " 行，请分批上传");
+            if (dataRows.size() > ImportLimits.MAX_ROW_COUNT) {
+                throw new BusinessException("单次上传行数超过上限 " + ImportLimits.MAX_ROW_COUNT + " 行，请分批上传");
             }
 
             return processDataRows(bizType, configs, columnFieldCodeMap, dataRows, dataFormatter);

@@ -90,9 +90,13 @@ public class ImportRowExecutor {
     /** 任职管理业务逻辑接口，复用其既有的创建/更新校验与写入逻辑。 */
     private final PositionService positionService;
 
+    /** 字典列支持组件，用于识别字典下拉单选列并把单元格文本按 label 反查为 code。 */
+    private final DictImportColumnSupport dictImportColumnSupport;
+
     /**
      * 处理一行 Excel 数据：先校验导入字段配置标记为必填的列是否均已提供非空值，
-     * 再按 {@code bizType} 路由到对应的新增/更新流程。
+     * 再对字典下拉单选列做 label→code 反查（design.md Decision 3），最后按
+     * {@code bizType} 路由到对应的新增/更新流程。
      *
      * 处理期间通过 {@link OperationSourceContext#mark(int)} 标记"当前操作来自 Excel
      * 导入"，使本行内部触发的 {@code OperationLogRecorder} 写库时能落库正确的操作
@@ -107,6 +111,7 @@ public class ImportRowExecutor {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void processRow(String bizType, Map<String, String> rowValues, List<ImportFieldConfigVO> configs) {
         checkRequiredColumns(rowValues, configs);
+        resolveDictColumns(rowValues, configs);
         try {
             OperationSourceContext.mark(OperationSource.IMPORT);
             switch (bizType) {
@@ -135,6 +140,37 @@ public class ImportRowExecutor {
             if (!StringUtils.hasText(rowValues.get(config.getFieldCode()))) {
                 throw new BusinessException("字段[" + config.getExcelHeaderName() + "]不能为空");
             }
+        }
+    }
+
+    /**
+     * 对本行数据中属于字典下拉单选列（{@code controlType=DICT}）的取值做 label→code
+     * 反查：取值非空且能在该字典类型当前启用项的 label 集合中精确匹配到时，把
+     * {@code rowValues} 中该列的值原地替换为对应的 code；非必填字典列取值为空时跳过
+     * 反查（沿用既有"非必填列留空"的语义，不在此处重复必填校验）；取值非空但反查不到
+     * 匹配项时，判定该行失败并在提示信息中包含该列的 Excel 表头文字（design.md
+     * Decision 3/4）。
+     *
+     * @param rowValues 本行数据，反查命中的字典列取值会被原地替换为 code
+     * @param configs   当前 bizType 下启用的导入字段配置列表
+     */
+    private void resolveDictColumns(Map<String, String> rowValues, List<ImportFieldConfigVO> configs) {
+        Map<String, String> dictColumns = dictImportColumnSupport.resolveDictColumns(configs);
+        if (dictColumns.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<String, String> entry : dictColumns.entrySet()) {
+            String fieldCode = entry.getKey();
+            String label = rowValues.get(fieldCode);
+            if (!StringUtils.hasText(label)) {
+                continue;
+            }
+            String dictTypeCode = entry.getValue();
+            String code = dictImportColumnSupport.resolveCodeByLabel(dictTypeCode, label);
+            if (code == null) {
+                throw new BusinessException(headerNameOf(configs, fieldCode, fieldCode) + "取值不是有效的字典选项");
+            }
+            rowValues.put(fieldCode, code);
         }
     }
 

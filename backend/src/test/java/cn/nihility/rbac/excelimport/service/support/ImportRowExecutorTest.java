@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -33,6 +34,7 @@ import cn.nihility.rbac.user.service.PositionService;
 import cn.nihility.rbac.user.service.UserService;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -85,6 +87,14 @@ class ImportRowExecutorTest {
     @Mock
     private PositionService positionService;
 
+    /**
+     * 被测组件的字典列支持依赖，使用 Mockito 打桩；未打桩时
+     * {@code resolveDictColumns} 默认返回空 Map（Mockito 对 Map 返回类型的默认行为），
+     * 因此既有不涉及字典列的用例无需额外打桩即可保持通过。
+     */
+    @Mock
+    private DictImportColumnSupport dictImportColumnSupport;
+
     /** 被测组件实例，Bean Validation 使用真实的默认校验器（不打桩）。 */
     private ImportRowExecutor importRowExecutor;
 
@@ -96,7 +106,7 @@ class ImportRowExecutorTest {
     void setUp() {
         Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
         importRowExecutor = new ImportRowExecutor(validator, orgMapper, orgService, userMapper, userService,
-                appMapper, appService, userPositionMapper, positionService);
+                appMapper, appService, userPositionMapper, positionService, dictImportColumnSupport);
     }
 
     /**
@@ -466,6 +476,79 @@ class ImportRowExecutorTest {
         verify(positionService).update(eq(9L), captor.capture());
         assertThat(captor.getValue().getOrgId()).isEqualTo(2L);
         assertThat(captor.getValue().getPositionType()).isEqualTo("primary");
+    }
+
+    /**
+     * 字典下拉单选列取值为启用字典项的 label 时，应反查为对应的 code 再落地到
+     * CreateRequest，而不是原样落地 label 文本（design.md Decision 3）。
+     */
+    @Test
+    void processRow_shouldResolveDictLabelToCode_whenLabelMatchesEnabledOption() {
+        List<ImportFieldConfigVO> configs = List.of(
+                buildConfig("__userCode", "人员编号", true),
+                buildConfig("__orgCode", "组织编码", true),
+                buildConfig("positionType", "任职类型", true));
+        UserEntity user = UserEntity.builder().id(1L).code("U001").status(UserStatus.ENABLED).build();
+        OrgEntity org = OrgEntity.builder().id(2L).code("ORG001").status(OrgStatus.ENABLED).build();
+        when(userMapper.selectList(any())).thenReturn(List.of(user));
+        when(orgMapper.selectList(any())).thenReturn(List.of(org));
+        when(userPositionMapper.selectList(any())).thenReturn(List.of());
+        when(dictImportColumnSupport.resolveDictColumns(configs)).thenReturn(Map.of("positionType", "POSITION_TYPE"));
+        when(dictImportColumnSupport.resolveCodeByLabel("POSITION_TYPE", "主要任职")).thenReturn("primary");
+        Map<String, String> rowValues = new HashMap<>(Map.of(
+                "__userCode", "U001", "__orgCode", "ORG001", "positionType", "主要任职"));
+
+        importRowExecutor.processRow(FormFieldBizType.POSITION, rowValues, configs);
+
+        ArgumentCaptor<PositionCreateRequest> captor = ArgumentCaptor.forClass(PositionCreateRequest.class);
+        verify(positionService).create(captor.capture());
+        assertThat(captor.getValue().getPositionType()).isEqualTo("primary");
+    }
+
+    /**
+     * 字典下拉单选列取值非空但反查不到任何启用字典项的 label 时，应判定该行失败，
+     * 提示信息包含该列的 Excel 表头文字，不触及任何业务模块的 create/update 调用
+     * （design.md Decision 4）。
+     */
+    @Test
+    void processRow_shouldFailRow_whenDictLabelNotMatched() {
+        List<ImportFieldConfigVO> configs = List.of(
+                buildConfig("__userCode", "人员编号", true),
+                buildConfig("__orgCode", "组织编码", true),
+                buildConfig("positionType", "任职类型", true));
+        when(dictImportColumnSupport.resolveDictColumns(configs)).thenReturn(Map.of("positionType", "POSITION_TYPE"));
+        when(dictImportColumnSupport.resolveCodeByLabel("POSITION_TYPE", "不存在的选项")).thenReturn(null);
+        Map<String, String> rowValues = new HashMap<>(Map.of(
+                "__userCode", "U001", "__orgCode", "ORG001", "positionType", "不存在的选项"));
+
+        assertThatThrownBy(() -> importRowExecutor.processRow(FormFieldBizType.POSITION, rowValues, configs))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("任职类型")
+                .hasMessageContaining("不是有效的字典选项");
+
+        verifyNoInteractions(userMapper, orgMapper, userPositionMapper, positionService);
+    }
+
+    /**
+     * 字典下拉单选列非必填、取值为空时应跳过反查，不调用 {@code resolveCodeByLabel}，
+     * 沿用既有的"非必填列留空"语义。用 ORG 场景下的 {@code remark}（DTO 上无
+     * {@code @NotBlank}）扮演一个非必填字典列，避免与业务字段自身独立于导入配置之外
+     * 的必填校验（如 {@code positionType} 的 {@code @NotBlank}）产生干扰。
+     */
+    @Test
+    void processRow_shouldSkipDictLookup_whenNonRequiredValueBlank() {
+        List<ImportFieldConfigVO> configs = List.of(
+                buildConfig("code", "组织编码", true),
+                buildConfig("__parentCode", "上级组织编码", true),
+                buildConfig("remark", "备注", false));
+        when(orgMapper.selectList(any())).thenReturn(List.of());
+        when(dictImportColumnSupport.resolveDictColumns(configs)).thenReturn(Map.of("remark", "SOME_DICT_TYPE"));
+        Map<String, String> rowValues = new HashMap<>(Map.of(
+                "code", "ORG001", "name", "测试组织", "__parentCode", "0", "remark", ""));
+
+        importRowExecutor.processRow(FormFieldBizType.ORG, rowValues, configs);
+
+        verify(dictImportColumnSupport, never()).resolveCodeByLabel(any(), any());
     }
 
     /**
