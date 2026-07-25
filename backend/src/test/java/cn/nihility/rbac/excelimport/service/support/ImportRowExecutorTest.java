@@ -403,6 +403,82 @@ class ImportRowExecutorTest {
     }
 
     /**
+     * 人员标识列取值不等于任何用户编号，但等于唯一一个未删除用户的手机号时，应按该
+     * 手机号匹配到该用户并继续走新增流程（design.md：人员标识扩展为编号/手机号/
+     * 身份证号任一匹配）。
+     */
+    @Test
+    void processRow_shouldMatchUserByMobile_whenCodeNotMatched() {
+        List<ImportFieldConfigVO> configs = List.of(
+                buildConfig("__userCode", "人员标识", true),
+                buildConfig("__orgCode", "组织编码", true),
+                buildConfig("positionType", "任职类型", true));
+        UserEntity user = UserEntity.builder().id(1L).code("U999").mobile("13800000000")
+                .status(UserStatus.ENABLED).build();
+        OrgEntity org = OrgEntity.builder().id(2L).code("ORG001").status(OrgStatus.ENABLED).build();
+        when(userMapper.selectList(any())).thenReturn(List.of(user));
+        when(orgMapper.selectList(any())).thenReturn(List.of(org));
+        when(userPositionMapper.selectList(any())).thenReturn(List.of());
+        Map<String, String> rowValues = Map.of(
+                "__userCode", "13800000000", "__orgCode", "ORG001", "positionType", "primary");
+
+        importRowExecutor.processRow(FormFieldBizType.POSITION, rowValues, configs);
+
+        ArgumentCaptor<PositionCreateRequest> captor = ArgumentCaptor.forClass(PositionCreateRequest.class);
+        verify(positionService).create(captor.capture());
+        assertThat(captor.getValue().getUserId()).isEqualTo(1L);
+    }
+
+    /**
+     * 人员标识列取值不等于任何用户编号或手机号，但等于唯一一个未删除用户的身份证号
+     * 时，应按该身份证号匹配到该用户并继续走新增流程。
+     */
+    @Test
+    void processRow_shouldMatchUserByIdCard_whenCodeAndMobileNotMatched() {
+        List<ImportFieldConfigVO> configs = List.of(
+                buildConfig("__userCode", "人员标识", true),
+                buildConfig("__orgCode", "组织编码", true),
+                buildConfig("positionType", "任职类型", true));
+        UserEntity user = UserEntity.builder().id(1L).code("U999").mobile("13800000000")
+                .idCard("110101199001010011").status(UserStatus.ENABLED).build();
+        OrgEntity org = OrgEntity.builder().id(2L).code("ORG001").status(OrgStatus.ENABLED).build();
+        when(userMapper.selectList(any())).thenReturn(List.of(user));
+        when(orgMapper.selectList(any())).thenReturn(List.of(org));
+        when(userPositionMapper.selectList(any())).thenReturn(List.of());
+        Map<String, String> rowValues = Map.of(
+                "__userCode", "110101199001010011", "__orgCode", "ORG001", "positionType", "primary");
+
+        importRowExecutor.processRow(FormFieldBizType.POSITION, rowValues, configs);
+
+        ArgumentCaptor<PositionCreateRequest> captor = ArgumentCaptor.forClass(PositionCreateRequest.class);
+        verify(positionService).create(captor.capture());
+        assertThat(captor.getValue().getUserId()).isEqualTo(1L);
+    }
+
+    /**
+     * 人员标识列取值同时匹配到两个不同未删除用户（如手机号未设唯一性约束、被重复
+     * 使用）时，应判定该行失败，提示匹配到多条已存在记录，不调用 create/update。
+     */
+    @Test
+    void processRow_shouldFailPosition_whenUserIdentifierMatchesMultiple() {
+        List<ImportFieldConfigVO> configs = List.of(
+                buildConfig("__userCode", "人员标识", true),
+                buildConfig("__orgCode", "组织编码", true));
+        UserEntity match1 = UserEntity.builder().id(1L).code("U001").mobile("13800000000")
+                .status(UserStatus.ENABLED).build();
+        UserEntity match2 = UserEntity.builder().id(2L).code("U002").mobile("13800000000")
+                .status(UserStatus.ENABLED).build();
+        when(userMapper.selectList(any())).thenReturn(List.of(match1, match2));
+        Map<String, String> rowValues = Map.of("__userCode", "13800000000", "__orgCode", "ORG001");
+
+        assertThatThrownBy(() -> importRowExecutor.processRow(FormFieldBizType.POSITION, rowValues, configs))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("多条");
+
+        verifyNoInteractions(orgMapper, positionService);
+    }
+
+    /**
      * 人员编号匹配成功但组织编码列取值在未删除的组织中不存在匹配记录时，应判定该行
      * 失败，明确提示是组织编码无法匹配。
      */

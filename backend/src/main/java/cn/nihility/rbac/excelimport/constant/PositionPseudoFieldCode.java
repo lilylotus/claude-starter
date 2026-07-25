@@ -9,7 +9,11 @@ package cn.nihility.rbac.excelimport.constant;
  */
 public final class PositionPseudoFieldCode {
 
-    /** 人员编号伪字段标识，导入时按其取值匹配 {@code tab_user.code} 得到 {@code userId}。 */
+    /**
+     * 人员标识伪字段标识，导入时按其取值匹配 {@code tab_user.code}/{@code mobile}/
+     * {@code idCard} 三者任一精确相等得到 {@code userId}（编号、手机号、身份证号
+     * 中任意一种取值都可以，不要求预先声明具体是哪一种）。
+     */
     public static final String USER_CODE = "__userCode";
 
     /** 组织编码伪字段标识，导入时按其取值匹配 {@code tab_org.code} 得到 {@code orgId}。 */

@@ -771,7 +771,7 @@ VALUES ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab
        ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'code'),
         '用户编号', 'code', 1, NULL, 1, 1, 1, 1, 1, 1, NULL, NULL, 3, 2000, 'admin', NOW(), 'admin', NOW()),
        ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'mobile'),
-        '手机号', 'mobile', 1, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 5, 2000, 'admin', NOW(), 'admin', NOW()),
+        '手机号', 'mobile', 1, NULL, 1, 0, 1, 1, 1, 1, NULL, NULL, 5, 2000, 'admin', NOW(), 'admin', NOW()),
        ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'id_card'),
         '身份证号', 'idCard', 1, NULL, 1, 0, 1, 1, 1, 1, NULL, NULL, 7, 2000, 'admin', NOW(), 'admin', NOW()),
        ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'gender'),

@@ -321,14 +321,16 @@ public class ImportRowExecutor {
     }
 
     /**
-     * 处理一行任职数据：把"人员编号"列按 {@code tab_user.code} 匹配得到 {@code userId}、
-     * "组织编码"列按 {@code tab_org.code} 匹配得到 {@code orgId}，任一匹配不到时该行
-     * 判定失败并注明具体是哪一列无法匹配；再按 {@code userId+orgId+positionType}
-     * 复合键匹配已有任职记录。
+     * 处理一行任职数据：把"人员标识"列按 {@code tab_user.code}、{@code mobile}、
+     * {@code idCard} 三者任一精确相等匹配得到 {@code userId}（编号、手机号、身份证号
+     * 中任意一种取值都能命中，不要求预先声明具体是哪一种）、"组织编码"列按
+     * {@code tab_org.code} 匹配得到 {@code orgId}，任一匹配不到时该行判定失败并注明
+     * 具体是哪一列无法匹配；再按 {@code userId+orgId+positionType} 复合键匹配已有
+     * 任职记录。
      *
      * @param rowValues 本行数据
      * @param configs   当前 bizType（POSITION）下启用的导入字段配置列表，用于解析
-     *                  人员编号/组织编码列对应的表头文字，拼装更友好的失败提示
+     *                  人员标识/组织编码列对应的表头文字，拼装更友好的失败提示
      */
     private void processPosition(Map<String, String> rowValues, List<ImportFieldConfigVO> configs) {
         String userCodeHeader = headerNameOf(configs, PositionPseudoFieldCode.USER_CODE, "人员编号");
@@ -337,7 +339,9 @@ public class ImportRowExecutor {
         String userCode = rowValues.get(PositionPseudoFieldCode.USER_CODE);
         UserEntity user = StringUtils.hasText(userCode) ? findSingleActive(
                 userMapper.selectList(new LambdaQueryWrapper<UserEntity>()
-                        .eq(UserEntity::getCode, userCode)
+                        .and(w -> w.eq(UserEntity::getCode, userCode)
+                                .or().eq(UserEntity::getMobile, userCode)
+                                .or().eq(UserEntity::getIdCard, userCode))
                         .ne(UserEntity::getStatus, UserStatus.DELETED))) : null;
         if (user == null) {
             throw new BusinessException(userCodeHeader + "无法匹配到已有人员记录");
