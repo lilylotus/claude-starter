@@ -14,11 +14,20 @@ import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.excelimport.dto.ImportFieldConfigVO;
 import cn.nihility.rbac.excelimport.dto.ImportResultVO;
 import cn.nihility.rbac.excelimport.service.ImportFieldConfigService;
+import cn.nihility.rbac.excelimport.service.support.DictImportColumnSupport;
 import cn.nihility.rbac.excelimport.service.support.ImportRowExecutor;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.Font;
+import org.apache.poi.ss.usermodel.IndexedColors;
 import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.apache.poi.xssf.usermodel.XSSFSheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.BeforeEach;
@@ -46,6 +55,10 @@ class BatchImportServiceImplTest {
     @Mock
     private ImportRowExecutor importRowExecutor;
 
+    /** 被测服务的字典/文本格式列支持组件依赖，使用 Mockito 打桩。 */
+    @Mock
+    private DictImportColumnSupport dictImportColumnSupport;
+
     /** 被测服务实例。 */
     private BatchImportServiceImpl batchImportService;
 
@@ -54,7 +67,8 @@ class BatchImportServiceImplTest {
      */
     @BeforeEach
     void setUp() {
-        batchImportService = new BatchImportServiceImpl(importFieldConfigService, importRowExecutor);
+        batchImportService =
+                new BatchImportServiceImpl(importFieldConfigService, importRowExecutor, dictImportColumnSupport);
     }
 
     /**
@@ -221,6 +235,108 @@ class BatchImportServiceImplTest {
                 org.mockito.ArgumentMatchers.argThat(map -> map != null && "U002".equals(map.get("__userCode"))), any());
         inOrder.verify(importRowExecutor).processRow(eq("POSITION"),
                 org.mockito.ArgumentMatchers.argThat(map -> map != null && "U001".equals(map.get("__userCode"))), any());
+    }
+
+    /**
+     * 全部行导入成功（{@code failList} 为空）时，不应生成标注版错误文件，
+     * {@code errorFileBase64}/{@code errorFileName} 应保持 {@code null}。
+     */
+    @Test
+    void importExcel_shouldReturnNullErrorFile_whenAllRowsSucceed() throws Exception {
+        when(importFieldConfigService.listActiveByBizType("ORG")).thenReturn(List.of(buildConfig("code", "组织编码", true)));
+
+        byte[] content = buildWorkbook(List.of("组织编码"), List.of(List.of("ORG001")));
+        MockMultipartFile file = new MockMultipartFile("file", "t.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content);
+
+        ImportResultVO result = batchImportService.importExcel("ORG", file);
+
+        assertThat(result.getFailList()).isEmpty();
+        assertThat(result.getErrorFileBase64()).isNull();
+        assertThat(result.getErrorFileName()).isNull();
+    }
+
+    /**
+     * 存在失败行时，应生成一份仅包含失败行的全新标注版错误文件（成功的行不出现在里面）：
+     * 表头按 {@code configs} 顺序 + 末尾"错误原因"列、失败行对应单元格写有失败原因且字体
+     * 标红，文件名格式为"业务对象类型中文名-12 位时间戳.xlsx"（design.md 决策 3 第二版）。
+     */
+    @Test
+    void importExcel_shouldAttachErrorAnnotatedFile_whenFailListNotEmpty() throws Exception {
+        when(importFieldConfigService.listActiveByBizType("ORG")).thenReturn(List.of(buildConfig("code", "组织编码", true)));
+        when(dictImportColumnSupport.resolveTextFormatFieldCodes(any())).thenReturn(Set.of());
+
+        byte[] content = buildWorkbook(List.of("组织编码"),
+                List.of(List.of("ORG001"), List.of("ORG002"), List.of("ORG003")));
+        MockMultipartFile file = new MockMultipartFile("file", "t.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content);
+
+        doNothing().when(importRowExecutor).processRow(eq("ORG"), argThatContainsCode("ORG001"), any());
+        doThrow(new BusinessException("组织编码[ORG002]已存在"))
+                .when(importRowExecutor).processRow(eq("ORG"), argThatContainsCode("ORG002"), any());
+        doNothing().when(importRowExecutor).processRow(eq("ORG"), argThatContainsCode("ORG003"), any());
+
+        ImportResultVO result = batchImportService.importExcel("ORG", file);
+
+        assertThat(result.getFailList()).hasSize(1);
+        assertThat(result.getErrorFileName()).matches("^组织失败明细-\\d{12}\\.xlsx$");
+        assertThat(result.getErrorFileBase64()).isNotBlank();
+
+        byte[] errorFileBytes = Base64.getDecoder().decode(result.getErrorFileBase64());
+        try (Workbook errorWorkbook = WorkbookFactory.create(new ByteArrayInputStream(errorFileBytes))) {
+            org.apache.poi.ss.usermodel.Sheet errorSheet = errorWorkbook.getSheetAt(0);
+            Row headerRow = errorSheet.getRow(0);
+            int errorColumnIndex = headerRow.getLastCellNum() - 1;
+            assertThat(headerRow.getCell(0).getStringCellValue()).isEqualTo("组织编码");
+            assertThat(headerRow.getCell(errorColumnIndex).getStringCellValue()).isEqualTo("错误原因");
+
+            // 成功的行（ORG001/ORG003）不应出现在错误文件里，仅失败的 ORG002 一条数据行。
+            assertThat(errorSheet.getLastRowNum()).isEqualTo(1);
+            Row failRow = errorSheet.getRow(1);
+            assertThat(failRow.getCell(0).getStringCellValue()).isEqualTo("ORG002");
+
+            Cell errorCell = failRow.getCell(errorColumnIndex);
+            assertThat(errorCell.getStringCellValue()).contains("ORG002");
+            Font font = errorWorkbook.getFontAt(errorCell.getCellStyle().getFontIndex());
+            assertThat(font.getColor()).isEqualTo(IndexedColors.RED.getIndex());
+        }
+    }
+
+    /**
+     * {@code ImportRowExecutor.processRow()} 内部会把字典列的取值从 label 原地改写成 code
+     * （见 {@code ImportRowExecutor.resolveDictColumns()}），本单测通过 {@code doAnswer}
+     * 模拟这个原地修改行为，验证标注版错误文件里字典列仍展示用户原本填写的 label，而不是
+     * 被改写后的 code——否则用户按错误文件修正后重新上传，会在字典列上出现新的、令人困惑的
+     * 失败（design.md 决策 3：错误文件用于"修正后重新上传"，必须展示原始输入）。
+     */
+    @Test
+    void importExcel_shouldKeepOriginalDictLabel_whenProcessRowMutatesRowValues() throws Exception {
+        when(importFieldConfigService.listActiveByBizType("ORG")).thenReturn(List.of(
+                buildConfig("code", "组织编码", true), buildConfig("type", "类型", false)));
+        when(dictImportColumnSupport.resolveTextFormatFieldCodes(any())).thenReturn(Set.of());
+
+        byte[] content = buildWorkbook(List.of("组织编码", "类型"), List.of(List.of("NOPE", "标签A")));
+        MockMultipartFile file = new MockMultipartFile("file", "t.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", content);
+
+        Mockito.doAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            Map<String, String> rowValues = invocation.getArgument(1, Map.class);
+            // 模拟 ImportRowExecutor 内部把字典列 label 原地改写成 code 的行为。
+            rowValues.put("type", "CODE_A");
+            throw new BusinessException("组织编码无法匹配到已有组织记录");
+        }).when(importRowExecutor).processRow(eq("ORG"), any(), any());
+
+        ImportResultVO result = batchImportService.importExcel("ORG", file);
+
+        assertThat(result.getFailList()).hasSize(1);
+        byte[] errorFileBytes = Base64.getDecoder().decode(result.getErrorFileBase64());
+        try (Workbook errorWorkbook = WorkbookFactory.create(new ByteArrayInputStream(errorFileBytes))) {
+            Row failRow = errorWorkbook.getSheetAt(0).getRow(1);
+            assertThat(failRow.getCell(1).getStringCellValue())
+                    .as("错误文件应展示用户原本填写的 label，而不是 processRow 原地改写后的 code")
+                    .isEqualTo("标签A");
+        }
     }
 
     /**

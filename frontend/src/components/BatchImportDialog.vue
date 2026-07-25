@@ -1,17 +1,24 @@
 <script setup lang="ts">
 // 组织/人员/任职/应用四个管理页面共用的批量导入上传弹窗：选择 Excel 文件 → 调用对应
-// bizType 的批量导入接口 → 在弹窗内展示成功条数与失败明细列表（行号 + 原因）。
-// 四个页面只需传入不同的 bizType，弹窗内部逻辑完全一致。
-import { ref, watch } from 'vue'
+// bizType 的批量导入接口 → 在弹窗内展示成功/失败汇总，存在失败行时提供"下载失败明细"
+// 按钮下载后端生成的标注版错误文件。四个页面只需传入不同的 bizType，弹窗内部逻辑完全一致。
+import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { UploadFile, UploadInstance, UploadRawFile } from 'element-plus'
 import * as excelImportApi from '@/api/excelImport'
 import type { FormFieldBizType, ImportResult } from '@/types/importFieldConfig'
+import { FORM_FIELD_BIZ_TYPE_OPTIONS } from '@/types/metadataField'
 
 const props = defineProps<{
   modelValue: boolean
   bizType: FormFieldBizType
 }>()
+
+// 弹窗标题按业务对象类型显示，如"组织批量导入"/"人员批量导入"
+const dialogTitle = computed(() => {
+  const label = FORM_FIELD_BIZ_TYPE_OPTIONS.find((option) => option.value === props.bizType)?.label ?? ''
+  return `${label}批量导入`
+})
 
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
@@ -73,10 +80,36 @@ async function handleImport() {
 function handleClose() {
   visible.value = false
 }
+
+// 把后端返回的 Base64 错误文件解码为 Blob 并触发浏览器下载，写法与
+// src/api/excelImport.ts 里 downloadImportTemplate() 触发下载模板的方式保持一致
+function handleDownloadErrorFile() {
+  const base64 = result.value?.errorFileBase64
+  const fileName = result.value?.errorFileName
+  if (!base64 || !fileName) return
+
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  const blob = new Blob([bytes], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="批量导入" width="560px" @close="resetState">
+  <el-dialog v-model="visible" :title="dialogTitle" width="560px" @close="resetState">
     <el-upload
       ref="uploadRef"
       drag
@@ -94,14 +127,18 @@ function handleClose() {
     </el-upload>
 
     <div v-if="result" class="batch-import-dialog__result">
-      <p class="batch-import-dialog__success">成功导入 {{ result.successCount }} 条</p>
-      <template v-if="result.failList.length > 0">
-        <p class="batch-import-dialog__fail-title">失败 {{ result.failList.length }} 条：</p>
-        <el-table :data="result.failList" size="small" max-height="240" border>
-          <el-table-column prop="rowNo" label="行号" width="80" />
-          <el-table-column prop="reason" label="失败原因" min-width="220" />
-        </el-table>
-      </template>
+      <p class="batch-import-dialog__summary">
+        成功 {{ result.successCount }} 条，失败 {{ result.failList.length }} 条
+      </p>
+      <el-button
+        v-if="result.failList.length > 0"
+        type="danger"
+        plain
+        size="small"
+        @click="handleDownloadErrorFile"
+      >
+        下载失败明细
+      </el-button>
     </div>
 
     <template #footer>
@@ -129,14 +166,9 @@ function handleClose() {
   padding-top: 12px;
 }
 
-.batch-import-dialog__success {
-  color: var(--color-success, #67c23a);
+.batch-import-dialog__summary {
+  color: var(--color-text-primary);
   font-weight: 600;
-  margin: 0 0 8px;
-}
-
-.batch-import-dialog__fail-title {
-  color: var(--color-danger, #e5484d);
   margin: 0 0 8px;
 }
 </style>

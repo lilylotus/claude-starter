@@ -30,4 +30,20 @@ public class ImportResultVO {
     @Schema(description = "失败明细列表")
     @Builder.Default
     private List<ImportFailItemVO> failList = new ArrayList<>();
+
+    /**
+     * 标注版错误文件的 Base64 编码内容：仅包含失败的行（末尾追加一列"错误原因"、标红
+     * 文字），成功导入的行不出现在这份文件里，仅当 {@link #failList} 非空时才会填充，
+     * 全部成功时保持 {@code null}。
+     */
+    @Schema(description = "标注版错误文件的 Base64 编码内容，仅包含失败行，仅 failList 非空时填充")
+    private String errorFileBase64;
+
+    /**
+     * 标注版错误文件的建议文件名：业务对象类型中文名 + 生成时刻时间戳（如
+     * {@code 任职-202607252318.xlsx}），仅当 {@link #failList} 非空时才会填充，全部成功
+     * 时保持 {@code null}。
+     */
+    @Schema(description = "标注版错误文件的建议文件名，格式为业务对象类型中文名-时间戳.xlsx，仅 failList 非空时填充")
+    private String errorFileName;
 }

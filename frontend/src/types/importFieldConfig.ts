@@ -63,10 +63,14 @@ export interface ImportFailItem {
   reason: string
 }
 
-// 批量导入结果：成功导入条数与失败明细列表
+// 批量导入结果：成功导入条数与失败明细列表。存在失败行时后端会额外生成一份标注了
+// 失败原因的错误文件（errorFileBase64 为 Base64 编码的 .xlsx 内容，errorFileName 为
+// 建议的下载文件名），全部成功时这两个字段为 null
 export interface ImportResult {
   successCount: number
   failList: ImportFailItem[]
+  errorFileBase64?: string | null
+  errorFileName?: string | null
 }
 
 // 通用分页响应结构，字段命名和后端 cn.nihility.rbac.common.PageResult 对齐

@@ -11,6 +11,7 @@ import cn.nihility.rbac.excelimport.service.support.DictImportColumnSupport;
 import java.io.ByteArrayInputStream;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.DataValidation;
 import org.apache.poi.ss.usermodel.Font;
@@ -173,6 +174,36 @@ class ImportTemplateServiceImplTest {
         try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(content))) {
             assertThat(workbook.getSheetAt(0).getDataValidations()).isEmpty();
             assertThat(workbook.getNumberOfSheets()).isEqualTo(1);
+        }
+    }
+
+    /**
+     * 数据区域应按 {@link DictImportColumnSupport#resolveTextFormatFieldCodes} 的判定结果
+     * 设置 Excel 文本格式（{@code @}）：POSITION 场景下无关联表单字段定义的固定标识列
+     * （{@code __userCode}/{@code __orgCode}）、关联 {@code DICT} 控件类型的
+     * {@code positionType} 列均应为文本格式，关联 {@code NUMBER} 控件类型的
+     * {@code showOrder} 列不应为文本格式。
+     */
+    @Test
+    void generateTemplate_shouldSetTextFormat_forNonNumberColumns() throws Exception {
+        List<ImportFieldConfigVO> configs = List.of(
+                buildConfig("__userCode", "人员编号", true, 100),
+                buildConfig("__orgCode", "组织编码", true, 90),
+                buildConfig("positionType", "任职类型", false, 80),
+                buildConfig("showOrder", "显示序号", false, 70));
+        when(importFieldConfigService.listActiveByBizType("POSITION")).thenReturn(configs);
+        when(dictImportColumnSupport.resolveTextFormatFieldCodes(configs))
+                .thenReturn(Set.of("__userCode", "__orgCode", "positionType"));
+
+        byte[] content = importTemplateService.generateTemplate("POSITION");
+
+        try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(content))) {
+            XSSFSheet sheet = workbook.getSheetAt(0);
+            assertThat(sheet.getRow(1).getCell(0).getCellStyle().getDataFormatString()).isEqualTo("@");
+            assertThat(sheet.getRow(1).getCell(1).getCellStyle().getDataFormatString()).isEqualTo("@");
+            assertThat(sheet.getRow(1).getCell(2).getCellStyle().getDataFormatString()).isEqualTo("@");
+            // showOrder（NUMBER 控件类型）未命中文本格式集合，数据区域单元格不会被创建，保留 Excel 默认数字格式。
+            assertThat(sheet.getRow(1).getCell(3)).isNull();
         }
     }
 

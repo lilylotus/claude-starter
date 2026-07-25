@@ -12,6 +12,7 @@ import cn.nihility.rbac.formfield.entity.FormFieldDefinitionEntity;
 import cn.nihility.rbac.formfield.mapper.FormFieldDefinitionMapper;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -104,6 +105,44 @@ class DictImportColumnSupportTest {
         List<String> labels = dictImportColumnSupport.getEnabledLabels("GENDER");
 
         assertThat(labels).isEmpty();
+    }
+
+    /**
+     * 未关联表单字段定义（{@code formFieldDefinitionId == null}）的固定标识列应恒被判定
+     * 为文本格式，不查询 {@code FormFieldDefinitionMapper}。
+     */
+    @Test
+    void resolveTextFormatFieldCodes_shouldIncludeFixedColumn_whenNoFormFieldDefinitionId() {
+        List<ImportFieldConfigVO> configs = List.of(buildConfig("__userCode", null));
+
+        Set<String> textFormatFieldCodes = dictImportColumnSupport.resolveTextFormatFieldCodes(configs);
+
+        assertThat(textFormatFieldCodes).containsExactly("__userCode");
+    }
+
+    /**
+     * 关联了表单字段定义的列中，只有控件类型为 {@code NUMBER} 的列不应被判定为文本格式，
+     * 其余控件类型（{@code TEXT}/{@code DICT}/{@code DATE}/{@code MULTI_DICT}）均应判定为
+     * 文本格式。
+     */
+    @Test
+    void resolveTextFormatFieldCodes_shouldExcludeOnlyNumberControlType() {
+        List<ImportFieldConfigVO> configs = List.of(
+                buildConfig("remark", 1L),
+                buildConfig("gender", 2L),
+                buildConfig("birthday", 3L),
+                buildConfig("tags", 4L),
+                buildConfig("showOrder", 5L));
+        when(formFieldDefinitionMapper.selectByIds(anyList())).thenReturn(List.of(
+                buildDefinition(1L, FormFieldControlType.TEXT, null),
+                buildDefinition(2L, FormFieldControlType.DICT, "GENDER"),
+                buildDefinition(3L, FormFieldControlType.DATE, null),
+                buildDefinition(4L, FormFieldControlType.MULTI_DICT, "TAG"),
+                buildDefinition(5L, FormFieldControlType.NUMBER, null)));
+
+        Set<String> textFormatFieldCodes = dictImportColumnSupport.resolveTextFormatFieldCodes(configs);
+
+        assertThat(textFormatFieldCodes).containsExactly("remark", "gender", "birthday", "tags");
     }
 
     /**

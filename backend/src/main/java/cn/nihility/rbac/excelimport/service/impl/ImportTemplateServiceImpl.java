@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellStyle;
@@ -74,6 +75,8 @@ public class ImportTemplateServiceImpl implements ImportTemplateService {
             XSSFSheet sheet = workbook.createSheet(SHEET_NAME);
             Row headerRow = sheet.createRow(0);
             CellStyle requiredStyle = buildRequiredHeaderStyle(workbook);
+            CellStyle textStyle = buildTextCellStyle(workbook);
+            Set<String> textFormatFieldCodes = dictImportColumnSupport.resolveTextFormatFieldCodes(configs);
 
             for (int i = 0; i < configs.size(); i++) {
                 ImportFieldConfigVO config = configs.get(i);
@@ -83,6 +86,12 @@ public class ImportTemplateServiceImpl implements ImportTemplateService {
                     cell.setCellStyle(requiredStyle);
                 }
                 sheet.setColumnWidth(i, COLUMN_WIDTH);
+
+                if (textFormatFieldCodes.contains(config.getFieldCode())) {
+                    for (int rowIndex = 1; rowIndex <= ImportLimits.MAX_ROW_COUNT; rowIndex++) {
+                        getOrCreateRow(sheet, rowIndex).createCell(i).setCellStyle(textStyle);
+                    }
+                }
             }
 
             Map<String, String> dictColumns = dictImportColumnSupport.resolveDictColumns(configs);
@@ -111,6 +120,19 @@ public class ImportTemplateServiceImpl implements ImportTemplateService {
 
         CellStyle style = workbook.createCellStyle();
         style.setFont(requiredFont);
+        return style;
+    }
+
+    /**
+     * 构造文本格式单元格样式：数据格式设为 {@code @}（Excel 文本格式），用于避免手机号、
+     * 身份证号等纯数字外观的字符串被 Excel 自动识别为数值。
+     *
+     * @param workbook 工作簿
+     * @return 文本格式单元格样式
+     */
+    private CellStyle buildTextCellStyle(XSSFWorkbook workbook) {
+        CellStyle style = workbook.createCellStyle();
+        style.setDataFormat(workbook.createDataFormat().getFormat("@"));
         return style;
     }
 

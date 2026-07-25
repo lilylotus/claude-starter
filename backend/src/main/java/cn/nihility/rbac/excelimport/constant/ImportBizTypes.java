@@ -1,6 +1,7 @@
 package cn.nihility.rbac.excelimport.constant;
 
 import cn.nihility.rbac.formfield.constant.FormFieldBizType;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -16,6 +17,16 @@ public final class ImportBizTypes {
             FormFieldBizType.ORG, FormFieldBizType.USER, FormFieldBizType.POSITION, FormFieldBizType.APP);
 
     /**
+     * 业务对象类型 -> 中文名映射，与前端 {@code FORM_FIELD_BIZ_TYPE_OPTIONS} 的文案保持一致，
+     * 纯静态常量映射，不查库，仅用于拼装标注版错误文件的文件名（design.md 决策 3）。
+     */
+    private static final Map<String, String> LABEL_BY_BIZ_TYPE = Map.of(
+            FormFieldBizType.ORG, "组织",
+            FormFieldBizType.USER, "人员",
+            FormFieldBizType.POSITION, "任职",
+            FormFieldBizType.APP, "应用");
+
+    /**
      * 工具类不允许实例化。
      */
     private ImportBizTypes() {
@@ -29,5 +40,15 @@ public final class ImportBizTypes {
      */
     public static boolean isValid(String bizType) {
         return bizType != null && ALL.contains(bizType);
+    }
+
+    /**
+     * 返回业务对象类型对应的中文名，未知取值时原样返回入参。
+     *
+     * @param bizType 业务对象类型
+     * @return 中文名
+     */
+    public static String labelOf(String bizType) {
+        return LABEL_BY_BIZ_TYPE.getOrDefault(bizType, bizType);
     }
 }

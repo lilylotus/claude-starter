@@ -9,11 +9,16 @@ import cn.nihility.rbac.excelimport.dto.ImportFieldConfigVO;
 import cn.nihility.rbac.excelimport.dto.ImportResultVO;
 import cn.nihility.rbac.excelimport.service.BatchImportService;
 import cn.nihility.rbac.excelimport.service.ImportFieldConfigService;
+import cn.nihility.rbac.excelimport.service.support.DictImportColumnSupport;
 import cn.nihility.rbac.excelimport.service.support.ImportRowExecutor;
 import cn.nihility.rbac.formfield.constant.FormFieldBizType;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -23,11 +28,16 @@ import java.util.Map;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellStyle;
 import org.apache.poi.ss.usermodel.DataFormatter;
+import org.apache.poi.ss.usermodel.Font;
+import org.apache.poi.ss.usermodel.IndexedColors;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.apache.poi.xssf.usermodel.XSSFSheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
@@ -40,11 +50,21 @@ import org.springframework.web.multipart.MultipartFile;
 @RequiredArgsConstructor
 public class BatchImportServiceImpl implements BatchImportService {
 
+    /** 标注版错误文件名里的时间戳格式：年月日时分，12 位数字。 */
+    private static final DateTimeFormatter ERROR_FILE_TIMESTAMP_FORMATTER =
+            DateTimeFormatter.ofPattern("yyyyMMddHHmm");
+
+    /** 标注版错误文件表头最后一列固定文案。 */
+    private static final String ERROR_REASON_HEADER = "错误原因";
+
     /** 导入字段配置业务逻辑接口，用于查询启用状态的导入字段配置驱动表头匹配。 */
     private final ImportFieldConfigService importFieldConfigService;
 
     /** 批量导入单行处理器，每行独立开启新事务处理。 */
     private final ImportRowExecutor importRowExecutor;
+
+    /** 字典/文本格式列支持组件，用于判定标注版错误文件里哪些列应设置为 Excel 文本格式。 */
+    private final DictImportColumnSupport dictImportColumnSupport;
 
     /**
      * {@inheritDoc}
@@ -79,10 +99,102 @@ public class BatchImportServiceImpl implements BatchImportService {
                 throw new BusinessException("单次上传行数超过上限 " + ImportLimits.MAX_ROW_COUNT + " 行，请分批上传");
             }
 
-            return processDataRows(bizType, configs, columnFieldCodeMap, dataRows, dataFormatter);
+            ProcessOutcome outcome = processDataRows(bizType, configs, columnFieldCodeMap, dataRows, dataFormatter);
+            ImportResultVO result = outcome.result();
+            if (!outcome.failedRows().isEmpty()) {
+                ErrorFile errorFile = buildErrorFile(bizType, configs, outcome.failedRows());
+                result.setErrorFileBase64(errorFile.base64());
+                result.setErrorFileName(errorFile.fileName());
+            }
+            return result;
         } catch (IOException ex) {
             throw new BusinessException("读取上传的 Excel 文件失败");
         }
+    }
+
+    /**
+     * 用失败行的解析结果重新拼装一份全新的标注版错误 {@code .xlsx}（不复用/修改原始上传的
+     * {@code workbook}），仅包含失败的行：表头按 {@code configs}（{@code showOrder} 升序）
+     * 逐列取 {@code excelHeaderName}，末尾追加"错误原因"列；数据行按 {@code configs} 列顺序
+     * 从每个失败行的 {@code rowValues} 取值填入，最后一列写失败原因并标红；成功的行不出现在
+     * 这份文件里。数据列（错误原因列除外）复用
+     * {@link DictImportColumnSupport#resolveTextFormatFieldCodes(List)} 判定结果设置文本
+     * 格式，避免手机号/身份证号等取值被 Excel 误判成数值（design.md 决策 3）。
+     *
+     * @param bizType    业务对象类型，用于拼装文件名
+     * @param configs    启用状态的导入字段配置列表，已按 {@code showOrder} 升序排列
+     * @param failedRows 失败行的解析结果与失败原因列表，非空
+     * @return 错误文件的 Base64 内容与建议文件名
+     */
+    private ErrorFile buildErrorFile(String bizType, List<ImportFieldConfigVO> configs, List<FailedRow> failedRows) {
+        Set<String> textFormatFieldCodes = dictImportColumnSupport.resolveTextFormatFieldCodes(configs);
+
+        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+            XSSFSheet sheet = workbook.createSheet("失败明细");
+            CellStyle errorStyle = buildErrorReasonStyle(workbook);
+            CellStyle textStyle = buildTextCellStyle(workbook);
+
+            Row headerRow = sheet.createRow(0);
+            for (int i = 0; i < configs.size(); i++) {
+                headerRow.createCell(i).setCellValue(configs.get(i).getExcelHeaderName());
+            }
+            int errorColumnIndex = configs.size();
+            headerRow.createCell(errorColumnIndex).setCellValue(ERROR_REASON_HEADER);
+
+            for (int r = 0; r < failedRows.size(); r++) {
+                FailedRow failedRow = failedRows.get(r);
+                Row dataRow = sheet.createRow(r + 1);
+                for (int i = 0; i < configs.size(); i++) {
+                    String fieldCode = configs.get(i).getFieldCode();
+                    Cell cell = dataRow.createCell(i);
+                    cell.setCellValue(failedRow.parsedRow().rowValues().getOrDefault(fieldCode, ""));
+                    if (textFormatFieldCodes.contains(fieldCode)) {
+                        cell.setCellStyle(textStyle);
+                    }
+                }
+                Cell reasonCell = dataRow.createCell(errorColumnIndex);
+                reasonCell.setCellValue(failedRow.reason());
+                reasonCell.setCellStyle(errorStyle);
+            }
+
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            workbook.write(out);
+            String base64 = Base64.getEncoder().encodeToString(out.toByteArray());
+            String fileName = ImportBizTypes.labelOf(bizType) + "失败明细-"
+                    + LocalDateTime.now().format(ERROR_FILE_TIMESTAMP_FORMATTER) + ".xlsx";
+            return new ErrorFile(base64, fileName);
+        } catch (IOException ex) {
+            throw new BusinessException("生成失败明细标注文件失败");
+        }
+    }
+
+    /**
+     * 构造错误原因单元格样式：字体颜色标红，不加粗。
+     *
+     * @param workbook 工作簿
+     * @return 错误原因单元格样式
+     */
+    private CellStyle buildErrorReasonStyle(Workbook workbook) {
+        Font errorFont = workbook.createFont();
+        errorFont.setColor(IndexedColors.RED.getIndex());
+
+        CellStyle style = workbook.createCellStyle();
+        style.setFont(errorFont);
+        return style;
+    }
+
+    /**
+     * 构造文本格式单元格样式：数据格式设为 {@code @}（Excel 文本格式），用于避免手机号、
+     * 身份证号等纯数字外观的字符串被 Excel 自动识别为数值，写法与
+     * {@code ImportTemplateServiceImpl#buildTextCellStyle} 一致。
+     *
+     * @param workbook 工作簿
+     * @return 文本格式单元格样式
+     */
+    private CellStyle buildTextCellStyle(Workbook workbook) {
+        CellStyle style = workbook.createCellStyle();
+        style.setDataFormat(workbook.createDataFormat().getFormat("@"));
+        return style;
     }
 
     /**
@@ -182,30 +294,39 @@ public class BatchImportServiceImpl implements BatchImportService {
      * @param columnFieldCodeMap 列下标到 {@code fieldCode} 的映射
      * @param dataRows           非空白数据行列表
      * @param dataFormatter      单元格文本格式化工具
-     * @return 批量导入结果
+     * @return 批量导入结果与每条失败行的原始解析数据（供生成标注版错误文件使用）
      */
-    private ImportResultVO processDataRows(String bizType, List<ImportFieldConfigVO> configs,
+    private ProcessOutcome processDataRows(String bizType, List<ImportFieldConfigVO> configs,
             Map<Integer, String> columnFieldCodeMap, List<Row> dataRows, DataFormatter dataFormatter) {
         List<ParsedRow> parsedRows = parseDataRows(columnFieldCodeMap, dataRows, dataFormatter);
 
         int successCount = 0;
         List<ImportFailItemVO> failList = new ArrayList<>();
+        List<FailedRow> failedRows = new ArrayList<>();
 
         List<ParsedRow> orderedRows = FormFieldBizType.ORG.equals(bizType)
-                ? sortOrgRowsByParentDependency(parsedRows, failList)
+                ? sortOrgRowsByParentDependency(parsedRows, failList, failedRows)
                 : parsedRows;
 
         for (ParsedRow parsedRow : orderedRows) {
+            // importRowExecutor.processRow() 会把字典列的取值从 label 原地改写成 code
+            // （见 ImportRowExecutor.resolveDictColumns()），失败时若直接把 parsedRow 存进
+            // failedRows，标注版错误文件里字典列会显示 code 而不是用户原本填写的 label，
+            // 导致修正后重新上传会在字典列上再次判定失败；这里先克隆一份原始取值用于错误
+            // 文件展示，不受 processRow() 内部原地修改的影响。
+            Map<String, String> originalValues = new LinkedHashMap<>(parsedRow.rowValues());
             try {
                 importRowExecutor.processRow(bizType, parsedRow.rowValues(), configs);
                 successCount++;
             } catch (Exception ex) {
                 String reason = StringUtils.hasText(ex.getMessage()) ? ex.getMessage() : "处理失败";
                 failList.add(ImportFailItemVO.builder().rowNo(parsedRow.rowNo()).reason(reason).build());
+                failedRows.add(new FailedRow(new ParsedRow(parsedRow.rowNo(), originalValues), reason));
             }
         }
 
-        return ImportResultVO.builder().successCount(successCount).failList(failList).build();
+        ImportResultVO result = ImportResultVO.builder().successCount(successCount).failList(failList).build();
+        return new ProcessOutcome(result, failedRows);
     }
 
     /**
@@ -244,11 +365,13 @@ public class BatchImportServiceImpl implements BatchImportService {
      * 因互相引用形成环，无法参与拓扑排序，直接组装为失败明细加入 {@code failList}，
      * 不出现在返回结果中（design.md 决策 2）。
      *
-     * @param rows     解析阶段得到的按原始文件行序排列的数据行列表
-     * @param failList 失败明细汇总列表，成环的行会被加入其中
+     * @param rows       解析阶段得到的按原始文件行序排列的数据行列表
+     * @param failList   失败明细汇总列表，成环的行会被加入其中
+     * @param failedRows 失败行原始解析数据汇总列表，成环的行会被加入其中，供生成标注版错误文件使用
      * @return 按拓扑序（父在前、子在后）排列的数据行列表，不含成环的行
      */
-    private List<ParsedRow> sortOrgRowsByParentDependency(List<ParsedRow> rows, List<ImportFailItemVO> failList) {
+    private List<ParsedRow> sortOrgRowsByParentDependency(List<ParsedRow> rows, List<ImportFailItemVO> failList,
+            List<FailedRow> failedRows) {
         Set<String> codesInBatch = new HashSet<>();
         for (ParsedRow row : rows) {
             String code = row.rowValues().get("code");
@@ -299,10 +422,9 @@ public class BatchImportServiceImpl implements BatchImportService {
             Set<ParsedRow> sortedSet = new HashSet<>(sorted);
             for (ParsedRow row : rows) {
                 if (!sortedSet.contains(row)) {
-                    failList.add(ImportFailItemVO.builder()
-                            .rowNo(row.rowNo())
-                            .reason("上级组织编码与文件内其他行形成循环引用，无法确定导入顺序")
-                            .build());
+                    String reason = "上级组织编码与文件内其他行形成循环引用，无法确定导入顺序";
+                    failList.add(ImportFailItemVO.builder().rowNo(row.rowNo()).reason(reason).build());
+                    failedRows.add(new FailedRow(row, reason));
                 }
             }
         }
@@ -319,5 +441,35 @@ public class BatchImportServiceImpl implements BatchImportService {
      * @param rowValues 本行数据，key 为 {@code fieldCode}，value 为单元格文本
      */
     private record ParsedRow(int rowNo, Map<String, String> rowValues) {
+    }
+
+    /**
+     * 一条处理失败的数据行：原始解析结果与失败原因，仅在本类内部使用，用于生成标注版
+     * 错误文件；不放进 {@link ImportResultVO}/{@link ImportFailItemVO}，避免对外暴露的
+     * API 响应结构承载整行原始数据（design.md 决策 3）。
+     *
+     * @param parsedRow 该行的原始解析结果
+     * @param reason    失败原因
+     */
+    private record FailedRow(ParsedRow parsedRow, String reason) {
+    }
+
+    /**
+     * {@link #processDataRows} 的内部返回结果：既包含对外暴露的批量导入结果，又包含仅供
+     * 生成标注版错误文件使用的失败行原始解析数据。
+     *
+     * @param result     批量导入结果
+     * @param failedRows 失败行原始解析数据与失败原因列表
+     */
+    private record ProcessOutcome(ImportResultVO result, List<FailedRow> failedRows) {
+    }
+
+    /**
+     * 标注版错误文件的生成结果：Base64 编码内容与建议文件名。
+     *
+     * @param base64   Base64 编码后的 {@code .xlsx} 文件内容
+     * @param fileName 建议文件名
+     */
+    private record ErrorFile(String base64, String fileName) {
     }
 }

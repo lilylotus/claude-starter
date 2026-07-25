@@ -7,9 +7,11 @@ import cn.nihility.rbac.formfield.constant.FormFieldControlType;
 import cn.nihility.rbac.formfield.entity.FormFieldDefinitionEntity;
 import cn.nihility.rbac.formfield.mapper.FormFieldDefinitionMapper;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -66,6 +68,43 @@ public class DictImportColumnSupport {
             }
         }
         return dictColumns;
+    }
+
+    /**
+     * 从一组导入字段配置中识别出应在导入模板里设置为 Excel 文本格式（{@code @}）的列，
+     * 用以避免手机号、身份证号等纯数字外观的字符串被 Excel 自动识别为数值导致精度丢失
+     * /科学计数法/丢失前导 0（design.md 决策 2）。判定规则：未关联表单字段定义的固定
+     * 标识列（如 {@code __userCode}/{@code __orgCode}）恒为文本格式；关联了表单字段
+     * 定义的列中，只有控件类型为 {@link FormFieldControlType#NUMBER} 的列不设文本格式，
+     * 其余控件类型（文本框、字典单选、日期、多选字典）均设为文本格式。
+     *
+     * @param configs 导入字段配置列表
+     * @return 应设为文本格式的 {@code fieldCode} 集合，按 {@code configs} 原有顺序排列
+     */
+    public Set<String> resolveTextFormatFieldCodes(List<ImportFieldConfigVO> configs) {
+        List<Long> definitionIds = configs.stream()
+                .map(ImportFieldConfigVO::getFormFieldDefinitionId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, FormFieldDefinitionEntity> definitionById = definitionIds.isEmpty()
+                ? Map.of()
+                : formFieldDefinitionMapper.selectByIds(definitionIds).stream()
+                        .collect(Collectors.toMap(FormFieldDefinitionEntity::getId, Function.identity(),
+                                (left, right) -> left));
+
+        Set<String> textFormatFieldCodes = new LinkedHashSet<>();
+        for (ImportFieldConfigVO config : configs) {
+            if (config.getFormFieldDefinitionId() == null) {
+                textFormatFieldCodes.add(config.getFieldCode());
+                continue;
+            }
+            FormFieldDefinitionEntity definition = definitionById.get(config.getFormFieldDefinitionId());
+            if (definition == null || !Objects.equals(definition.getControlType(), FormFieldControlType.NUMBER)) {
+                textFormatFieldCodes.add(config.getFieldCode());
+            }
+        }
+        return textFormatFieldCodes;
     }
 
     /**
