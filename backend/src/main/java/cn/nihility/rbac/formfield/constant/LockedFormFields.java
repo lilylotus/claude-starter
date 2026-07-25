@@ -3,9 +3,12 @@ package cn.nihility.rbac.formfield.constant;
 import java.util.Set;
 
 /**
- * 承重字段（锁定字段）白名单：组织/用户/应用各自的 {@code name}、{@code code}
- * 列当前已经拥有后端硬编码的 {@code @NotBlank} 与编码唯一性校验，属于代码层面的
- * 既定事实，不属于管理员可以在界面上调整的"元数据配置"，因此不落库到
+ * 承重字段（锁定字段）白名单：组织/用户/应用各自的 {@code name}、{@code code} 列，
+ * 以及任职（POSITION）的 {@code position_type} 列，当前已经拥有后端硬编码的
+ * {@code @NotBlank} 与业务规则校验（编码唯一性，或如 {@code position_type} 对应
+ * {@code tab_user_position.position_type} 列本身为 {@code NOT NULL} 且创建任职记录
+ * 接口已把其列为硬编码必填项），属于代码层面的既定事实，不属于管理员可以在界面上
+ * 调整的"元数据配置"，因此不落库到
  * {@code tab_metadata_field}/{@code tab_form_field_definition}，改为在此维护一份
  * {@code (bizType, columnName)} 常量白名单，绑定到这些元数据字段的表单字段定义
  * 在读取/更新时通过反查计算得出一个只读的 {@code locked} 标记，不可停用/删除，
@@ -20,7 +23,8 @@ public final class LockedFormFields {
             key(FormFieldBizType.USER, "name"),
             key(FormFieldBizType.USER, "code"),
             key(FormFieldBizType.APP, "name"),
-            key(FormFieldBizType.APP, "code"));
+            key(FormFieldBizType.APP, "code"),
+            key(FormFieldBizType.POSITION, "position_type"));
 
     /**
      * 工具类不允许实例化。

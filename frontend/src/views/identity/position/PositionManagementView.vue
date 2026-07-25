@@ -9,12 +9,10 @@ import { PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import * as positionApi from '@/api/position'
 import * as orgApi from '@/api/org'
 import * as userApi from '@/api/user'
-import * as dictApi from '@/api/dict'
 import * as excelImportApi from '@/api/excelImport'
 import BatchImportDialog from '@/components/BatchImportDialog.vue'
 import { POSITION_STATUS_ENABLED, type PositionFormRequest, type PositionRow } from '@/types/position'
 import type { OrgTreeNode } from '@/types/org'
-import type { DictItemOption } from '@/types/dict'
 import { useDynamicFormFields } from '@/composables/useDynamicFormFields'
 import {
   FORM_FIELD_CONTROL_TYPE_DATE,
@@ -27,18 +25,17 @@ import {
 const positionStore = usePositionStore()
 const router = useRouter()
 
-// 除关联组织（orgId）、关联用户（userId）、认证类型（positionType）、启停用状态（status）
-// 外的全部字段（含原有表字段与 ext1~ext10）统一按"表单字段定义"（bizType=POSITION）
-// 动态渲染，见 design.md 决策 12
+// 除关联组织（orgId）、关联用户（userId）、启停用状态（status）外的全部字段
+// （含原有表字段、认证类型 positionType 与 ext1~ext10）统一按“表单字段定义”
+// （bizType=POSITION）动态渲染，见 design.md 决策 2
 const positionFields = useDynamicFormFields('POSITION')
 
 onMounted(() => {
   // 左侧导航树在 lazy 模式下挂载时会自动对根节点调用一次 load（parentId = 0），
-  // 这里不需要主动拉取；任职类型下拉框的数据源在这里预加载。
+  // 这里不需要主动拉取。
   // 全量组织树（orgTree，供新增/编辑弹窗内“所属组织”选择器用）不在这里预加载：
   // 只有打开弹窗时才需要它，此处预加载会让绝大多数只浏览任职列表的页面访问都白白
   // 发一次 GET /api/orgs/tree（见 openCreateDialog/openEditDialog）
-  fetchPositionTypeOptions()
   positionFields.fetchSchema()
 })
 
@@ -74,18 +71,6 @@ const orgTree = ref<OrgTreeNode[]>([])
 
 async function fetchOrgTree() {
   orgTree.value = await orgApi.getOrgTree()
-}
-
-// ---- 任职类型下拉框（数据源为字典模块 position_type 字典类型下的启用项） ----
-
-const positionTypeOptions = ref<DictItemOption[]>([])
-
-async function fetchPositionTypeOptions() {
-  positionTypeOptions.value = await dictApi.getDictItemOptions('position_type')
-}
-
-function positionTypeLabel(code: string): string {
-  return positionTypeOptions.value.find((opt) => opt.code === code)?.label ?? code
 }
 
 // ---- Excel 批量导入：下载模板 / 上传批量导入 ----
@@ -136,13 +121,12 @@ const formRef = ref<FormInstance>()
 
 // 表单里的 userId/orgId 在校验通过前允许暂时为空（由用户手动选择），
 // userName 仅编辑模式下只读展示所属用户，不随表单一起提交给后端；其余字段
-// （positionAddress/positionPhone/showOrder/remark/ext1~ext10）由 positionFields
-// 动态渲染驱动，key 为各自绑定的 columnName
+// （positionType/positionAddress/positionPhone/showOrder/remark/ext1~ext10）
+// 由 positionFields 动态渲染驱动，key 为各自绑定的 columnName
 interface PositionFormStatic {
   userId: number | null
   userName: string
   orgId: number | null
-  positionType: string
 }
 
 type PositionForm = PositionFormStatic & Record<string, unknown>
@@ -151,10 +135,9 @@ const form = reactive<PositionForm>({
   userId: null,
   userName: '',
   orgId: null,
-  positionType: '',
 })
 
-// 保留 form 里指定 key（如 userId/userName/orgId/positionType），清空其余动态字段的 key，
+// 保留 form 里指定 key（如 userId/userName/orgId），清空其余动态字段的 key，
 // 供每次打开弹窗前重置
 function resetDynamicKeys(target: Record<string, unknown>, keep: string[]) {
   Object.keys(target).forEach((key) => {
@@ -165,7 +148,6 @@ function resetDynamicKeys(target: Record<string, unknown>, keep: string[]) {
 const rules = computed<FormRules>(() => ({
   userId: [{ required: true, message: '请选择所属用户', trigger: 'change' }],
   orgId: [{ required: true, message: '请选择所属组织', trigger: 'change' }],
-  positionType: [{ required: true, message: '请选择任职类型', trigger: 'change' }],
   ...(dialogMode.value === 'create' ? positionFields.createRules : positionFields.editRules),
 }))
 
@@ -177,13 +159,12 @@ async function openCreateDialog() {
   await fetchOrgTree()
   dialogMode.value = 'create'
   editingId.value = null
-  resetDynamicKeys(form, ['userId', 'userName', 'orgId', 'positionType'])
+  resetDynamicKeys(form, ['userId', 'userName', 'orgId'])
   Object.assign(form, positionFields.buildFormModel(positionFields.createFields))
   form.userId = null
   form.userName = ''
   // 所属组织默认预填为左侧当前选中的组织节点，用户仍可手动改选为其他组织
   form.orgId = positionStore.selectedOrgId
-  form.positionType = ''
   userOptions.value = []
   dialogVisible.value = true
 }
@@ -193,12 +174,11 @@ async function openEditDialog(row: PositionRow) {
   editingId.value = row.id
   const detail = await positionApi.getPositionById(row.id)
   await fetchOrgTree()
-  resetDynamicKeys(form, ['userId', 'userName', 'orgId', 'positionType'])
+  resetDynamicKeys(form, ['userId', 'userName', 'orgId'])
   Object.assign(form, positionFields.buildFormModel(positionFields.editFields, detail))
   form.userId = detail.userId
   form.userName = detail.userName
   form.orgId = detail.orgId
-  form.positionType = detail.positionType
   dialogVisible.value = true
 }
 
@@ -213,16 +193,16 @@ async function submitForm() {
 
   submitting.value = true
   try {
-    // 上面的表单校验已经确保 orgId/positionType 必填，此处已知非空；userId/userName
-    // 单独处理（userName 只读展示，不提交给后端），其余动态字段（含 MULTI_DICT）先经
+    // 上面的表单校验已经确保 orgId 必填、positionType 等动态字段的必填/正则规则（来自
+    // positionFields.createRules/editRules）；userId/userName 单独处理（userName 只读
+    // 展示，不提交给后端），其余动态字段（含 positionType、MULTI_DICT）先经
     // buildSubmitModel 把多选字典的数组值序列化成逗号分隔字符串，避免把数组直接提交
     // 给后端导致 HttpMessageNotReadableException
-    const { userId, userName: _userName, orgId, positionType, ...dynamicValues } = form
+    const { userId, userName: _userName, orgId, ...dynamicValues } = form
     const activeFields = dialogMode.value === 'create' ? positionFields.createFields : positionFields.editFields
     const payload = {
       ...positionFields.buildSubmitModel(activeFields, dynamicValues),
       orgId: orgId as number,
-      positionType,
     } as unknown as PositionFormRequest
     if (dialogMode.value === 'create') {
       // 表单校验已经确保 userId 必填，此处已知非空；编辑接口不接受 userId 字段，
@@ -315,9 +295,8 @@ async function handleDelete(row: PositionRow) {
         <el-table v-loading="positionStore.listLoading" :data="positionStore.list" empty-text="暂无任职记录">
           <el-table-column prop="userName" label="姓名" min-width="100" />
           <el-table-column prop="orgName" label="组织" min-width="120" />
-          <el-table-column label="任职类型" min-width="100">
-            <template #default="{ row }">{{ positionTypeLabel((row as PositionRow).positionType) }}</template>
-          </el-table-column>
+          <!-- 任职类型（positionType）已随 positionFields.listColumns 动态渲染（showInList=true），
+               不再单独硬编码一列，避免同一字段渲染两次，见 design.md 决策 2 -->
           <el-table-column
             v-for="col in positionFields.listColumns"
             :key="col.fieldCode"
@@ -404,11 +383,6 @@ async function handleDelete(row: PositionRow) {
             placeholder="请选择组织"
             style="width: 100%"
           />
-        </el-form-item>
-        <el-form-item label="任职类型" prop="positionType">
-          <el-select v-model="form.positionType" placeholder="请选择任职类型" style="width: 100%">
-            <el-option v-for="opt in positionTypeOptions" :key="opt.code" :label="opt.label" :value="opt.code" />
-          </el-select>
         </el-form-item>
         <el-form-item
           v-for="item in (dialogMode === 'create' ? positionFields.createFields : positionFields.editFields)"

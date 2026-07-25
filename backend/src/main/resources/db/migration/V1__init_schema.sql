@@ -619,8 +619,10 @@ CREATE TABLE IF NOT EXISTS `tab_metadata_field`
 
 -- 覆盖组织（ORG）、人员（USER）、任职（POSITION）、应用（APP）四类业务对象各自
 -- "可开放配置的原有列"与全部 ext1~ext10 扩展列。已有专用交互控件的字段（parentId、
--- orgId、userId、positionType、ownerId、status 等）不出现在此目录中，继续保持
--- 硬编码渲染；USER 的 gender 已改造为普通字典下拉字段，出现在此目录中。
+-- orgId、userId、ownerId、status 等）不出现在此目录中，继续保持硬编码渲染；
+-- USER 的 gender 已改造为普通字典下拉字段，出现在此目录中；positionType 虽然绑定了
+-- 专用的字典类型（position_type），但和其余表单字段定义一样纳入本目录、动态渲染，
+-- 并且是承重字段（见 LockedFormFields），不属于"硬编码渲染"这一类。
 
 -- ---- 组织（ORG，对应 tab_org） ----
 INSERT INTO `tab_metadata_field`
@@ -801,7 +803,7 @@ VALUES ('POSITION', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 
        ('POSITION', (SELECT `id`
                      FROM `tab_metadata_field`
                      WHERE `table_name` = 'tab_user_position'
-                       AND `column_name` = 'show_order'), '显示序号', 'showOrder', 2, NULL, 0, 1, 1, 1, 1, 1, NULL,
+                       AND `column_name` = 'show_order'), '显示序号', 'showOrder', 2, NULL, 0, 0, 1, 1, 1, 1, NULL,
         NULL, 3, 2000, 'admin', NOW(), 'admin', NOW()),
        ('POSITION', (SELECT `id`
                      FROM `tab_metadata_field`

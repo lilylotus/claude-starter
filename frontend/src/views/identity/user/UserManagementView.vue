@@ -430,7 +430,7 @@ async function handleDelete(row: UserRow) {
           <div v-else class="user-position-list">
             <div v-for="(position, index) in form.positions" :key="index" class="user-position-row">
               <div class="user-position-row__fields">
-                <el-form-item label="所属组织" label-width="90px" :prop="`positions.${index}.orgId`" :rules="positionOrgRule">
+                <el-form-item label="所属组织" label-width="auto" :prop="`positions.${index}.orgId`" :rules="positionOrgRule">
                   <el-tree-select
                     v-model="position.orgId"
                     :data="orgTree"
@@ -443,7 +443,7 @@ async function handleDelete(row: UserRow) {
                 </el-form-item>
                 <el-form-item
                   label="任职类型"
-                  label-width="90px"
+                  label-width="auto"
                   :prop="`positions.${index}.positionType`"
                   :rules="positionTypeRule"
                 >
@@ -456,16 +456,16 @@ async function handleDelete(row: UserRow) {
                     />
                   </el-select>
                 </el-form-item>
-                <el-form-item label="任职地址" label-width="76px">
+                <el-form-item label="任职地址" label-width="auto">
                   <el-input v-model="position.positionAddress" placeholder="选填" />
                 </el-form-item>
-                <el-form-item label="任职电话" label-width="76px">
+                <el-form-item label="任职电话" label-width="auto">
                   <el-input v-model="position.positionPhone" placeholder="选填" />
                 </el-form-item>
-                <el-form-item label="显示序号" label-width="76px">
+                <el-form-item label="显示序号" label-width="auto">
                   <el-input-number v-model="position.showOrder" :min="0" style="width: 100%" />
                 </el-form-item>
-                <el-form-item label="备注" label-width="76px">
+                <el-form-item label="备注" label-width="auto">
                   <el-input v-model="position.remark" placeholder="选填" />
                 </el-form-item>
                 <el-form-item
@@ -474,7 +474,7 @@ async function handleDelete(row: UserRow) {
                   )"
                   :key="item.fieldCode"
                   :label="item.fieldName"
-                  label-width="76px"
+                  label-width="auto"
                   :prop="`positions.${index}.${item.columnName}`"
                   :rules="positionDynamicFieldRules(item)"
                 >
@@ -662,6 +662,13 @@ async function handleDelete(row: UserRow) {
 .user-position-row__remove {
   margin-top: 6px;
   flex-shrink: 0;
+}
+
+// label-width="auto" 只解决"宽度不够"，不解决"内容超长时是否换行"；展示名称来自
+// 表单管理页面管理员自由填写的 fieldName，任意长度都需要禁止换行，避免与下方控件/
+// 相邻列重叠错位，见 design.md 决策 3
+.user-position-row :deep(.el-form-item__label) {
+  white-space: nowrap;
 }
 
 // 操作列相邻按钮间距收紧，比 Element Plus 默认更紧凑

@@ -6,9 +6,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import OperationHistoryPanel from '@/components/OperationHistoryPanel.vue'
 import * as positionApi from '@/api/position'
-import * as dictApi from '@/api/dict'
 import { POSITION_STATUS_ENABLED, type PositionRow } from '@/types/position'
-import type { DictItemOption } from '@/types/dict'
 import { useDynamicFormFields } from '@/composables/useDynamicFormFields'
 import {
   FORM_FIELD_CONTROL_TYPE_DICT,
@@ -36,18 +34,10 @@ function extFieldValue(item: FormFieldRenderItem): unknown {
   return (detailData.value as unknown as Record<string, unknown>)[item.columnName]
 }
 
-// ---- 任职类型下拉框选项（数据源为字典模块 position_type 字典类型下的启用项），
-// 用于把任职记录的 positionType 编码翻译为中文标签 ----
-
-const positionTypeOptions = ref<DictItemOption[]>([])
-
-async function fetchPositionTypeOptions() {
-  positionTypeOptions.value = await dictApi.getDictItemOptions('position_type')
-}
-
-function positionTypeLabel(code: string): string {
-  return positionTypeOptions.value.find((opt) => opt.code === code)?.label ?? code
-}
+// 任职类型（positionType）字典编码 → 标签展示：不再单独维护字典选项/翻译函数，改为
+// 从 positionFields.schema 中找到 positionType 对应的字段定义，复用扩展字段共用的
+// dictOptionLabel() 转换逻辑，见 design.md 决策 2
+const positionTypeField = computed(() => positionFields.schema.find((item) => item.columnName === 'positionType'))
 
 async function fetchDetail() {
   loading.value = true
@@ -63,7 +53,6 @@ async function fetchDetail() {
 
 onMounted(() => {
   fetchDetail()
-  fetchPositionTypeOptions()
   positionFields.fetchSchema()
 })
 
@@ -96,7 +85,7 @@ function goBack() {
           <el-descriptions-item label="所属用户">{{ detailData?.userName }}</el-descriptions-item>
           <el-descriptions-item label="所属组织">{{ detailData?.orgName }}</el-descriptions-item>
           <el-descriptions-item label="任职类型">
-            {{ positionTypeLabel(detailData?.positionType ?? '') }}
+            {{ (positionTypeField && positionFields.dictOptionLabel(positionTypeField, detailData?.positionType)) || detailData?.positionType || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="状态">
             <el-tag v-if="detailData?.status === POSITION_STATUS_ENABLED" type="success">启用</el-tag>

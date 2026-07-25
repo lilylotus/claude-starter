@@ -61,7 +61,8 @@ function handleSizeChange(newSize: number) {
   fetchPage()
 }
 
-// ---- "关联字段"选择器数据源：当前业务对象类型下状态为启用的表单字段定义 ----
+// ---- "关联字段"选择器数据源：当前业务对象类型下状态为启用、且尚未被其他有效导入
+// 字段配置占用的表单字段定义 ----
 // 表单字段定义列表接口不支持按状态过滤，用较大的 pageSize 取回该 bizType 下全部
 // 未删除定义后在前端过滤出启用状态的，供选择器下拉框使用
 
@@ -70,6 +71,24 @@ const availableFormFields = ref<FormFieldDefinition[]>([])
 async function fetchAvailableFormFields() {
   const result = await formFieldApi.getFormFieldPage({ bizType: activeBizType.value, pageSize: 200 })
   availableFormFields.value = result.records.filter((item) => item.status === FORM_FIELD_STATUS_ENABLED)
+}
+
+// 取回当前 bizType 下全部有效（未逻辑删除）导入字段配置已占用的表单字段定义 id 集合，
+// 供 openCreateDialog/openEditDialog 过滤"关联字段"下拉，避免同一字段被重复配置。
+// POSITION/APP/ORG 各自预置的固定标识列 formFieldDefinitionId 为 null，不占用任何
+// 表单字段定义名额，需要过滤掉；pageSize 与 fetchAvailableFormFields() 保持一致的
+// 既定假设（单个 bizType 下配置数量不超过 200 条），见 design.md 决策 4
+async function fetchOccupiedFormFieldIds(): Promise<Set<number>> {
+  const result = await importFieldConfigApi.getImportFieldConfigPage({
+    bizType: activeBizType.value,
+    page: 1,
+    pageSize: 200,
+  })
+  const occupiedIds = new Set<number>()
+  result.records.forEach((item) => {
+    if (item.formFieldDefinitionId !== null) occupiedIds.add(item.formFieldDefinitionId)
+  })
+  return occupiedIds
 }
 
 // ---- 新增/编辑弹窗 ----
@@ -113,6 +132,8 @@ const dialogTitle = computed(() => (dialogMode.value === 'create' ? '新增导�
 
 async function openCreateDialog() {
   await fetchAvailableFormFields()
+  const occupiedIds = await fetchOccupiedFormFieldIds()
+  availableFormFields.value = availableFormFields.value.filter((item) => !occupiedIds.has(item.id))
   dialogMode.value = 'create'
   editingId.value = null
   editingLocked.value = false
@@ -123,6 +144,10 @@ async function openCreateDialog() {
 async function openEditDialog(row: ImportFieldConfig) {
   if (!row.locked) {
     await fetchAvailableFormFields()
+    const occupiedIds = await fetchOccupiedFormFieldIds()
+    // 排除当前编辑配置自身占用的字段，确保选择器仍能展示并选中该配置当前关联的字段
+    if (row.formFieldDefinitionId !== null) occupiedIds.delete(row.formFieldDefinitionId)
+    availableFormFields.value = availableFormFields.value.filter((item) => !occupiedIds.has(item.id))
   }
   dialogMode.value = 'edit'
   editingId.value = row.id
