@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import java.util.List;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -36,4 +37,8 @@ public class RoleUpdateRequest {
     @Size(max = 255, message = "备注长度不能超过 255 个字符")
     @Schema(description = "备注")
     private String remark;
+
+    /** 待分配的权限点 id 列表，整体覆盖式同步：不传或空数组视为清空该角色全部权限点分配。 */
+    @Schema(description = "待分配的权限点 id 列表，整体覆盖式同步，不传或空数组视为清空全部权限点分配")
+    private List<Long> permissionIds;
 }

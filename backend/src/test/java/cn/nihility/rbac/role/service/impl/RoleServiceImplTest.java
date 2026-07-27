@@ -3,6 +3,7 @@ package cn.nihility.rbac.role.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -10,12 +11,15 @@ import static org.mockito.Mockito.when;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.permission.dto.PermissionOptionVO;
 import cn.nihility.rbac.role.constant.RoleStatus;
 import cn.nihility.rbac.role.dto.RoleCreateRequest;
 import cn.nihility.rbac.role.dto.RoleUpdateRequest;
 import cn.nihility.rbac.role.dto.RoleVO;
 import cn.nihility.rbac.role.entity.RoleEntity;
+import cn.nihility.rbac.role.entity.RolePermissionEntity;
 import cn.nihility.rbac.role.mapper.RoleMapper;
+import cn.nihility.rbac.role.mapper.RolePermissionMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
@@ -39,6 +43,10 @@ class RoleServiceImplTest {
     @Mock
     private RoleMapper roleMapper;
 
+    /** 被测服务的角色权限点关联数据访问依赖，使用 Mockito 打桩。 */
+    @Mock
+    private RolePermissionMapper rolePermissionMapper;
+
     /** 被测服务的操作日志记录组件依赖，使用 Mockito 打桩。 */
     @Mock
     private OperationLogRecorder operationLogRecorder;
@@ -52,7 +60,7 @@ class RoleServiceImplTest {
      */
     @BeforeEach
     void setUp() {
-        roleService = new RoleServiceImpl(roleMapper, operationLogRecorder);
+        roleService = new RoleServiceImpl(roleMapper, rolePermissionMapper, operationLogRecorder);
     }
 
     /**
@@ -102,6 +110,58 @@ class RoleServiceImplTest {
     }
 
     /**
+     * 创建角色时同时携带非空的权限点 id 列表，应先清空该角色既有关联再按列表批量插入
+     * （spec.md "创建角色时同时分配权限点" Scenario）。
+     */
+    @Test
+    void create_shouldSyncPermissions_whenPermissionIdsProvided() {
+        RoleEntity inserted = buildEntity(10L, RoleStatus.ENABLED);
+        when(roleMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+        when(roleMapper.selectById(any())).thenReturn(inserted);
+        doAnswer(invocation -> {
+            RoleEntity entity = invocation.getArgument(0);
+            entity.setId(10L);
+            return 1;
+        }).when(roleMapper).insert(any(RoleEntity.class));
+
+        RoleCreateRequest request = new RoleCreateRequest();
+        request.setName("测试角色");
+        request.setCode("role001");
+        request.setShowOrder(0);
+        request.setPermissionIds(List.of(1L, 2L));
+
+        roleService.create(request);
+
+        verify(rolePermissionMapper).delete(any(LambdaQueryWrapper.class));
+        ArgumentCaptor<RolePermissionEntity> captor = ArgumentCaptor.forClass(RolePermissionEntity.class);
+        verify(rolePermissionMapper, org.mockito.Mockito.times(2)).insert(captor.capture());
+        assertThat(captor.getAllValues()).extracting(RolePermissionEntity::getPermissionId)
+                .containsExactly(1L, 2L);
+        assertThat(captor.getAllValues()).allMatch(entity -> entity.getRoleId().equals(10L));
+    }
+
+    /**
+     * 创建角色时不携带权限点 id 列表，不应建立任何权限点关联
+     * （spec.md "创建角色时不携带权限点" Scenario）。
+     */
+    @Test
+    void create_shouldNotInsertPermissions_whenPermissionIdsAbsent() {
+        RoleEntity inserted = buildEntity(10L, RoleStatus.ENABLED);
+        when(roleMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+        when(roleMapper.selectById(any())).thenReturn(inserted);
+
+        RoleCreateRequest request = new RoleCreateRequest();
+        request.setName("测试角色");
+        request.setCode("role001");
+        request.setShowOrder(0);
+
+        roleService.create(request);
+
+        verify(rolePermissionMapper).delete(any(LambdaQueryWrapper.class));
+        verify(rolePermissionMapper, never()).insert(any(RolePermissionEntity.class));
+    }
+
+    /**
      * 创建角色时，若角色编码已被其他未删除角色占用，应拒绝创建。
      */
     @Test
@@ -139,6 +199,53 @@ class RoleServiceImplTest {
         assertThat(entity.getName()).isEqualTo("新名称");
         assertThat(entity.getCode()).isEqualTo("role002");
         verify(roleMapper).updateById(entity);
+    }
+
+    /**
+     * 更新角色时携带的权限点 id 列表与既有分配不同，应整体覆盖同步：先清空既有关联，
+     * 再按新列表批量插入（spec.md "更新角色时整体覆盖权限点分配" Scenario）。
+     */
+    @Test
+    void update_shouldSyncPermissions_whenPermissionIdsChanged() {
+        RoleEntity entity = buildEntity(10L, RoleStatus.ENABLED);
+        when(roleMapper.selectById(10L)).thenReturn(entity);
+        when(roleMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+
+        RoleUpdateRequest request = new RoleUpdateRequest();
+        request.setName("新名称");
+        request.setCode("role002");
+        request.setShowOrder(1);
+        request.setPermissionIds(List.of(3L));
+
+        roleService.update(10L, request);
+
+        verify(rolePermissionMapper).delete(any(LambdaQueryWrapper.class));
+        ArgumentCaptor<RolePermissionEntity> captor = ArgumentCaptor.forClass(RolePermissionEntity.class);
+        verify(rolePermissionMapper).insert(captor.capture());
+        assertThat(captor.getValue().getPermissionId()).isEqualTo(3L);
+        assertThat(captor.getValue().getRoleId()).isEqualTo(10L);
+    }
+
+    /**
+     * 更新角色时 {@code permissionIds} 为空数组，应移除该角色此前全部的权限点关联，
+     * 不再插入任何新关联（spec.md "更新角色时清空权限点分配" Scenario）。
+     */
+    @Test
+    void update_shouldClearPermissions_whenPermissionIdsEmpty() {
+        RoleEntity entity = buildEntity(10L, RoleStatus.ENABLED);
+        when(roleMapper.selectById(10L)).thenReturn(entity);
+        when(roleMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+
+        RoleUpdateRequest request = new RoleUpdateRequest();
+        request.setName("新名称");
+        request.setCode("role002");
+        request.setShowOrder(1);
+        request.setPermissionIds(List.of());
+
+        roleService.update(10L, request);
+
+        verify(rolePermissionMapper).delete(any(LambdaQueryWrapper.class));
+        verify(rolePermissionMapper, never()).insert(any(RolePermissionEntity.class));
     }
 
     /**
@@ -203,6 +310,38 @@ class RoleServiceImplTest {
         verify(roleMapper, never()).deleteById(any(Long.class));
         verify(operationLogRecorder).recordDelete(org.mockito.ArgumentMatchers.eq("role"),
                 org.mockito.ArgumentMatchers.eq(10L), any(), any(Map.class));
+    }
+
+    /**
+     * 查询角色详情时，应返回该角色已分配的权限点列表（spec.md "角色详情返回已分配权限点"
+     * Scenario）。
+     */
+    @Test
+    void getById_shouldReturnAssignedPermissions() {
+        RoleEntity entity = buildEntity(10L, RoleStatus.ENABLED);
+        when(roleMapper.selectById(10L)).thenReturn(entity);
+        PermissionOptionVO permission = PermissionOptionVO.builder().id(1L).name("查看").code("mod:res:view").build();
+        when(rolePermissionMapper.selectPermissionsByRoleId(10L)).thenReturn(List.of(permission));
+
+        RoleVO vo = roleService.getById(10L);
+
+        assertThat(vo.getPermissions()).hasSize(1);
+        assertThat(vo.getPermissions().get(0).getCode()).isEqualTo("mod:res:view");
+    }
+
+    /**
+     * 查询一个未分配任何权限点的角色详情时，权限点列表应为空数组
+     * （spec.md "角色未分配任何权限点" Scenario）。
+     */
+    @Test
+    void getById_shouldReturnEmptyPermissions_whenNoneAssigned() {
+        RoleEntity entity = buildEntity(10L, RoleStatus.ENABLED);
+        when(roleMapper.selectById(10L)).thenReturn(entity);
+        when(rolePermissionMapper.selectPermissionsByRoleId(10L)).thenReturn(List.of());
+
+        RoleVO vo = roleService.getById(10L);
+
+        assertThat(vo.getPermissions()).isEmpty();
     }
 
     /**

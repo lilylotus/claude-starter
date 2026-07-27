@@ -22,11 +22,13 @@ public interface RoleConvert {
     RoleConvert INSTANCE = Mappers.getMapper(RoleConvert.class);
 
     /**
-     * 实体转详情视图对象。
+     * 实体转详情视图对象，{@code permissions}（已分配权限点列表）由服务层查询
+     * {@code tab_role_permission} 关联后另行赋值，不参与本次转换。
      *
      * @param entity 角色实体
      * @return 详情视图对象
      */
+    @Mapping(target = "permissions", ignore = true)
     RoleVO toVO(RoleEntity entity);
 
     /**

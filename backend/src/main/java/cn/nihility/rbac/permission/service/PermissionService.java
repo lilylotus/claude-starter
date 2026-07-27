@@ -2,8 +2,10 @@ package cn.nihility.rbac.permission.service;
 
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.permission.dto.PermissionCreateRequest;
+import cn.nihility.rbac.permission.dto.PermissionOptionVO;
 import cn.nihility.rbac.permission.dto.PermissionUpdateRequest;
 import cn.nihility.rbac.permission.dto.PermissionVO;
+import java.util.List;
 
 /**
  * 权限管理业务逻辑接口，提供权限点主数据的分页查询、维护、启停用、逻辑删除能力。
@@ -66,4 +68,12 @@ public interface PermissionService {
      * @param id 权限点 id
      */
     void delete(Long id);
+
+    /**
+     * 查询全部未被逻辑删除且状态为启用的权限点精简选项列表，供角色管理等其他模块的
+     * 权限点勾选控件一次性加载全量选项使用，不分页。
+     *
+     * @return 启用状态的权限点精简选项列表，按显示序号降序、id 升序排列
+     */
+    List<PermissionOptionVO> getEnabledOptions();
 }

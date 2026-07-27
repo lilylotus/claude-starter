@@ -6,6 +6,7 @@ import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.permission.constant.PermissionStatus;
 import cn.nihility.rbac.permission.dto.PermissionCreateRequest;
+import cn.nihility.rbac.permission.dto.PermissionOptionVO;
 import cn.nihility.rbac.permission.dto.PermissionUpdateRequest;
 import cn.nihility.rbac.permission.dto.PermissionVO;
 import cn.nihility.rbac.permission.entity.PermissionEntity;
@@ -135,6 +136,18 @@ public class PermissionServiceImpl implements PermissionService {
         permissionMapper.updateById(entity);
 
         operationLogRecorder.recordDelete(OperationLogResourceType.PERMISSION, id, entity.getName(), beforeSnapshot);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public List<PermissionOptionVO> getEnabledOptions() {
+        List<PermissionEntity> entities = permissionMapper.selectList(new LambdaQueryWrapper<PermissionEntity>()
+                .eq(PermissionEntity::getStatus, PermissionStatus.ENABLED)
+                .orderByDesc(PermissionEntity::getShowOrder)
+                .orderByAsc(PermissionEntity::getId));
+        return PermissionConvert.INSTANCE.toOptionVOList(entities);
     }
 
     /**

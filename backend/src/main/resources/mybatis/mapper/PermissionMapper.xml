@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 按用户 id 查询其当前拥有的有效权限编码集合：tab_admin -> tab_admin_role -> tab_role
+     （启用状态）-> tab_role_permission -> tab_permission（启用状态），单条 JOIN 完成，
+     不做缓存（rbac-permission-authorization change design.md Decision 4）。 -->
+<mapper namespace="cn.nihility.rbac.permission.mapper.PermissionMapper">
+
+    <select id="selectGrantedPermissionCodesByUserId" resultType="java.lang.String">
+        SELECT DISTINCT p.code
+        FROM tab_admin a
+        INNER JOIN tab_admin_role ar ON ar.admin_id = a.id
+        INNER JOIN tab_role r ON r.id = ar.role_id AND r.status = 2000
+        INNER JOIN tab_role_permission rp ON rp.role_id = r.id
+        INNER JOIN tab_permission p ON p.id = rp.permission_id AND p.status = 2000
+        WHERE a.user_id = #{userId} AND a.status = 2000
+    </select>
+
+</mapper>

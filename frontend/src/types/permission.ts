@@ -35,3 +35,11 @@ export interface PageResult<T> {
   page: number
   pageSize: number
 }
+
+// 权限点精简选项，来自 GET /api/permissions/options，供角色表单的权限点勾选控件
+// 一次性加载全量可选项使用；仅含未删除且启用的权限点，字段与后端 PermissionOptionVO 对齐
+export interface PermissionOption {
+  id: number
+  name: string
+  code: string
+}

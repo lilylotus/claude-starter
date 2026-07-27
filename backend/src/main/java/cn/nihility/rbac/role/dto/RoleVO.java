@@ -1,7 +1,9 @@
 package cn.nihility.rbac.role.dto;
 
+import cn.nihility.rbac.permission.dto.PermissionOptionVO;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
+import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -58,4 +60,8 @@ public class RoleVO {
     /** 更新时间。 */
     @Schema(description = "更新时间")
     private LocalDateTime updateTime;
+
+    /** 已分配的权限点列表。 */
+    @Schema(description = "已分配的权限点列表")
+    private List<PermissionOptionVO> permissions;
 }

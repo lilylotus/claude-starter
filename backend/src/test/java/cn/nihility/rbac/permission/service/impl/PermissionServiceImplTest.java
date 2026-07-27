@@ -206,6 +206,22 @@ class PermissionServiceImplTest {
     }
 
     /**
+     * 查询启用权限点选项时，只应返回状态为启用的权限点，不包含已停用或已删除的权限点
+     * （spec.md "查询启用状态的权限点选项" Scenario，覆盖 tasks.md "只返回启用状态权限点"）。
+     */
+    @Test
+    void getEnabledOptions_shouldOnlyReturnEnabledPermissions() {
+        PermissionEntity enabled = buildEntity(10L, PermissionStatus.ENABLED);
+        when(permissionMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(enabled));
+
+        List<cn.nihility.rbac.permission.dto.PermissionOptionVO> options = permissionService.getEnabledOptions();
+
+        assertThat(options).hasSize(1);
+        assertThat(options.get(0).getId()).isEqualTo(10L);
+        assertThat(options.get(0).getCode()).isEqualTo("permission000");
+    }
+
+    /**
      * 查询一个不存在的权限点时，应抛出业务异常。
      */
     @Test

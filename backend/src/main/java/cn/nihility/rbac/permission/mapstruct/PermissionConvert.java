@@ -1,6 +1,7 @@
 package cn.nihility.rbac.permission.mapstruct;
 
 import cn.nihility.rbac.permission.dto.PermissionCreateRequest;
+import cn.nihility.rbac.permission.dto.PermissionOptionVO;
 import cn.nihility.rbac.permission.dto.PermissionUpdateRequest;
 import cn.nihility.rbac.permission.dto.PermissionVO;
 import cn.nihility.rbac.permission.entity.PermissionEntity;
@@ -63,4 +64,20 @@ public interface PermissionConvert {
     @Mapping(target = "updateBy", ignore = true)
     @Mapping(target = "updateTime", ignore = true)
     void updateEntity(PermissionUpdateRequest request, @MappingTarget PermissionEntity entity);
+
+    /**
+     * 实体转精简选项视图对象。
+     *
+     * @param entity 权限点实体
+     * @return 精简选项视图对象
+     */
+    PermissionOptionVO toOptionVO(PermissionEntity entity);
+
+    /**
+     * 实体列表批量转精简选项视图对象列表。
+     *
+     * @param entities 权限点实体列表
+     * @return 精简选项视图对象列表
+     */
+    List<PermissionOptionVO> toOptionVOList(List<PermissionEntity> entities);
 }

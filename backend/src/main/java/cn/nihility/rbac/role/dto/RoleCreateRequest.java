@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import java.util.List;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -36,4 +37,8 @@ public class RoleCreateRequest {
     @Size(max = 255, message = "备注长度不能超过 255 个字符")
     @Schema(description = "备注")
     private String remark;
+
+    /** 待分配的权限点 id 列表，可选，不传或空数组视为不授予任何权限点。 */
+    @Schema(description = "待分配的权限点 id 列表，不传或空数组视为不授予任何权限点")
+    private List<Long> permissionIds;
 }

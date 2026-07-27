@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 角色权限点关联查询：tab_role_permission 关联 tab_permission 回填权限点名称、编码。
+     用 INNER JOIN（而非 LEFT JOIN）是有意为之：权限点若已被删除，对应的关联行没有
+     展示价值，直接不返回，风格对齐 AdminRoleMapper.xml。 -->
+<mapper namespace="cn.nihility.rbac.role.mapper.RolePermissionMapper">
+
+    <select id="selectPermissionsByRoleId" resultType="cn.nihility.rbac.permission.dto.PermissionOptionVO">
+        SELECT
+        p.id AS id,
+        p.name AS name,
+        p.code AS code
+        FROM tab_role_permission rp
+        INNER JOIN tab_permission p ON p.id = rp.permission_id
+        WHERE rp.role_id = #{roleId}
+        ORDER BY p.show_order DESC, p.id ASC
+    </select>
+
+</mapper>

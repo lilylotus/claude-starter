@@ -2,6 +2,7 @@ package cn.nihility.rbac.auth.filter;
 
 import cn.nihility.rbac.auth.constant.AuthErrorCode;
 import cn.nihility.rbac.auth.context.CurrentUserContext;
+import cn.nihility.rbac.auth.service.AuthorizationService;
 import cn.nihility.rbac.auth.service.PasswordService;
 import cn.nihility.rbac.auth.service.TokenService;
 import cn.nihility.rbac.common.result.Result;
@@ -30,6 +31,15 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * 本过滤器抛出的异常不会被 {@code GlobalExceptionHandler}（{@code @RestControllerAdvice}）
  * 捕获，因为那套机制只处理 {@code DispatcherServlet} 分发到 Controller 之后抛出的异常，
  * 所以校验不通过时直接手写 HTTP 响应，而不是 {@code throw}。
+ * <p>
+ * rbac-permission-authorization change 在首登拦截通过后追加第四步真正的权限判断：
+ * 当前用户的角色权限点集合是否包含请求 {@code menu} 编码，不满足则拦截为 {@link
+ * AuthErrorCode#FORBIDDEN}。修改密码接口（{@link #FIRST_LOGIN_WHITELIST}）是不区分
+ * 权限点的自助操作——任何已登录用户都应当能修改自己的密码，该接口对应的资源编码未被
+ * 登记进权限点种子数据（不属于 权限资源.txt 里任何一个业务模块），如果对它也做权限点
+ * 匹配判断，会导致包括默认账号在内的一切用户在首次登录强制改密这一步就被自己引入的
+ * 鉴权机制卡死、永远无法完成首登流程，因此该白名单同时豁免权限判断，与豁免首登拦截
+ * 保持同一批白名单、同一个语义（"自助操作，不受角色权限点约束"）。
  */
 @RequiredArgsConstructor
 public class IdentityAuthFilter extends OncePerRequestFilter {
@@ -67,6 +77,9 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
     /** 密码业务逻辑接口，用于查询首登标识。 */
     private final PasswordService passwordService;
 
+    /** 运行时鉴权业务逻辑接口，用于判断当前用户是否有权访问请求的 {@code menu} 编码。 */
+    private final AuthorizationService authorizationService;
+
     /**
      * {@inheritDoc}
      */
@@ -102,8 +115,14 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
             request.setAttribute("userId", userId);
             CurrentUserContext.setUserId(userId);
 
-            if (!matches(FIRST_LOGIN_WHITELIST, path) && passwordService.isFirstLogin(userId)) {
+            boolean firstLoginExempt = matches(FIRST_LOGIN_WHITELIST, path);
+            if (!firstLoginExempt && passwordService.isFirstLogin(userId)) {
                 writeError(response, AuthErrorCode.FIRST_LOGIN_REQUIRED, "首次登录，请先修改密码");
+                return;
+            }
+
+            if (!firstLoginExempt && !authorizationService.hasPermission(userId, menu)) {
+                writeError(response, AuthErrorCode.FORBIDDEN, "无权限访问该资源");
                 return;
             }
 

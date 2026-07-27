@@ -16,6 +16,14 @@ public final class AuthErrorCode {
     public static final int FIRST_LOGIN_REQUIRED = 4010;
 
     /**
+     * 无权限：已登录且未处于首登待改密状态，但当前用户的角色权限点集合不包含请求的
+     * {@code menu} 编码（含用户没有启用状态的管理员身份这种情况）。与
+     * {@link #UNAUTHORIZED}（未登录/身份校验失败）、{@link #FIRST_LOGIN_REQUIRED}
+     * （首登强制改密）取值互不冲突，贴合 HTTP 403 Forbidden 的通用语义。
+     */
+    public static final int FORBIDDEN = 403;
+
+    /**
      * 工具类不允许实例化。
      */
     private AuthErrorCode() {

@@ -3,6 +3,7 @@ package cn.nihility.rbac.permission.controller;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.result.Result;
 import cn.nihility.rbac.permission.dto.PermissionCreateRequest;
+import cn.nihility.rbac.permission.dto.PermissionOptionVO;
 import cn.nihility.rbac.permission.dto.PermissionUpdateRequest;
 import cn.nihility.rbac.permission.dto.PermissionVO;
 import cn.nihility.rbac.permission.service.PermissionService;
@@ -10,6 +11,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -120,5 +122,18 @@ public class PermissionController {
     public Result<Void> delete(@PathVariable Long id) {
         permissionService.delete(id);
         return Result.success();
+    }
+
+    /**
+     * 查询全部启用状态的权限点精简选项列表，供其他模块的权限点勾选控件一次性
+     * 加载全量选项使用，不分页。
+     *
+     * @return 启用状态的权限点精简选项列表
+     */
+    @Operation(summary = "查询启用权限点选项", description = "返回全部未被逻辑删除且状态为启用的权限点列表，"
+            + "每项包含 id、name、code，按显示序号降序、id 升序排列，不分页")
+    @GetMapping("/api/permissions/options")
+    public List<PermissionOptionVO> options() {
+        return permissionService.getEnabledOptions();
     }
 }

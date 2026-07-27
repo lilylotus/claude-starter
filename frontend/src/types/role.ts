@@ -1,11 +1,13 @@
 // 角色管理相关类型定义，字段命名和后端 RoleVO / RoleCreateRequest / RoleUpdateRequest DTO 对齐。
+import type { PermissionOption } from '@/types/permission'
 
 // 状态常量：2000 = 启用，3000 = 停用（-1000 为逻辑删除，后端接口已过滤，前端不会拿到）。
 export const ROLE_STATUS_ENABLED = 2000
 export const ROLE_STATUS_DISABLED = 3000
 
 // 角色列表行/详情数据，来自 GET /api/roles、GET /api/roles/{id}、POST /api/roles、
-// PUT /api/roles/{id} 等接口的返回值
+// PUT /api/roles/{id} 等接口的返回值；permissions（已分配权限点）只有详情接口
+// （GET /api/roles/{id}）才会返回，分页列表行上该字段为 undefined
 export interface RoleRow {
   id: number
   name: string
@@ -17,14 +19,17 @@ export interface RoleRow {
   createTime: string
   updateBy: string
   updateTime: string
+  permissions?: PermissionOption[]
 }
 
-// 新增/编辑弹窗提交的请求体，字段与后端 RoleCreateRequest/RoleUpdateRequest 一致
+// 新增/编辑弹窗提交的请求体，字段与后端 RoleCreateRequest/RoleUpdateRequest 一致；
+// permissionIds 可选，不传或空数组代表不授予/清空全部权限点
 export interface RoleFormRequest {
   name: string
   code: string
   showOrder: number
   remark: string
+  permissionIds: number[]
 }
 
 // 不分页的角色选项，来自 GET /api/roles/options，供其他模块（如管理员管理）的

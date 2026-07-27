@@ -97,6 +97,14 @@ request.interceptors.response.use(
       return Promise.reject(new Error(body.message || '请先修改密码'))
     }
 
+    // 403：已登录但当前用户的角色权限点集合不包含请求的 menu 编码（IdentityAuthFilter
+    // 新增的运行时鉴权判断），不跳转、不清空登录态，只提示，走和其余未识别业务错误码
+    // 相同的兜底路径，仅把默认文案换成更贴切的说法
+    if (body.code === 403) {
+      ElMessage.error(body.message || '无权限访问')
+      return Promise.reject(new Error(body.message || '无权限访问'))
+    }
+
     ElMessage.error(body.message || '请求失败')
     return Promise.reject(new Error(body.message || '请求失败'))
   },

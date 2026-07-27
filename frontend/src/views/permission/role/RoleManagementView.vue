@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { FormInstance, FormRules } from 'element-plus'
+import type { FormInstance, FormRules, TreeInstance } from 'element-plus'
 import { useRoleStore } from '@/stores/role'
 import { PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import * as roleApi from '@/api/role'
+import * as permissionApi from '@/api/permission'
 import { ROLE_STATUS_ENABLED, type RoleFormRequest, type RoleRow } from '@/types/role'
+import type { PermissionOption } from '@/types/permission'
 
 const roleStore = useRoleStore()
 const router = useRouter()
@@ -17,6 +19,39 @@ onMounted(() => {
 
 function handlePageChange(targetPage: number) {
   roleStore.changePage(targetPage)
+}
+
+// ---- 弹窗内"权限点分配"勾选控件数据源（按需加载：只在打开新增/编辑弹窗时请求一次，
+// 页面进入、翻页、搜索角色列表都不触发） ----
+
+interface PermissionTreeNode {
+  id: string | number
+  label: string
+  children?: PermissionTreeNode[]
+}
+
+const permissionOptions = ref<PermissionOption[]>([])
+const permissionTreeRef = ref<TreeInstance>()
+
+// 按权限点编码冒号分隔的第一段（模块）分组构造两层树：第一层是分组虚拟节点（id 形如
+// "group:模块名"，不对应任何真实权限点，仅用于分组展示、全选/半选联动），第二层是
+// 具体权限点叶子节点（id 为权限点真实数字 id，label 用中文名称）
+const permissionTreeData = computed<PermissionTreeNode[]>(() => {
+  const groups = new Map<string, PermissionTreeNode>()
+  for (const option of permissionOptions.value) {
+    const moduleName = option.code.split(':')[0] || option.code
+    let group = groups.get(moduleName)
+    if (!group) {
+      group = { id: `group:${moduleName}`, label: moduleName, children: [] }
+      groups.set(moduleName, group)
+    }
+    group.children!.push({ id: option.id, label: option.name })
+  }
+  return Array.from(groups.values())
+})
+
+async function fetchPermissionOptions() {
+  permissionOptions.value = await permissionApi.getPermissionOptions()
 }
 
 // ---- 新增/编辑弹窗 ----
@@ -32,6 +67,7 @@ const form = reactive<RoleFormRequest>({
   code: '',
   showOrder: 0,
   remark: '',
+  permissionIds: [],
 })
 
 const rules: FormRules<RoleFormRequest> = {
@@ -41,25 +77,33 @@ const rules: FormRules<RoleFormRequest> = {
 
 const dialogTitle = computed(() => (dialogMode.value === 'create' ? '新增角色' : '编辑角色'))
 
-function openCreateDialog() {
+async function openCreateDialog() {
   dialogMode.value = 'create'
   editingId.value = null
   form.name = ''
   form.code = ''
   form.showOrder = 0
   form.remark = ''
+  form.permissionIds = []
+  await fetchPermissionOptions()
   dialogVisible.value = true
+  await nextTick()
+  permissionTreeRef.value?.setCheckedKeys([])
 }
 
 async function openEditDialog(row: RoleRow) {
   dialogMode.value = 'edit'
   editingId.value = row.id
   const detail = await roleApi.getRoleById(row.id)
+  await fetchPermissionOptions()
   form.name = detail.name
   form.code = detail.code
   form.showOrder = detail.showOrder
   form.remark = detail.remark
+  form.permissionIds = (detail.permissions ?? []).map((permission) => permission.id)
   dialogVisible.value = true
+  await nextTick()
+  permissionTreeRef.value?.setCheckedKeys(form.permissionIds)
 }
 
 function closeDialog() {
@@ -73,11 +117,17 @@ async function submitForm() {
 
   submitting.value = true
   try {
+    // el-tree 的分组虚拟节点 id 是字符串（"group:模块名"），只有叶子节点（真实权限点）
+    // 的 id 是数字，getCheckedKeys() 默认不返回半选中的分组节点，这里再按类型过滤一层
+    // 保险，确保绝不会把分组虚拟节点当作权限点 id 提交给后端
+    const checkedKeys = permissionTreeRef.value?.getCheckedKeys() ?? []
+    const permissionIds = checkedKeys.filter((key): key is number => typeof key === 'number')
     const payload: RoleFormRequest = {
       name: form.name,
       code: form.code,
       showOrder: form.showOrder,
       remark: form.remark,
+      permissionIds,
     }
     if (dialogMode.value === 'create') {
       await roleApi.createRole(payload)
@@ -172,7 +222,7 @@ async function handleDelete(row: RoleRow) {
       />
     </section>
 
-    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="560px" @close="closeDialog">
+    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="640px" @close="closeDialog">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
         <el-form-item label="角色名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入角色名称" />
@@ -186,6 +236,18 @@ async function handleDelete(row: RoleRow) {
         </el-form-item>
         <el-form-item label="备注" prop="remark">
           <el-input v-model="form.remark" type="textarea" :rows="3" placeholder="选填" />
+        </el-form-item>
+        <el-form-item label="权限点">
+          <el-tree
+            ref="permissionTreeRef"
+            class="role-permission-tree"
+            :data="permissionTreeData"
+            show-checkbox
+            node-key="id"
+            :props="{ label: 'label', children: 'children' }"
+            default-expand-all
+            empty-text="暂无可分配的权限点"
+          />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -228,6 +290,16 @@ async function handleDelete(row: RoleRow) {
   font-size: 12px;
   color: var(--color-text-tertiary);
   margin-top: 4px;
+}
+
+// 权限点数量可达上百条，树形勾选控件限定高度并允许内部滚动，避免撑爆弹窗
+.role-permission-tree {
+  width: 100%;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 4px;
 }
 
 // 操作列（详情/编辑/启用停用/删除）相邻按钮间距收紧，比 Element Plus 默认更紧凑

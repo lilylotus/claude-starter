@@ -4,13 +4,16 @@ import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.permission.dto.PermissionOptionVO;
 import cn.nihility.rbac.role.constant.RoleStatus;
 import cn.nihility.rbac.role.dto.RoleCreateRequest;
 import cn.nihility.rbac.role.dto.RoleOptionVO;
 import cn.nihility.rbac.role.dto.RoleUpdateRequest;
 import cn.nihility.rbac.role.dto.RoleVO;
 import cn.nihility.rbac.role.entity.RoleEntity;
+import cn.nihility.rbac.role.entity.RolePermissionEntity;
 import cn.nihility.rbac.role.mapper.RoleMapper;
+import cn.nihility.rbac.role.mapper.RolePermissionMapper;
 import cn.nihility.rbac.role.mapstruct.RoleConvert;
 import cn.nihility.rbac.role.service.RoleService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -20,11 +23,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 /**
- * 角色管理业务逻辑实现。
+ * 角色管理业务逻辑实现。角色权限点关联（{@code tab_role_permission}）在每次创建/更新时
+ * 采用"先删后插"的整体同步策略，不做按行 diff，风格对齐 {@code AdminServiceImpl#syncRoles}。
  */
 @Service
 @RequiredArgsConstructor
@@ -35,6 +40,9 @@ public class RoleServiceImpl implements RoleService {
 
     /** 角色数据访问接口。 */
     private final RoleMapper roleMapper;
+
+    /** 角色权限点关联数据访问接口。 */
+    private final RolePermissionMapper rolePermissionMapper;
 
     /** 操作日志记录组件。 */
     private final OperationLogRecorder operationLogRecorder;
@@ -61,7 +69,9 @@ public class RoleServiceImpl implements RoleService {
     @Override
     public RoleVO getById(Long id) {
         RoleEntity entity = getExistingEntity(id);
-        return RoleConvert.INSTANCE.toVO(entity);
+        RoleVO vo = RoleConvert.INSTANCE.toVO(entity);
+        vo.setPermissions(rolePermissionMapper.selectPermissionsByRoleId(id));
+        return vo;
     }
 
     /**
@@ -79,6 +89,8 @@ public class RoleServiceImpl implements RoleService {
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(now);
         roleMapper.insert(entity);
+
+        syncPermissions(entity.getId(), request.getPermissionIds());
 
         operationLogRecorder.recordCreate(OperationLogResourceType.ROLE, entity.getId(), entity.getName(),
                 toLogSnapshot(entity));
@@ -99,6 +111,8 @@ public class RoleServiceImpl implements RoleService {
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(LocalDateTime.now());
         roleMapper.updateById(entity);
+
+        syncPermissions(id, request.getPermissionIds());
 
         operationLogRecorder.recordUpdate(OperationLogResourceType.ROLE, id, entity.getName(),
                 beforeSnapshot, toLogSnapshot(entity));
@@ -205,19 +219,66 @@ public class RoleServiceImpl implements RoleService {
     }
 
     /**
-     * 构造角色实体的操作日志字段快照，key 为中文字段名，value 为人类可读的格式化值。
+     * 把请求中的权限点 id 列表与角色当前的权限点关联做整体同步：先物理删除该角色名下
+     * 全部既有权限点关联行，再按请求列表整批插入，不做按行 diff，风格对齐
+     * {@code AdminServiceImpl#syncRoles}。
+     *
+     * @param roleId        角色 id
+     * @param permissionIds 请求中的权限点 id 列表，可为空（视为清空全部既有权限点关联）
+     */
+    private void syncPermissions(Long roleId, List<Long> permissionIds) {
+        rolePermissionMapper.delete(
+                new LambdaQueryWrapper<RolePermissionEntity>().eq(RolePermissionEntity::getRoleId, roleId));
+
+        if (permissionIds == null || permissionIds.isEmpty()) {
+            return;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        for (Long permissionId : permissionIds) {
+            RolePermissionEntity entity = RolePermissionEntity.builder()
+                    .roleId(roleId)
+                    .permissionId(permissionId)
+                    .createBy(DEFAULT_OPERATOR)
+                    .createTime(now)
+                    .updateBy(DEFAULT_OPERATOR)
+                    .updateTime(now)
+                    .build();
+            rolePermissionMapper.insert(entity);
+        }
+    }
+
+    /**
+     * 构造角色实体的操作日志字段快照，key 为中文字段名，value 为人类可读的格式化值；
+     * 已分配权限点按 {@code roleId} 查询当前关联行，汇总成一个可读字符串字段，不逐行 diff。
      *
      * @param entity 角色实体
      * @return 操作日志字段快照
      */
     private Map<String, Object> toLogSnapshot(RoleEntity entity) {
+        List<PermissionOptionVO> permissions = rolePermissionMapper.selectPermissionsByRoleId(entity.getId());
+
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("角色名称", entity.getName());
         snapshot.put("角色编码", entity.getCode());
         snapshot.put("显示序号", entity.getShowOrder());
         snapshot.put("备注", entity.getRemark());
         snapshot.put("状态", statusLabel(entity.getStatus()));
+        snapshot.put("已分配权限点", joinPermissionNames(permissions));
         return snapshot;
+    }
+
+    /**
+     * 把已分配权限点列表汇总成一个以顿号分隔的可读字符串。
+     *
+     * @param permissions 已分配权限点列表
+     * @return 汇总字符串，列表为空时返回 {@code null}
+     */
+    private String joinPermissionNames(List<PermissionOptionVO> permissions) {
+        if (permissions == null || permissions.isEmpty()) {
+            return null;
+        }
+        return permissions.stream().map(PermissionOptionVO::getName).collect(Collectors.joining("、"));
     }
 
     /**

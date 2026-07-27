@@ -17,6 +17,22 @@ const loading = ref(false)
 const loadError = ref('')
 const detailData = ref<RoleRow | null>(null)
 
+// 已分配权限点按编码冒号分隔的第一段（模块）分组，只读展示，不提供勾选交互，
+// 分组逻辑与 RoleManagementView.vue 新增/编辑弹窗内的权限点树保持一致
+const groupedPermissions = computed(() => {
+  const groups = new Map<string, { moduleName: string; items: { id: number; name: string }[] }>()
+  for (const permission of detailData.value?.permissions ?? []) {
+    const moduleName = permission.code.split(':')[0] || permission.code
+    let group = groups.get(moduleName)
+    if (!group) {
+      group = { moduleName, items: [] }
+      groups.set(moduleName, group)
+    }
+    group.items.push({ id: permission.id, name: permission.name })
+  }
+  return Array.from(groups.values())
+})
+
 async function fetchDetail() {
   loading.value = true
   loadError.value = ''
@@ -73,6 +89,21 @@ function goBack() {
       </section>
 
       <section class="role-detail__panel">
+        <h3 class="role-detail__subtitle">已分配权限点</h3>
+        <p v-if="groupedPermissions.length === 0" class="role-detail__empty">暂未分配任何权限点</p>
+        <div v-else class="role-permission-groups">
+          <div v-for="group in groupedPermissions" :key="group.moduleName" class="role-permission-group">
+            <span class="role-permission-group__name">{{ group.moduleName }}</span>
+            <div class="role-permission-group__tags">
+              <el-tag v-for="item in group.items" :key="item.id" class="role-permission-tag">
+                {{ item.name }}
+              </el-tag>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="role-detail__panel">
         <OperationHistoryPanel resource-type="role" :target-id="detailData?.id ?? null" />
       </section>
     </template>
@@ -112,5 +143,67 @@ function goBack() {
   border-radius: var(--radius-md);
   padding: 20px;
   box-shadow: var(--shadow-sm);
+}
+
+.role-detail__subtitle {
+  font-size: 14px;
+  color: var(--color-ink);
+  margin: 0 0 12px;
+}
+
+.role-detail__empty {
+  font-size: 13px;
+  color: var(--color-text-tertiary);
+  margin: 0;
+}
+
+// 按模块分组的权限点列表，用一条虚线 + 圆点串起各模块分组，呼应组织范围/角色多选等
+// 子表单一致的"链式连接"视觉语言
+.role-permission-groups {
+  position: relative;
+  padding-left: 16px;
+  border-left: 1px dashed var(--chain-line-color);
+}
+
+.role-permission-group {
+  position: relative;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px dashed var(--color-border);
+}
+
+.role-permission-group:last-child {
+  padding-bottom: 0;
+  margin-bottom: 0;
+  border-bottom: none;
+}
+
+.role-permission-group::before {
+  content: '';
+  position: absolute;
+  left: -20px;
+  top: 6px;
+  width: var(--chain-dot-size-sm);
+  height: var(--chain-dot-size-sm);
+  border-radius: 50%;
+  background: var(--chain-line-color-active);
+}
+
+.role-permission-group__name {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-ink);
+  margin-bottom: 8px;
+}
+
+.role-permission-group__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.role-permission-tag {
+  margin: 0;
 }
 </style>
