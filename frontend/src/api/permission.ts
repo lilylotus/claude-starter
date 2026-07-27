@@ -14,6 +14,13 @@ export function getPermissionOptions(): Promise<PermissionOption[]> {
   return request.get('/permissions/options')
 }
 
+// 获取不分页的权限点完整字段全量列表（未逻辑删除，含停用状态），供权限点管理页面的
+// 树形展示一次性加载全量数据使用；按 showOrder 升序、id 升序排列（显示序号越小越靠前，
+// 与 getPermissionPage/getPermissionOptions 的降序约定相反，是本接口特意选用的顺序）
+export function getPermissionList(): Promise<PermissionRow[]> {
+  return request.get('/permissions/list')
+}
+
 // 获取权限点详情，用于编辑表单回填与只读详情弹窗
 export function getPermissionById(id: number): Promise<PermissionRow> {
   return request.get(`/permissions/${id}`)

@@ -2,24 +2,68 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { FormInstance, FormRules } from 'element-plus'
+import type { FormInstance, FormRules, TreeInstance } from 'element-plus'
+import type Node from 'element-plus/es/components/tree/src/model/node'
 import { usePermissionStore } from '@/stores/permission'
-import { PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import * as permissionApi from '@/api/permission'
 import { PERMISSION_STATUS_ENABLED, type PermissionFormRequest, type PermissionRow } from '@/types/permission'
+import { buildPermissionTree, resolvePermissionModuleLabel, type PermissionTreeNode } from '@/utils/permissionTree'
 
 const permissionStore = usePermissionStore()
 const router = useRouter()
 
-onMounted(() => {
-  permissionStore.fetchPage()
-})
+// ---- 按模块分组的两层虚拟树（分组算法复用 src/utils/permissionTree.ts，与角色管理
+// 弹窗内的权限点勾选树共用同一份实现，分组节点的中文模块名解析同样复用共享的
+// resolvePermissionModuleLabel）。后端 GET /api/permissions/list 已按 showOrder
+// 升序、id 升序排好序，buildPermissionTree 只负责分组、保留原始顺序，不重新排序 ----
+const permissionTreeData = computed<PermissionTreeNode<PermissionRow>[]>(() =>
+  buildPermissionTree(permissionStore.list, resolvePermissionModuleLabel),
+)
 
-function handlePageChange(targetPage: number) {
-  permissionStore.changePage(targetPage)
+const treeRef = ref<TreeInstance>()
+const treeProps = { label: 'label', children: 'children' }
+
+// 当前展开的节点 key 集合：仅在用户手动展开/收起、或点击"全部展开/全部收起"时变化；
+// 增/改/启停用/删除触发的数据刷新不会重置这个集合，从而满足"已展开的分组节点保持
+// 展开状态不被折叠"的交互要求——树在数据刷新时会按这个集合重新展开匹配的节点。页面
+// 打开时默认全部收起，不做首次自动展开
+const expandedKeys = ref<Array<string | number>>([])
+
+async function loadInitialData() {
+  await permissionStore.loadList()
 }
 
-// ---- 新增/编辑弹窗 ----
+onMounted(loadInitialData)
+
+function handleNodeExpand(_data: unknown, node: Node) {
+  const key = node.data.id as string | number
+  if (!expandedKeys.value.includes(key)) expandedKeys.value.push(key)
+}
+
+function handleNodeCollapse(_data: unknown, node: Node) {
+  const key = node.data.id as string | number
+  const index = expandedKeys.value.indexOf(key)
+  if (index !== -1) expandedKeys.value.splice(index, 1)
+}
+
+function expandAll() {
+  expandedKeys.value = permissionTreeData.value.map((group) => group.id)
+}
+
+function collapseAll() {
+  for (const key of expandedKeys.value) {
+    treeRef.value?.getNode(key)?.collapse()
+  }
+  expandedKeys.value = []
+}
+
+// el-tree 默认插槽的 data 参数类型是宽松的 TreeNodeData（Record<string, any>），这里
+// 收窄回 buildPermissionTree 实际产出的类型，避免模板里到处写内联类型断言
+function asTreeNode(data: unknown): PermissionTreeNode<PermissionRow> {
+  return data as PermissionTreeNode<PermissionRow>
+}
+
+// ---- 新增/编辑弹窗（表单字段与原实现一致，不改动） ----
 
 const dialogVisible = ref(false)
 const dialogMode = ref<'create' | 'edit'>('create')
@@ -129,47 +173,53 @@ async function handleDelete(row: PermissionRow) {
     <section class="permission-panel">
       <header class="permission-panel__header">
         <h2 class="permission-panel__title">权限管理</h2>
-        <el-button type="primary" @click="openCreateDialog">新增</el-button>
+        <div class="permission-panel__actions">
+          <el-button @click="expandAll">全部展开</el-button>
+          <el-button @click="collapseAll">全部收起</el-button>
+          <el-button type="primary" @click="openCreateDialog">新增</el-button>
+        </div>
       </header>
 
-      <el-table v-loading="permissionStore.listLoading" :data="permissionStore.list" empty-text="暂无权限">
-        <el-table-column prop="name" label="权限名称" min-width="140" />
-        <el-table-column prop="code" label="权限编码" min-width="140" />
-        <el-table-column prop="remark" label="备注" min-width="160" />
-        <el-table-column label="状态" width="90">
-          <template #default="{ row }">
-            <el-tag v-if="(row as PermissionRow).status === PERMISSION_STATUS_ENABLED" type="success">启用</el-tag>
-            <el-tag v-else type="warning">停用</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="showOrder" label="显示序号" width="90" />
-        <el-table-column label="操作" width="240" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="goToDetail(row as PermissionRow)">详情</el-button>
-            <el-button link type="primary" @click="openEditDialog(row as PermissionRow)">编辑</el-button>
-            <el-button
-              link
-              :type="(row as PermissionRow).status === PERMISSION_STATUS_ENABLED ? 'warning' : 'success'"
-              @click="toggleStatus(row as PermissionRow)"
-            >
-              {{ (row as PermissionRow).status === PERMISSION_STATUS_ENABLED ? '停用' : '启用' }}
-            </el-button>
-            <el-button link type="danger" @click="handleDelete(row as PermissionRow)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <el-pagination
-        class="permission-pagination"
-        background
-        layout="sizes, prev, pager, next, total"
-        :page-sizes="[...PAGE_SIZE_OPTIONS]"
-        :current-page="permissionStore.page"
-        :page-size="permissionStore.pageSize"
-        :total="permissionStore.total"
-        @current-change="handlePageChange"
-        @size-change="permissionStore.changePageSize"
-      />
+      <el-tree
+        ref="treeRef"
+        v-loading="permissionStore.listLoading"
+        class="permission-tree"
+        :data="permissionTreeData"
+        :props="treeProps"
+        node-key="id"
+        :default-expanded-keys="expandedKeys"
+        :expand-on-click-node="false"
+        empty-text="暂无权限点"
+        @node-expand="handleNodeExpand"
+        @node-collapse="handleNodeCollapse"
+      >
+        <template #default="{ node, data }">
+          <div v-if="asTreeNode(data).raw" class="permission-tree__leaf">
+            <span class="permission-tree__leaf-name">{{ asTreeNode(data).raw!.name }}</span>
+            <span class="permission-tree__leaf-code">{{ asTreeNode(data).raw!.code }}</span>
+            <el-tag v-if="asTreeNode(data).raw!.status === PERMISSION_STATUS_ENABLED" type="success" size="small">
+              启用
+            </el-tag>
+            <el-tag v-else type="warning" size="small">停用</el-tag>
+            <span class="permission-tree__leaf-actions">
+              <el-button link type="primary" @click.stop="goToDetail(asTreeNode(data).raw!)">详情</el-button>
+              <el-button link type="primary" @click.stop="openEditDialog(asTreeNode(data).raw!)">编辑</el-button>
+              <el-button
+                link
+                :type="asTreeNode(data).raw!.status === PERMISSION_STATUS_ENABLED ? 'warning' : 'success'"
+                @click.stop="toggleStatus(asTreeNode(data).raw!)"
+              >
+                {{ asTreeNode(data).raw!.status === PERMISSION_STATUS_ENABLED ? '停用' : '启用' }}
+              </el-button>
+              <el-button link type="danger" @click.stop="handleDelete(asTreeNode(data).raw!)">删除</el-button>
+            </span>
+          </div>
+          <div v-else class="permission-tree__group">
+            <span class="permission-tree__group-name">{{ node.label }}</span>
+            <el-tag size="small" round>{{ asTreeNode(data).count ?? 0 }}</el-tag>
+          </div>
+        </template>
+      </el-tree>
     </section>
 
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="560px" @close="closeDialog">
@@ -193,7 +243,6 @@ async function handleDelete(row: PermissionRow) {
         <el-button type="primary" :loading="submitting" @click="submitForm">确定</el-button>
       </template>
     </el-dialog>
-
   </div>
 </template>
 
@@ -219,10 +268,9 @@ async function handleDelete(row: PermissionRow) {
   margin: 0;
 }
 
-.permission-pagination {
+.permission-panel__actions {
   display: flex;
-  justify-content: flex-end;
-  margin-top: 16px;
+  gap: 8px;
 }
 
 .permission-form-hint {
@@ -231,8 +279,75 @@ async function handleDelete(row: PermissionRow) {
   margin-top: 4px;
 }
 
-// 操作列（详情/编辑/启用停用/删除）相邻按钮间距收紧，比 Element Plus 默认更紧凑
-:deep(.el-table .el-button + .el-button) {
+.permission-tree__group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.permission-tree__group-name {
+  color: var(--color-ink);
+  font-weight: 500;
+}
+
+.permission-tree__leaf {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.permission-tree__leaf-name {
+  color: var(--color-ink);
+}
+
+.permission-tree__leaf-code {
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+}
+
+.permission-tree__leaf-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+}
+
+.permission-tree__leaf-actions :deep(.el-button + .el-button) {
   margin-left: 6px;
+}
+
+// 用一条虚线 + 圆点把父子层级“连”起来，呼应侧边栏子菜单、菜单管理树的链式视觉语言
+.permission-tree :deep(.el-tree-node__children) {
+  position: relative;
+  margin-left: 4px;
+  padding-left: 6px;
+  border-left: 1px dashed var(--chain-line-color);
+}
+
+.permission-tree :deep(.el-tree-node__children > .el-tree-node) {
+  position: relative;
+}
+
+.permission-tree :deep(.el-tree-node__children > .el-tree-node::before) {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 14px;
+  width: var(--chain-dot-size-sm);
+  height: var(--chain-dot-size-sm);
+  border-radius: 50%;
+  background: var(--chain-line-color);
+}
+
+.permission-tree :deep(.el-tree-node.is-current > .el-tree-node__children::before),
+.permission-tree :deep(.el-tree-node.is-current::before) {
+  background: var(--chain-line-color-active);
+}
+
+.permission-tree :deep(.el-tree-node__content) {
+  height: auto;
+  min-height: 36px;
+  padding: 4px 0;
 }
 </style>

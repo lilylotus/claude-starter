@@ -136,4 +136,18 @@ public class PermissionController {
     public List<PermissionOptionVO> options() {
         return permissionService.getEnabledOptions();
     }
+
+    /**
+     * 查询全部未被逻辑删除的权限点完整信息列表，供权限管理树形视图一次性加载全量
+     * 数据使用，不供角色勾选等只读选项场景复用。
+     *
+     * @return 权限点完整信息列表，按显示序号升序、id 升序排列
+     */
+    @Operation(summary = "查询权限点全量列表", description = "返回全部未被逻辑删除的权限点完整信息（不按状态筛选，启用、停用的均返回），"
+            + "按显示序号升序、id 升序排列，显示序号越小越靠前，不分页；供权限管理树形视图一次性加载全量数据使用，"
+            + "不供角色勾选等只读选项场景复用（后者请使用 /api/permissions/options）")
+    @GetMapping("/api/permissions/list")
+    public List<PermissionVO> list() {
+        return permissionService.getAllList();
+    }
 }

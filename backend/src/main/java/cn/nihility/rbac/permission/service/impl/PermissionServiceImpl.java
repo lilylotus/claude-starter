@@ -151,6 +151,18 @@ public class PermissionServiceImpl implements PermissionService {
     }
 
     /**
+     * {@inheritDoc}
+     */
+    @Override
+    public List<PermissionVO> getAllList() {
+        List<PermissionEntity> entities = permissionMapper.selectList(new LambdaQueryWrapper<PermissionEntity>()
+                .ne(PermissionEntity::getStatus, PermissionStatus.DELETED)
+                .orderByAsc(PermissionEntity::getShowOrder)
+                .orderByAsc(PermissionEntity::getId));
+        return PermissionConvert.INSTANCE.toVOList(entities);
+    }
+
+    /**
      * 变更权限点状态（启用/停用）并返回更新后的详情。
      *
      * @param id     权限点 id

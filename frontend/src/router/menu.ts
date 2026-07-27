@@ -8,9 +8,9 @@ export const MENU_GROUPS: MenuGroup[] = [
     title: '身份管理',
     icon: UserFilled,
     children: [
-      { title: '组织管理', path: '/identity/orgs', permissionKey: 'identity:org:view' },
-      { title: '用户管理', path: '/identity/users', permissionKey: 'identity:user:view' },
-      { title: '任职管理', path: '/identity/positions', permissionKey: 'identity:position:view' },
+      { title: '组织管理', path: '/identity/orgs', permissionKey: 'OrgManagement:org:view' },
+      { title: '用户管理', path: '/identity/users', permissionKey: 'UserManagement:user:view' },
+      { title: '任职管理', path: '/identity/positions', permissionKey: 'PositionManagement:position:view' },
     ],
   },
   {
@@ -18,8 +18,8 @@ export const MENU_GROUPS: MenuGroup[] = [
     title: '应用管理',
     icon: Grid,
     children: [
-      { title: '应用管理', path: '/application/list', permissionKey: 'application:app:view' },
-      { title: '应用密钥', path: '/application/secret', permissionKey: 'application:secret:view' },
+      { title: '应用管理', path: '/application/list', permissionKey: 'AppManagement:app:view' },
+      { title: '应用密钥', path: '/application/secret', permissionKey: 'AppManagement:secret:view' },
     ],
   },
   {
@@ -27,9 +27,9 @@ export const MENU_GROUPS: MenuGroup[] = [
     title: '权限管理',
     icon: Lock,
     children: [
-      { title: '角色管理', path: '/permission/roles', permissionKey: 'permission:role:view' },
-      { title: '权限点管理', path: '/permission/points', permissionKey: 'permission:point:view' },
-      { title: '管理员管理', path: '/permission/admins', permissionKey: 'permission:admin:view' },
+      { title: '角色管理', path: '/permission/roles', permissionKey: 'RoleManagement:role:view' },
+      { title: '权限点管理', path: '/permission/points', permissionKey: 'PermissionManagement:permission:view' },
+      { title: '管理员管理', path: '/permission/admins', permissionKey: 'AdminManagement:admin:view' },
     ],
   },
   {
@@ -37,11 +37,11 @@ export const MENU_GROUPS: MenuGroup[] = [
     title: '系统管理',
     icon: Setting,
     children: [
-      { title: '菜单管理', path: '/system/menus', permissionKey: 'system:menu:view' },
-      { title: '字典管理', path: '/system/dicts', permissionKey: 'system:dict:view' },
-      { title: '元数据配置', path: '/system/metadata-fields', permissionKey: 'system:metadataField:view' },
-      { title: '表单管理', path: '/system/form-fields', permissionKey: 'system:formField:view' },
-      { title: '操作日志', path: '/system/logs', permissionKey: 'system:log:view' },
+      { title: '菜单管理', path: '/system/menus', permissionKey: 'MenuManagement:menu:view' },
+      { title: '字典管理', path: '/system/dicts', permissionKey: 'DictManagement:dictType:view' },
+      { title: '元数据配置', path: '/system/metadata-fields', permissionKey: 'MetadataFieldManagement:metadataField:view' },
+      { title: '表单管理', path: '/system/form-fields', permissionKey: 'FormFieldManagement:formField:view' },
+      { title: '操作日志', path: '/system/logs', permissionKey: 'OperationLogManagement:log:view' },
     ],
   },
 ]

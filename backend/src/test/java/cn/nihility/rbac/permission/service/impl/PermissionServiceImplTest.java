@@ -17,10 +17,14 @@ import cn.nihility.rbac.permission.dto.PermissionVO;
 import cn.nihility.rbac.permission.entity.PermissionEntity;
 import cn.nihility.rbac.permission.mapper.PermissionMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.apache.ibatis.session.Configuration;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -45,6 +49,19 @@ class PermissionServiceImplTest {
 
     /** 被测服务实例。 */
     private PermissionServiceImpl permissionService;
+
+    /**
+     * MyBatis-Plus 的 {@code LambdaQueryWrapper} 需要先有实体的 {@code TableInfo} 缓存才能在
+     * 脱离 Spring 容器的纯单元测试里调用 {@code getSqlSegment()} 做排序/条件断言（正常启动时该
+     * 缓存由 Spring Boot 扫描 Mapper 时自动建立），这里手动触发一次初始化，仅供本测试类使用。
+     */
+    @BeforeAll
+    static void primeLambdaColumnCache() {
+        Configuration configuration = new Configuration();
+        MapperBuilderAssistant assistant = new MapperBuilderAssistant(configuration, "permissionServiceImplTest");
+        assistant.setCurrentNamespace(PermissionEntity.class.getName());
+        TableInfoHelper.initTableInfo(assistant, PermissionEntity.class);
+    }
 
     /**
      * 每个用例执行前重新构造被测服务；实体/DTO 转换通过 {@code PermissionConvert.INSTANCE}
@@ -219,6 +236,55 @@ class PermissionServiceImplTest {
         assertThat(options).hasSize(1);
         assertThat(options.get(0).getId()).isEqualTo(10L);
         assertThat(options.get(0).getCode()).isEqualTo("permission000");
+    }
+
+    /**
+     * 查询权限点全量列表时，应包含停用状态的权限点（不按状态筛选）
+     * （spec.md "全量列表包含停用状态的权限点" Scenario）。
+     */
+    @Test
+    void getAllList_shouldIncludeDisabledPermissions() {
+        PermissionEntity disabled = buildEntity(20L, PermissionStatus.DISABLED);
+        when(permissionMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(disabled));
+
+        List<PermissionVO> result = permissionService.getAllList();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getId()).isEqualTo(20L);
+        assertThat(result.get(0).getStatus()).isEqualTo(PermissionStatus.DISABLED);
+    }
+
+    /**
+     * 查询权限点全量列表时，查询条件应排除已逻辑删除的权限点
+     * （spec.md "已逻辑删除的权限点不出现在全量列表中" Scenario）。
+     */
+    @Test
+    void getAllList_shouldExcludeDeletedPermissions() {
+        PermissionEntity enabled = buildEntity(10L, PermissionStatus.ENABLED);
+        when(permissionMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(enabled));
+
+        List<PermissionVO> result = permissionService.getAllList();
+
+        ArgumentCaptor<LambdaQueryWrapper<PermissionEntity>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(permissionMapper).selectList(captor.capture());
+        assertThat(captor.getValue().getSqlSegment()).contains("status <>");
+        assertThat(result).extracting(PermissionVO::getStatus).doesNotContain(PermissionStatus.DELETED);
+    }
+
+    /**
+     * 查询权限点全量列表时，应按显示序号升序排列（序号小的排前面），与本模块其余
+     * 接口的降序约定相反（spec.md "查询权限点全量列表" Scenario）。
+     */
+    @Test
+    void getAllList_shouldOrderByShowOrderAscending() {
+        PermissionEntity entity = buildEntity(10L, PermissionStatus.ENABLED);
+        when(permissionMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(entity));
+
+        permissionService.getAllList();
+
+        ArgumentCaptor<LambdaQueryWrapper<PermissionEntity>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(permissionMapper).selectList(captor.capture());
+        assertThat(captor.getValue().getSqlSegment()).contains("ORDER BY showOrder ASC,id ASC");
     }
 
     /**

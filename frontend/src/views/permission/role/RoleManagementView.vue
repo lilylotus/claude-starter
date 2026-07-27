@@ -9,6 +9,7 @@ import * as roleApi from '@/api/role'
 import * as permissionApi from '@/api/permission'
 import { ROLE_STATUS_ENABLED, type RoleFormRequest, type RoleRow } from '@/types/role'
 import type { PermissionOption } from '@/types/permission'
+import { buildPermissionTree, resolvePermissionModuleLabel, type PermissionTreeNode } from '@/utils/permissionTree'
 
 const roleStore = useRoleStore()
 const router = useRouter()
@@ -24,31 +25,18 @@ function handlePageChange(targetPage: number) {
 // ---- 弹窗内"权限点分配"勾选控件数据源（按需加载：只在打开新增/编辑弹窗时请求一次，
 // 页面进入、翻页、搜索角色列表都不触发） ----
 
-interface PermissionTreeNode {
-  id: string | number
-  label: string
-  children?: PermissionTreeNode[]
-}
-
 const permissionOptions = ref<PermissionOption[]>([])
 const permissionTreeRef = ref<TreeInstance>()
 
 // 按权限点编码冒号分隔的第一段（模块）分组构造两层树：第一层是分组虚拟节点（id 形如
 // "group:模块名"，不对应任何真实权限点，仅用于分组展示、全选/半选联动），第二层是
-// 具体权限点叶子节点（id 为权限点真实数字 id，label 用中文名称）
-const permissionTreeData = computed<PermissionTreeNode[]>(() => {
-  const groups = new Map<string, PermissionTreeNode>()
-  for (const option of permissionOptions.value) {
-    const moduleName = option.code.split(':')[0] || option.code
-    let group = groups.get(moduleName)
-    if (!group) {
-      group = { id: `group:${moduleName}`, label: moduleName, children: [] }
-      groups.set(moduleName, group)
-    }
-    group.children!.push({ id: option.id, label: option.name })
-  }
-  return Array.from(groups.values())
-})
+// 具体权限点叶子节点（id 为权限点真实数字 id，label 用中文名称）。分组算法本身抽取为
+// 共享工具 buildPermissionTree（src/utils/permissionTree.ts），供权限点管理树复用；分组
+// 节点的中文模块名解析同样复用共享的 resolvePermissionModuleLabel，与权限点管理页面
+// 保持同一份映射，不重复维护
+const permissionTreeData = computed<PermissionTreeNode<PermissionOption>[]>(() =>
+  buildPermissionTree(permissionOptions.value, resolvePermissionModuleLabel),
+)
 
 async function fetchPermissionOptions() {
   permissionOptions.value = await permissionApi.getPermissionOptions()

@@ -4,7 +4,7 @@ import type { Component } from 'vue'
 export interface MenuChild {
   title: string
   path: string
-  // 该页面对应的权限点 key，风格上和后端权限 code 对齐（如 identity:user:view）
+  // 该页面对应的权限点 code，须与后端 tab_permission.code / 权限资源.txt 保持一致（如 UserManagement:user:view）
   permissionKey: string
 }
 
