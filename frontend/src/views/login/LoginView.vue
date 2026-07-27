@@ -13,8 +13,8 @@ const formRef = ref<FormInstance>()
 const submitting = ref(false)
 
 const form = reactive({
-  username: 'admin',
-  password: 'admin123',
+  username: '',
+  password: '',
 })
 
 const rules: FormRules = {
@@ -29,6 +29,10 @@ async function handleSubmit() {
   submitting.value = true
   try {
     await authStore.login(form)
+    if (authStore.firstLogin) {
+      router.push({ name: 'change-password' })
+      return
+    }
     const redirect = (route.query.redirect as string) || '/dashboard'
     router.push(redirect)
   } catch (error) {
@@ -106,7 +110,7 @@ async function handleSubmit() {
           </el-button>
         </el-form>
 
-        <p class="login__hint">演示账号：admin / admin123</p>
+        <p class="login__hint">用户名为分配的用户编码，密码为初始密码或管理员重置后的默认密码</p>
       </div>
     </section>
   </div>

@@ -71,4 +71,12 @@ public interface UserService {
      * @param id 用户 id
      */
     void delete(Long id);
+
+    /**
+     * 重置指定用户的密码为默认密码 {@code Default#123456}，并将其标记为待首次登录强制改密状态；
+     * 仅重置密码，不修改用户的 {@code status}。
+     *
+     * @param id 用户 id
+     */
+    void resetPassword(Long id);
 }

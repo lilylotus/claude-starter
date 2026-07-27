@@ -131,4 +131,18 @@ public class UserController {
         userService.delete(id);
         return Result.success();
     }
+
+    /**
+     * 重置用户密码为默认密码，并将其标记为待首次登录强制改密状态。
+     *
+     * @param id 用户 id
+     * @return 无业务数据的成功响应
+     */
+    @Operation(summary = "重置密码",
+            description = "将指定用户密码重置为默认密码 Default#123456，并标记为待首次登录强制改密状态，不修改用户 status")
+    @PutMapping("/api/users/{id}/reset-password")
+    public Result<Void> resetPassword(@PathVariable Long id) {
+        userService.resetPassword(id);
+        return Result.success();
+    }
 }

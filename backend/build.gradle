@@ -21,6 +21,8 @@ repositories {
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+
 	/* springdoc 3.x 目标 Spring Boot 4，与本项目的 Spring Boot 3.5 不兼容，固定使用 2.x 系列的最新版 */
 	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.17'
 

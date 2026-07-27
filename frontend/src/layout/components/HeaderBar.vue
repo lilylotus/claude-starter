@@ -44,9 +44,9 @@ function handleLogout() {
       <el-dropdown trigger="click">
         <button class="header-bar__user">
           <el-avatar :size="30" style="background: var(--color-primary)">
-            {{ authStore.userInfo?.displayName?.slice(0, 1) }}
+            {{ authStore.accountCode?.slice(0, 1)?.toUpperCase() }}
           </el-avatar>
-          <span class="header-bar__user-name">{{ authStore.userInfo?.displayName }}</span>
+          <span class="header-bar__user-name">{{ authStore.accountCode }}</span>
           <el-icon size="14"><ArrowDown /></el-icon>
         </button>
         <template #dropdown>

@@ -30,7 +30,7 @@ const quickLinks = computed(() => MENU_GROUPS)
 <template>
   <div class="dashboard">
     <header class="dashboard__greeting">
-      <h1>你好，{{ authStore.userInfo?.displayName ?? '管理员' }}</h1>
+      <h1>你好，{{ authStore.accountCode || '管理员' }}</h1>
       <p>{{ today }} · 这是身份与权限体系的整体概览</p>
     </header>
 

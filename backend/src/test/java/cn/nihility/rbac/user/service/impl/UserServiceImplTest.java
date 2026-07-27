@@ -5,11 +5,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import cn.nihility.rbac.auth.service.PasswordService;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.dict.service.DictItemService;
 import cn.nihility.rbac.formfield.constant.FormFieldBizType;
@@ -77,6 +79,10 @@ class UserServiceImplTest {
     @Mock
     private DictItemService dictItemService;
 
+    /** 被测服务的密码业务逻辑依赖（{@code auth} 模块暴露），使用 Mockito 打桩。 */
+    @Mock
+    private PasswordService passwordService;
+
     /** 被测服务实例。 */
     private UserServiceImpl userService;
 
@@ -99,7 +105,7 @@ class UserServiceImplTest {
                 formFieldDefinitionService, formFieldSnapshotSupport, dictItemService);
         userService = new UserServiceImpl(userMapper, userPositionMapper, orgMapper, operationLogRecorder,
                 formFieldDefinitionService, formFieldSnapshotSupport, dictItemService, positionDynamicFieldSupport,
-                positionLogSnapshotSupport);
+                positionLogSnapshotSupport, passwordService);
         lenient().when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
     }
@@ -397,6 +403,54 @@ class UserServiceImplTest {
         assertThat(pageResult.getRecords()).hasSize(1);
         assertThat(pageResult.getRecords().get(0).getName()).isEqualTo("张三");
         verify(userMapper).selectPage(any(), any(LambdaQueryWrapper.class));
+    }
+
+    /**
+     * 创建用户成功后，应联动调用 {@link PasswordService#createDefaultPassword} 为新用户
+     * 创建默认密码记录（user-management spec.md "创建用户联动生成默认密码" Scenario）。
+     */
+    @Test
+    void create_shouldCreateDefaultPassword_whenUserCreatedSuccessfully() {
+        when(userMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+        doAnswer(invocation -> {
+            UserEntity entity = invocation.getArgument(0);
+            entity.setId(100L);
+            return 1;
+        }).when(userMapper).insert(any(UserEntity.class));
+        when(userMapper.selectById(100L)).thenReturn(buildUserEntity(100L, "张三", "U001", UserStatus.ENABLED));
+        when(userPositionMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
+
+        UserCreateRequest request = buildCreateRequest("张三", "U001", null);
+
+        userService.create(request);
+
+        verify(passwordService).createDefaultPassword(100L);
+    }
+
+    /**
+     * 重置密码时，若用户不存在（或已被逻辑删除），应抛出业务异常且不调用密码重置逻辑。
+     */
+    @Test
+    void resetPassword_shouldThrowBusinessException_whenUserNotFound() {
+        when(userMapper.selectById(99L)).thenReturn(null);
+
+        assertThatThrownBy(() -> userService.resetPassword(99L)).isInstanceOf(BusinessException.class);
+        verify(passwordService, never()).resetToDefault(any());
+    }
+
+    /**
+     * 重置密码时，若用户存在，应调用 {@link PasswordService#resetToDefault} 完成重置，
+     * 不修改用户自身的 {@code status}（user-management spec.md "重置存在的用户密码" Scenario）。
+     */
+    @Test
+    void resetPassword_shouldCallPasswordServiceResetToDefault_whenUserExists() {
+        UserEntity entity = buildUserEntity(1L, "张三", "U001", UserStatus.ENABLED);
+        when(userMapper.selectById(1L)).thenReturn(entity);
+
+        userService.resetPassword(1L);
+
+        verify(passwordService).resetToDefault(1L);
+        verify(userMapper, never()).updateById(any(UserEntity.class));
     }
 
     /**

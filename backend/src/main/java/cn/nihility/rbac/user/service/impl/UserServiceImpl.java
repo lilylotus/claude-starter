@@ -1,5 +1,6 @@
 package cn.nihility.rbac.user.service.impl;
 
+import cn.nihility.rbac.auth.service.PasswordService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.dict.dto.DictItemOptionVO;
@@ -40,6 +41,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 /**
@@ -102,6 +104,12 @@ public class UserServiceImpl implements UserService {
     private final PositionLogSnapshotSupport positionLogSnapshotSupport;
 
     /**
+     * 密码业务逻辑接口（{@code auth} 模块暴露），用于新增用户时联动创建默认密码记录、
+     * 管理员重置密码；本模块只依赖该接口做依赖注入调用，不反向被 {@code auth} 依赖。
+     */
+    private final PasswordService passwordService;
+
+    /**
      * {@inheritDoc}
      */
     @Override
@@ -133,8 +141,12 @@ public class UserServiceImpl implements UserService {
 
     /**
      * {@inheritDoc}
+     * <p>
+     * 创建用户与创建默认密码记录（{@link PasswordService#createDefaultPassword}）需在同一
+     * 事务内完成，因此整个方法标注 {@link Transactional}。
      */
     @Override
+    @Transactional
     public UserVO create(UserCreateRequest request) {
         checkCodeUnique(request.getCode(), null);
         validateDynamicFields(request, true, null);
@@ -148,6 +160,8 @@ public class UserServiceImpl implements UserService {
         entity.setUpdateBy(DEFAULT_OPERATOR);
         entity.setUpdateTime(now);
         userMapper.insert(entity);
+
+        passwordService.createDefaultPassword(entity.getId());
 
         syncPositions(entity.getId(), request.getPositions());
 
@@ -211,6 +225,15 @@ public class UserServiceImpl implements UserService {
         userMapper.updateById(entity);
 
         operationLogRecorder.recordDelete(OperationLogResourceType.USER, id, entity.getName(), beforeSnapshot);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void resetPassword(Long id) {
+        getExistingEntity(id);
+        passwordService.resetToDefault(id);
     }
 
     /**

@@ -54,61 +54,61 @@ const detailRoutes = [
     path: 'identity/orgs/:id',
     name: 'identity-orgs-detail',
     component: () => import('@/views/identity/org/OrgDetailView.vue'),
-    meta: { title: '组织详情', requiresAuth: true },
+    meta: { title: '组织详情', requiresAuth: true, permissionKey: 'identity:org:detail' },
   },
   {
     path: 'identity/users/:id',
     name: 'identity-users-detail',
     component: () => import('@/views/identity/user/UserDetailView.vue'),
-    meta: { title: '用户详情', requiresAuth: true },
+    meta: { title: '用户详情', requiresAuth: true, permissionKey: 'identity:user:detail' },
   },
   {
     path: 'identity/positions/:id',
     name: 'identity-positions-detail',
     component: () => import('@/views/identity/position/PositionDetailView.vue'),
-    meta: { title: '任职详情', requiresAuth: true },
+    meta: { title: '任职详情', requiresAuth: true, permissionKey: 'identity:position:detail' },
   },
   {
     path: 'application/list/:id',
     name: 'application-list-detail',
     component: () => import('@/views/application/app/AppDetailView.vue'),
-    meta: { title: '应用详情', requiresAuth: true },
+    meta: { title: '应用详情', requiresAuth: true, permissionKey: 'application:app:detail' },
   },
   {
     path: 'permission/roles/:id',
     name: 'permission-roles-detail',
     component: () => import('@/views/permission/role/RoleDetailView.vue'),
-    meta: { title: '角色详情', requiresAuth: true },
+    meta: { title: '角色详情', requiresAuth: true, permissionKey: 'permission:role:detail' },
   },
   {
     path: 'permission/points/:id',
     name: 'permission-points-detail',
     component: () => import('@/views/permission/permission/PermissionDetailView.vue'),
-    meta: { title: '权限点详情', requiresAuth: true },
+    meta: { title: '权限点详情', requiresAuth: true, permissionKey: 'permission:point:detail' },
   },
   {
     path: 'permission/admins/:id',
     name: 'permission-admins-detail',
     component: () => import('@/views/permission/admin/AdminDetailView.vue'),
-    meta: { title: '管理员详情', requiresAuth: true },
+    meta: { title: '管理员详情', requiresAuth: true, permissionKey: 'permission:admin:detail' },
   },
   {
     path: 'system/menus/:id',
     name: 'system-menus-detail',
     component: () => import('@/views/system/menu/MenuDetailView.vue'),
-    meta: { title: '菜单详情', requiresAuth: true },
+    meta: { title: '菜单详情', requiresAuth: true, permissionKey: 'system:menu:detail' },
   },
   {
     path: 'system/dicts/type/:id',
     name: 'system-dicts-type-detail',
     component: () => import('@/views/system/dict/DictTypeDetailView.vue'),
-    meta: { title: '字典类型详情', requiresAuth: true },
+    meta: { title: '字典类型详情', requiresAuth: true, permissionKey: 'system:dict:typeDetail' },
   },
   {
     path: 'system/dicts/item/:id',
     name: 'system-dicts-item-detail',
     component: () => import('@/views/system/dict/DictItemDetailView.vue'),
-    meta: { title: '字典项详情', requiresAuth: true },
+    meta: { title: '字典项详情', requiresAuth: true, permissionKey: 'system:dict:itemDetail' },
   },
 ]
 
@@ -120,6 +120,18 @@ const router = createRouter({
       name: 'login',
       component: () => import('@/views/login/LoginView.vue'),
       meta: { title: '登录' },
+    },
+    {
+      // 首登强制改密页面：不挂在 menu.ts 侧边栏菜单下（不是主动导航入口，是登录后
+      // firstLogin=true 时被动跳转进入），因此不出现在侧边栏，也不在权限资源.txt 里
+      // 登记为一个独立的可访问菜单资源；但 POST /api/auth/password 本身仍属于"业务接口"，
+      // 不在后端 menu 请求头校验的白名单（登录/刷新/公钥获取）内，仍需要携带一个格式合法
+      // 的三段式 menu 头（后端本次只做格式校验，不做真实权限匹配，见 design.md Non-Goals），
+      // 所以这里仍给出一个 permissionKey，只是不作为侧边栏可点菜单对外注册
+      path: '/change-password',
+      name: 'change-password',
+      component: () => import('@/views/auth/ChangePasswordView.vue'),
+      meta: { title: '修改密码', requiresAuth: true, permissionKey: 'Auth:password:change' },
     },
     {
       path: '/',
@@ -142,12 +154,23 @@ const router = createRouter({
 
 router.beforeEach((to) => {
   const authStore = useAuthStore()
+
+  // 1. 目标路由需要登录，但本地判定未登录（access-key/refresh-key 都已过期或压根没有）
   if (to.meta.requiresAuth && !authStore.isLoggedIn) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
+
+  // 2. 已登录且处于首登待改密状态，除改密页面本身外一律拦截并重定向到改密页面
+  //    （包括已登录再次访问 /login 的情况，此时应该去改密页而不是概览页）
+  if (authStore.isLoggedIn && authStore.firstLogin && to.name !== 'change-password') {
+    return { name: 'change-password' }
+  }
+
+  // 3. 已登录（且非首登待改密，上面已处理）访问登录页，直接跳概览页
   if (to.name === 'login' && authStore.isLoggedIn) {
     return { path: '/dashboard' }
   }
+
   return true
 })
 

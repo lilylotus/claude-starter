@@ -43,6 +43,7 @@ UserManagement（用户管理，/identity/users）
 - UserManagement:user:delete   删除用户
 - UserManagement:user:importTemplate 下载用户导入模板
 - UserManagement:user:import         批量导入用户
+- UserManagement:user:resetPassword  重置用户密码
 
 PositionManagement（任职管理，/identity/positions）
 - PositionManagement:position:view     任职管理页面访问

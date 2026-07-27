@@ -44,3 +44,9 @@ export function disableUser(id: number): Promise<void> {
 export function deleteUser(id: number): Promise<void> {
   return request.delete(`/users/${id}`)
 }
+
+// 重置密码：将该用户密码重置为默认密码，并将其标记为待首次登录强制改密状态；
+// 不影响用户的启停用状态（status），调用方无需刷新列表数据
+export function resetPassword(id: number): Promise<void> {
+  return request.put(`/users/${id}/reset-password`)
+}

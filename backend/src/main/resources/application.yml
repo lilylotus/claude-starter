@@ -21,6 +21,14 @@ spring:
     username: root
     password: mysql
 
+  data:
+    redis:
+      database: 8
+      password: redis
+      host: 127.0.0.1
+      port: 6379
+      connect-timeout: 3000ms
+
   # 数据库版本由 Flyway 管理，迁移脚本位于 src/main/resources/db/migration，
   # 命名规范为 V<版本号>__<描述>.sql
   # 避免应用启动阶段因连接失败而报错；连接到真实数据库后再打开。
@@ -40,3 +48,15 @@ mybatis-plus:
 logging:
   level:
     cn.nihility.rbac: debug
+
+rbac:
+  user:
+    login:
+      # 以下 RSA-2048 密钥对（X.509/PKCS8 DER + Base64，用 RsaJdkUtils.generateKeyPair()
+      # 生成）仅用于本地开发/演示，生产环境务必替换为独立生成的密钥对，不要沿用仓库中的默认值。
+      public-key: MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtiJC3VNSovxIi0i+aYda44GZ+fGOx6UyjCO1ahPD7GWIV62Ogsr1dySItgSntRpWwDOu/WNzT/eNXFLy+haqiHJ9y0Vh+WQD/8DCZki2yq2td8jARJZtIs4z6EcI3jCiH2s+O1VOl5hLOcOLTKyzSTdovduiK7TULx2gfRoGGpXmtu+CGxLGXrXWq+GQSUzP8LWdq4lPj6pZikLCd/w6w7EWmXqJBGmG2JsPplAkiviJjrk2pLouglFWwn/ncqZ4Ni0JT0ZLls+omkw8kL6BPIs7YGnfALXB42+mIFXiUH/sHaZYUIYXonpWKzlA3dccb4YcIZfbTOUgMjMnI2oASwIDAQAB
+      private-key: MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC2IkLdU1Ki/EiLSL5ph1rjgZn58Y7HpTKMI7VqE8PsZYhXrY6CyvV3JIi2BKe1GlbAM679Y3NP941cUvL6FqqIcn3LRWH5ZAP/wMJmSLbKra13yMBElm0izjPoRwjeMKIfaz47VU6XmEs5w4tMrLNJN2i926IrtNQvHaB9GgYalea274IbEsZetdar4ZBJTM/wtZ2riU+PqlmKQsJ3/DrDsRaZeokEaYbYmw+mUCSK+ImOuTakui6CUVbCf+dypng2LQlPRkuWz6iaTDyQvoE8iztgad8AtcHjb6YgVeJQf+wdplhQhheielYrOUDd1xxvhhwhl9tM5SAyMycjagBLAgMBAAECggEAIn84xOzsQPyhzOfZUOmXOHIqtOGg1oWenlaBHPdja5oLiffQf0tr1MYxsrANB8tWVQ80/L9ibuoHd04qwV2brT5qPx8EIJVmAIIFEBSDsr3UllSKvjLzttzxjfQuZM83VdYdMmXE/geVb/punvYy+xIon5VDER4t9kKZTDiqoUwjJ2PWB+SgsSl3IVlnmMVhWXR7Ou/1+525/Rxzv9iC4yta5zWQDWdIv/dtpEKqhoEef8GRV9fSpUA+7NKT5QM9oOVrW/SGNWoGeb7I+TJBx1Y2GlNpXYhRxwppgP18mKZV1jnwPuXuQHDOEbBulWcZsPZru+aSLWeOxtk7QZaqmQKBgQDnuGOt8AOrsZ9gjFLpbDn6IsucP1FfRCNTJSQzzbXObQoipUfAlYUaCVk1ygJnjg8qw7UJIq9d1HngmwpTCnSfoiUjizWmLcDPqbmng4BNwrlK8s+23rksVvGMJAUNKU9rfB3hbBlyOqTsJBEBWiTYB0r0FiIyiTtqAcfg/U0prwKBgQDJN8bYPJNPRT62aSGIpX5dI7DdPYsiunJjk1PfPDOukTfPqltC9VSIDFHiMuqLHeAW8XUMYMsuc+mQvIlXyEGhYwdAv8xg+5VbPnZauo72n8nIp6WWrRQMIHEjgWEH18pNg6d49T/j000/PpqEe6OaGL7inopX0UJiTgjGGd0mJQKBgQC1muKseJY34t65CWEVxhduPgT7sPgyRLG2wT4tR4S8guLVolmoysZlUHxVVrwpssGaT4W74i40yIi4imo+CMy8K5UV1U23rtYVKrzxV3Of/gPAhKpcdRQFdyKaJcS7uuuensjAWjtbNjD5TY7yU1ba5GRPBmXI25rwCvM/FuZ5ywKBgQCnOHNHwQ+rESDM9xGnPeGGBeM1+a9nbQsjNYy+OIm6yXRYYHr3amqVpadnFGlWs71HU+KyJr60HCA+6HA7Q3FHbcTZSovPDUVSTtaND/0/eAt5ddlnHu9KJKvhlePNYMf/IypKm4Y9D51iseQ3tYiAx4/bRWYzFPTWPYONHnFrAQKBgD6f5ReexwCgmV0OKuoCyefHXVzFp+5nEzj9V88kCXUEOm+r+31He1x4/q5FZXoQBl2FX9Gba/p2Q5nz9fb8jG2+n2s2zHygZFXQasflrtyevooFubO0eZr+b1RmDVInAn4QISiZ3ZcMTKDu3+Lqq2zMlthOGL4wt1uVBMmYuhQk
+      # access-key 有效期（秒），默认 7200 秒（2 小时）
+      access-token-expire-seconds: 7200
+      # refresh-key 有效期（秒），默认 604800 秒（7 天）
+      refresh-token-expire-seconds: 604800

@@ -270,6 +270,17 @@ async function handleDelete(row: UserRow) {
   ElMessage.success('删除成功')
   await userStore.refreshAfterMutation()
 }
+
+// 重置密码：不影响 status，二次确认后无需刷新列表
+async function handleResetPassword(row: UserRow) {
+  await ElMessageBox.confirm(`确定要将用户「${row.name}」的密码重置为默认密码吗？`, '重置密码确认', {
+    type: 'warning',
+    confirmButtonText: '重置',
+    cancelButtonText: '取消',
+  })
+  await userApi.resetPassword(row.id)
+  ElMessage.success('已重置为默认密码')
+}
 </script>
 
 <template>
@@ -336,7 +347,7 @@ async function handleDelete(row: UserRow) {
             <el-tag v-else type="warning">停用</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right">
+        <el-table-column label="操作" width="360" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="goToDetail(row as UserRow)">详情</el-button>
             <el-button link type="primary" @click="openEditDialog(row as UserRow)">编辑</el-button>
@@ -347,6 +358,7 @@ async function handleDelete(row: UserRow) {
             >
               {{ (row as UserRow).status === USER_STATUS_ENABLED ? '停用' : '启用' }}
             </el-button>
+            <el-button link type="warning" @click="handleResetPassword(row as UserRow)">重置密码</el-button>
             <el-button link type="danger" @click="handleDelete(row as UserRow)">删除</el-button>
           </template>
         </el-table-column>
