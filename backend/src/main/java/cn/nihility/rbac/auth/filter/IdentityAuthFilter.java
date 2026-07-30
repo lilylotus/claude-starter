@@ -34,12 +34,14 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * <p>
  * rbac-permission-authorization change 在首登拦截通过后追加第四步真正的权限判断：
  * 当前用户的角色权限点集合是否包含请求 {@code menu} 编码，不满足则拦截为 {@link
- * AuthErrorCode#FORBIDDEN}。修改密码接口（{@link #FIRST_LOGIN_WHITELIST}）是不区分
- * 权限点的自助操作——任何已登录用户都应当能修改自己的密码，该接口对应的资源编码未被
- * 登记进权限点种子数据（不属于 权限资源.txt 里任何一个业务模块），如果对它也做权限点
- * 匹配判断，会导致包括默认账号在内的一切用户在首次登录强制改密这一步就被自己引入的
- * 鉴权机制卡死、永远无法完成首登流程，因此该白名单同时豁免权限判断，与豁免首登拦截
- * 保持同一批白名单、同一个语义（"自助操作，不受角色权限点约束"）。
+ * AuthErrorCode#FORBIDDEN}。修改密码接口是不区分权限点的自助操作——任何已登录用户都应当
+ * 能修改自己的密码，该接口对应的资源编码未被登记进权限点种子数据（不属于 权限资源.txt
+ * 里任何一个业务模块），如果对它也做权限点匹配判断，会导致包括默认账号在内的一切用户在
+ * 首次登录强制改密这一步就被自己引入的鉴权机制卡死、永远无法完成首登流程；
+ * permission-driven-ui-visibility change 新增的"查询当前用户权限编码"接口同理不应要求
+ * 调用方"必须已拥有某个权限编码才能查询自己有哪些权限编码"，否则出现鸡生蛋悖论。
+ * 因此这两个接口（{@link #FIRST_LOGIN_WHITELIST}）同时豁免首登拦截与权限判断，保持
+ * 同一批白名单、同一个语义（"自助操作，不受角色权限点约束"）。
  */
 @RequiredArgsConstructor
 public class IdentityAuthFilter extends OncePerRequestFilter {
@@ -65,8 +67,12 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
             "/swagger-resources/**",
             "/webjars/**");
 
-    /** 仍需 {@code identity-token}/{@code menu} 校验，但豁免"首登强制改密"拦截的路径。 */
-    private static final List<String> FIRST_LOGIN_WHITELIST = List.of("/api/auth/password");
+    /**
+     * 仍需 {@code identity-token}/{@code menu} 校验，但豁免"首登强制改密"拦截与
+     * "权限编码校验"的路径：修改密码、查询当前用户权限编码，均为不区分权限点的自助操作。
+     */
+    private static final List<String> FIRST_LOGIN_WHITELIST =
+            List.of("/api/auth/password", "/api/auth/permissions");
 
     /** Ant 风格路径匹配器，用于维护白名单。 */
     private static final AntPathMatcher PATH_MATCHER = new AntPathMatcher();

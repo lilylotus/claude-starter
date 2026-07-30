@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import type { LoginForm } from '@/types/auth'
 import * as authApi from '@/api/auth'
 import { parseBackendDateTime } from '@/utils/datetime'
+import { useCurrentUserPermissionStore } from '@/stores/currentUserPermission'
 
 const STORAGE_KEY = 'rbac_auth_session'
 
@@ -92,6 +93,9 @@ export const useAuthStore = defineStore('auth', () => {
     firstLogin.value = false
     accountCode.value = ''
     localStorage.removeItem(STORAGE_KEY)
+    // 清空上一个用户的权限编码，避免下一个登录的用户短暂"继承"残留权限展示
+    const permissionStore = useCurrentUserPermissionStore()
+    permissionStore.reset()
   }
 
   return {

@@ -1,6 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { MENU_GROUPS } from './menu'
 import { useAuthStore } from '@/stores/auth'
+import { useCurrentUserPermissionStore } from '@/stores/currentUserPermission'
+import { usePermission } from '@/composables/usePermission'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -152,7 +155,7 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const authStore = useAuthStore()
 
   // 1. 目标路由需要登录，但本地判定未登录（access-key/refresh-key 都已过期或压根没有）
@@ -166,7 +169,26 @@ router.beforeEach((to) => {
     return { name: 'change-password' }
   }
 
-  // 3. 已登录（且非首登待改密，上面已处理）访问登录页，直接跳概览页
+  // 3. 已登录、非首登待改密状态，但当前用户的权限编码集合尚未加载过（内存状态为空——
+  //    刷新页面/直接地址栏输入 URL 都会走到这里），先拉取一次，供下一步权限校验、
+  //    以及侧边栏菜单过滤使用
+  const currentUserPermissionStore = useCurrentUserPermissionStore()
+  if (authStore.isLoggedIn && !authStore.firstLogin && !currentUserPermissionStore.loaded) {
+    await currentUserPermissionStore.loadCodes()
+  }
+
+  // 4. 目标路由声明了 permissionKey，但当前用户不拥有该权限编码：拦截导航，
+  //    不允许仅凭"入口不展示"这一层防线被绕过（直接改地址栏 URL 访问）。
+  //    change-password 的 permissionKey 只是给请求头用的格式占位（未登记为真实权限点，
+  //    权限编码集合里永远不会有它），豁免本项校验，否则首登用户会在 /dashboard 与
+  //    /change-password 之间被无限重定向
+  const { hasPermission } = usePermission()
+  if (to.name !== 'change-password' && to.meta.permissionKey && !hasPermission(to.meta.permissionKey)) {
+    ElMessage.warning('没有权限访问该页面')
+    return { path: '/dashboard' }
+  }
+
+  // 5. 已登录（且非首登待改密，上面已处理）访问登录页，直接跳概览页
   if (to.name === 'login' && authStore.isLoggedIn) {
     return { path: '/dashboard' }
   }

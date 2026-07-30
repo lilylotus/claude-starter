@@ -21,9 +21,11 @@ import {
   FORM_FIELD_CONTROL_TYPE_NUMBER,
   FORM_FIELD_CONTROL_TYPE_TEXT,
 } from '@/types/formField'
+import { usePermission } from '@/composables/usePermission'
 
 const positionStore = usePositionStore()
 const router = useRouter()
+const { hasPermission } = usePermission()
 
 // 除关联组织（orgId）、关联用户（userId）、启停用状态（status）外的全部字段
 // （含原有表字段、认证类型 positionType 与 ext1~ext10）统一按“表单字段定义”
@@ -277,9 +279,14 @@ async function handleDelete(row: PositionRow) {
         <!-- 未选中任何左侧树节点时标题保持空白，是本页面刻意的默认态 -->
         <h2 class="position-panel__title">{{ rightPanelTitle }}</h2>
         <div class="position-panel__actions">
-          <el-button @click="handleDownloadTemplate">下载导入模板</el-button>
-          <el-button @click="batchImportVisible = true">批量导入</el-button>
-          <el-button type="primary" :disabled="positionStore.selectedOrgId === null" @click="openCreateDialog">
+          <el-button v-if="hasPermission('PositionManagement:position:importTemplate')" @click="handleDownloadTemplate">下载导入模板</el-button>
+          <el-button v-if="hasPermission('PositionManagement:position:import')" @click="batchImportVisible = true">批量导入</el-button>
+          <el-button
+            v-if="hasPermission('PositionManagement:position:add')"
+            type="primary"
+            :disabled="positionStore.selectedOrgId === null"
+            @click="openCreateDialog"
+          >
             新增
           </el-button>
         </div>
@@ -321,16 +328,17 @@ async function handleDelete(row: PositionRow) {
           </el-table-column>
           <el-table-column label="操作" width="240" fixed="right">
             <template #default="{ row }">
-              <el-button link type="primary" @click="goToDetail(row as PositionRow)">详情</el-button>
-              <el-button link type="primary" @click="openEditDialog(row as PositionRow)">编辑</el-button>
+              <el-button v-if="hasPermission('PositionManagement:position:detail')" link type="primary" @click="goToDetail(row as PositionRow)">详情</el-button>
+              <el-button v-if="hasPermission('PositionManagement:position:edit')" link type="primary" @click="openEditDialog(row as PositionRow)">编辑</el-button>
               <el-button
                 link
                 :type="(row as PositionRow).status === POSITION_STATUS_ENABLED ? 'warning' : 'success'"
+                v-if="(row as PositionRow).status === POSITION_STATUS_ENABLED ? hasPermission('PositionManagement:position:disable') : hasPermission('PositionManagement:position:enable')"
                 @click="toggleStatus(row as PositionRow)"
               >
                 {{ (row as PositionRow).status === POSITION_STATUS_ENABLED ? '停用' : '启用' }}
               </el-button>
-              <el-button link type="danger" @click="handleDelete(row as PositionRow)">删除</el-button>
+              <el-button v-if="hasPermission('PositionManagement:position:delete')" link type="danger" @click="handleDelete(row as PositionRow)">删除</el-button>
             </template>
           </el-table-column>
         </el-table>

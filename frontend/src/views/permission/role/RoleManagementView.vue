@@ -10,9 +10,11 @@ import * as permissionApi from '@/api/permission'
 import { ROLE_STATUS_ENABLED, type RoleFormRequest, type RoleRow } from '@/types/role'
 import type { PermissionOption } from '@/types/permission'
 import { buildPermissionTree, resolvePermissionModuleLabel, type PermissionTreeNode } from '@/utils/permissionTree'
+import { usePermission } from '@/composables/usePermission'
 
 const roleStore = useRoleStore()
 const router = useRouter()
+const { hasPermission } = usePermission()
 
 onMounted(() => {
   roleStore.fetchPage()
@@ -167,7 +169,7 @@ async function handleDelete(row: RoleRow) {
     <section class="role-panel">
       <header class="role-panel__header">
         <h2 class="role-panel__title">角色管理</h2>
-        <el-button type="primary" @click="openCreateDialog">新增</el-button>
+        <el-button v-if="hasPermission('RoleManagement:role:add')" type="primary" @click="openCreateDialog">新增</el-button>
       </header>
 
       <el-table v-loading="roleStore.listLoading" :data="roleStore.list" empty-text="暂无角色">
@@ -183,16 +185,17 @@ async function handleDelete(row: RoleRow) {
         <el-table-column prop="showOrder" label="显示序号" width="90" />
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="goToDetail(row as RoleRow)">详情</el-button>
-            <el-button link type="primary" @click="openEditDialog(row as RoleRow)">编辑</el-button>
+            <el-button v-if="hasPermission('RoleManagement:role:detail')" link type="primary" @click="goToDetail(row as RoleRow)">详情</el-button>
+            <el-button v-if="hasPermission('RoleManagement:role:edit')" link type="primary" @click="openEditDialog(row as RoleRow)">编辑</el-button>
             <el-button
               link
               :type="(row as RoleRow).status === ROLE_STATUS_ENABLED ? 'warning' : 'success'"
+              v-if="(row as RoleRow).status === ROLE_STATUS_ENABLED ? hasPermission('RoleManagement:role:disable') : hasPermission('RoleManagement:role:enable')"
               @click="toggleStatus(row as RoleRow)"
             >
               {{ (row as RoleRow).status === ROLE_STATUS_ENABLED ? '停用' : '启用' }}
             </el-button>
-            <el-button link type="danger" @click="handleDelete(row as RoleRow)">删除</el-button>
+            <el-button v-if="hasPermission('RoleManagement:role:delete')" link type="danger" @click="handleDelete(row as RoleRow)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>

@@ -20,9 +20,11 @@ import {
   FORM_FIELD_CONTROL_TYPE_NUMBER,
   FORM_FIELD_CONTROL_TYPE_TEXT,
 } from '@/types/formField'
+import { usePermission } from '@/composables/usePermission'
 
 const appStore = useAppStore()
 const router = useRouter()
+const { hasPermission } = usePermission()
 
 // 除负责人（ownerId）、所属组织（orgId）、启停用状态（status）外的全部字段
 // （含原有表字段与 ext1~ext10）统一按"表单字段定义"（bizType=APP）动态渲染，见 design.md 决策 12
@@ -226,9 +228,9 @@ async function handleDelete(row: AppRow) {
       <header class="app-panel__header">
         <h2 class="app-panel__title">应用管理</h2>
         <div class="app-panel__actions">
-          <el-button @click="handleDownloadTemplate">下载导入模板</el-button>
-          <el-button @click="batchImportVisible = true">批量导入</el-button>
-          <el-button type="primary" @click="openCreateDialog">新增</el-button>
+          <el-button v-if="hasPermission('AppManagement:app:importTemplate')" @click="handleDownloadTemplate">下载导入模板</el-button>
+          <el-button v-if="hasPermission('AppManagement:app:import')" @click="batchImportVisible = true">批量导入</el-button>
+          <el-button v-if="hasPermission('AppManagement:app:add')" type="primary" @click="openCreateDialog">新增</el-button>
         </div>
       </header>
 
@@ -259,16 +261,17 @@ async function handleDelete(row: AppRow) {
         </el-table-column>
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="goToDetail(row as AppRow)">详情</el-button>
-            <el-button link type="primary" @click="openEditDialog(row as AppRow)">编辑</el-button>
+            <el-button v-if="hasPermission('AppManagement:app:detail')" link type="primary" @click="goToDetail(row as AppRow)">详情</el-button>
+            <el-button v-if="hasPermission('AppManagement:app:edit')" link type="primary" @click="openEditDialog(row as AppRow)">编辑</el-button>
             <el-button
               link
               :type="(row as AppRow).status === APP_STATUS_ENABLED ? 'warning' : 'success'"
+              v-if="(row as AppRow).status === APP_STATUS_ENABLED ? hasPermission('AppManagement:app:disable') : hasPermission('AppManagement:app:enable')"
               @click="toggleStatus(row as AppRow)"
             >
               {{ (row as AppRow).status === APP_STATUS_ENABLED ? '停用' : '启用' }}
             </el-button>
-            <el-button link type="danger" @click="handleDelete(row as AppRow)">删除</el-button>
+            <el-button v-if="hasPermission('AppManagement:app:delete')" link type="danger" @click="handleDelete(row as AppRow)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>

@@ -18,9 +18,11 @@ import {
   FORM_FIELD_CONTROL_TYPE_NUMBER,
   FORM_FIELD_CONTROL_TYPE_TEXT,
 } from '@/types/formField'
+import { usePermission } from '@/composables/usePermission'
 
 const orgStore = useOrgStore()
 const router = useRouter()
+const { hasPermission } = usePermission()
 
 // 除上级组织（parentId）、启停用状态（status）外的全部字段（含原有表字段与 ext1~ext10）
 // 统一按"表单字段定义"（bizType=ORG）动态渲染，见 design.md 决策 12
@@ -299,9 +301,9 @@ async function handleDelete(row: OrgRow) {
         -->
         <h2 class="org-panel__title">{{ rightPanelTitle }}</h2>
         <div class="org-panel__actions">
-          <el-button @click="handleDownloadTemplate">下载导入模板</el-button>
-          <el-button @click="batchImportVisible = true">批量导入</el-button>
-          <el-button type="primary" @click="openCreateDialog">新增</el-button>
+          <el-button v-if="hasPermission('OrgManagement:org:importTemplate')" @click="handleDownloadTemplate">下载导入模板</el-button>
+          <el-button v-if="hasPermission('OrgManagement:org:import')" @click="batchImportVisible = true">批量导入</el-button>
+          <el-button v-if="hasPermission('OrgManagement:org:add')" type="primary" @click="openCreateDialog">新增</el-button>
         </div>
       </header>
 
@@ -334,16 +336,17 @@ async function handleDelete(row: OrgRow) {
         </el-table-column>
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="goToDetail(row as OrgRow)">详情</el-button>
-            <el-button link type="primary" @click="openEditDialog(row as OrgRow)">编辑</el-button>
+            <el-button v-if="hasPermission('OrgManagement:org:detail')" link type="primary" @click="goToDetail(row as OrgRow)">详情</el-button>
+            <el-button v-if="hasPermission('OrgManagement:org:edit')" link type="primary" @click="openEditDialog(row as OrgRow)">编辑</el-button>
             <el-button
               link
               :type="row.status === ORG_STATUS_ENABLED ? 'warning' : 'success'"
+              v-if="row.status === ORG_STATUS_ENABLED ? hasPermission('OrgManagement:org:disable') : hasPermission('OrgManagement:org:enable')"
               @click="toggleStatus(row as OrgRow)"
             >
               {{ row.status === ORG_STATUS_ENABLED ? '停用' : '启用' }}
             </el-button>
-            <el-button link type="danger" @click="handleDelete(row as OrgRow)">删除</el-button>
+            <el-button v-if="hasPermission('OrgManagement:org:delete')" link type="danger" @click="handleDelete(row as OrgRow)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>

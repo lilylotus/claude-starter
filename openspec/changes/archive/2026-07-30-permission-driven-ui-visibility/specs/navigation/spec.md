@@ -1,8 +1,5 @@
-# navigation Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change compact-tree-and-menu-indent. Update Purpose after archive.
-## Requirements
 ### Requirement: 侧边导航二级菜单
 系统 SHALL 在应用外壳（`AppLayout.vue`/`SideNav.vue`）的侧边导航中，以一级菜单分组（可展开/收起）+ 二级菜单项的两级结构展示各功能入口；二级菜单项 SHALL 用一条虚线 + 圆点的链式连接视觉语言与其所属的一级菜单分组关联，缩进 SHALL 保持紧凑，不应让二级菜单相对一级菜单标题的横向偏移占据侧边栏展开态宽度的过大比例，同时缩进仍需清晰地区分出二级菜单项从属于哪个一级菜单分组。侧边导航 SHALL 只展示当前登录用户拥有对应权限编码的二级菜单项；一级菜单分组下的二级菜单项全部因无权限被过滤掉时，该一级菜单分组本身也 SHALL NOT 展示。
 
@@ -21,4 +18,3 @@ TBD - created by archiving change compact-tree-and-menu-indent. Update Purpose a
 #### Scenario: 一级菜单分组下全部子菜单无权限时整组不展示
 - **WHEN** 当前登录用户的权限编码集合不包含某个一级菜单分组下任何一个二级菜单项的 `permissionKey`
 - **THEN** 侧边导航中不渲染该一级菜单分组（含其标题与图标），而不是展示一个空的、展开后没有任何子项的分组
-

@@ -45,3 +45,17 @@ export const MENU_GROUPS: MenuGroup[] = [
     ],
   },
 ]
+
+// 按当前用户权限编码集合过滤菜单：无权限的二级菜单项被过滤掉；一级分组下所有
+// 二级菜单都被过滤掉时，该分组自然从结果数组里消失，不需要额外的"是否整组隐藏"分支。
+export function filterMenuGroups(
+  groups: MenuGroup[],
+  hasPermission: (code?: string) => boolean,
+): MenuGroup[] {
+  return groups
+    .map((group) => ({
+      ...group,
+      children: group.children.filter((child) => hasPermission(child.permissionKey)),
+    }))
+    .filter((group) => group.children.length > 0)
+}

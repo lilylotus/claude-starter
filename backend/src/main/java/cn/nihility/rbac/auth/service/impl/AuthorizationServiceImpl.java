@@ -25,7 +25,16 @@ public class AuthorizationServiceImpl implements AuthorizationService {
      */
     @Override
     public boolean hasPermission(Long userId, String menuCode) {
+        Set<String> grantedCodes = getGrantedPermissionCodes(userId);
+        return grantedCodes.contains(menuCode);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public Set<String> getGrantedPermissionCodes(Long userId) {
         Set<String> grantedCodes = permissionMapper.selectGrantedPermissionCodesByUserId(userId);
-        return grantedCodes != null && grantedCodes.contains(menuCode);
+        return grantedCodes != null ? grantedCodes : Set.of();
     }
 }

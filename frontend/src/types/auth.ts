@@ -34,3 +34,8 @@ export interface ChangePasswordForm {
   oldPassword: string
   newPassword: string
 }
+
+// GET /api/auth/permissions 响应：当前登录用户拥有的全量三段式权限编码集合
+export interface PermissionCodesResult {
+  codes: string[]
+}

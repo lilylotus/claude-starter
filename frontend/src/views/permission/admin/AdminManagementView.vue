@@ -17,9 +17,11 @@ import {
 } from '@/types/admin'
 import type { OrgTreeNode } from '@/types/org'
 import type { RoleOption } from '@/types/role'
+import { usePermission } from '@/composables/usePermission'
 
 const adminStore = useAdminStore()
 const router = useRouter()
+const { hasPermission } = usePermission()
 
 onMounted(() => {
   adminStore.fetchPage()
@@ -250,7 +252,7 @@ async function handleDelete(row: AdminRow) {
     <section class="admin-panel">
       <header class="admin-panel__header">
         <h2 class="admin-panel__title">管理员管理</h2>
-        <el-button type="primary" @click="openCreateDialog">新增</el-button>
+        <el-button v-if="hasPermission('AdminManagement:admin:add')" type="primary" @click="openCreateDialog">新增</el-button>
       </header>
 
       <el-table v-loading="adminStore.listLoading" :data="adminStore.list" empty-text="暂无管理员">
@@ -266,16 +268,17 @@ async function handleDelete(row: AdminRow) {
         </el-table-column>
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="goToDetail(row as AdminRow)">详情</el-button>
-            <el-button link type="primary" @click="openEditDialog(row as AdminRow)">编辑</el-button>
+            <el-button v-if="hasPermission('AdminManagement:admin:detail')" link type="primary" @click="goToDetail(row as AdminRow)">详情</el-button>
+            <el-button v-if="hasPermission('AdminManagement:admin:edit')" link type="primary" @click="openEditDialog(row as AdminRow)">编辑</el-button>
             <el-button
               link
               :type="(row as AdminRow).status === ADMIN_STATUS_ENABLED ? 'warning' : 'success'"
+              v-if="(row as AdminRow).status === ADMIN_STATUS_ENABLED ? hasPermission('AdminManagement:admin:disable') : hasPermission('AdminManagement:admin:enable')"
               @click="toggleStatus(row as AdminRow)"
             >
               {{ (row as AdminRow).status === ADMIN_STATUS_ENABLED ? '停用' : '启用' }}
             </el-button>
-            <el-button link type="danger" @click="handleDelete(row as AdminRow)">删除</el-button>
+            <el-button v-if="hasPermission('AdminManagement:admin:delete')" link type="danger" @click="handleDelete(row as AdminRow)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>

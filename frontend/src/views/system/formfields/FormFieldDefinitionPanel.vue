@@ -19,6 +19,9 @@ import {
   type FormFieldDefinition,
 } from '@/types/formField'
 import { DICT_STATUS_ENABLED, type DictTypeRow } from '@/types/dict'
+import { usePermission } from '@/composables/usePermission'
+
+const { hasPermission } = usePermission()
 
 // 表单管理页面"字段定义"tab（由 FormFieldListView.vue 承载外层 字段定义/导入模板配置
 // 两个 tab，本组件只负责字段定义这一个）：按业务对象类型（组织/人员/任职/应用）切换
@@ -282,7 +285,7 @@ async function handleDelete(row: FormFieldDefinition) {
     </el-tabs>
 
     <div class="form-field-toolbar">
-      <el-button type="primary" @click="openCreateDialog">新增</el-button>
+      <el-button v-if="hasPermission('FormFieldManagement:formField:add')" type="primary" @click="openCreateDialog">新增</el-button>
     </div>
 
     <el-table v-loading="listLoading" :data="list" empty-text="暂无字段定义">
@@ -318,16 +321,17 @@ async function handleDelete(row: FormFieldDefinition) {
       </el-table-column>
       <el-table-column label="操作" width="220" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click="openEditDialog(row as FormFieldDefinition)">编辑</el-button>
+          <el-button v-if="hasPermission('FormFieldManagement:formField:edit')" link type="primary" @click="openEditDialog(row as FormFieldDefinition)">编辑</el-button>
           <template v-if="!(row as FormFieldDefinition).locked">
             <el-button
               link
               :type="(row as FormFieldDefinition).status === FORM_FIELD_STATUS_ENABLED ? 'warning' : 'success'"
+              v-if="(row as FormFieldDefinition).status === FORM_FIELD_STATUS_ENABLED ? hasPermission('FormFieldManagement:formField:disable') : hasPermission('FormFieldManagement:formField:enable')"
               @click="toggleStatus(row as FormFieldDefinition)"
             >
               {{ (row as FormFieldDefinition).status === FORM_FIELD_STATUS_ENABLED ? '停用' : '启用' }}
             </el-button>
-            <el-button link type="danger" @click="handleDelete(row as FormFieldDefinition)">删除</el-button>
+            <el-button v-if="hasPermission('FormFieldManagement:formField:delete')" link type="danger" @click="handleDelete(row as FormFieldDefinition)">删除</el-button>
           </template>
         </template>
       </el-table-column>

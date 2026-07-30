@@ -14,9 +14,11 @@ import {
   type DictTypeFormRequest,
   type DictTypeRow,
 } from '@/types/dict'
+import { usePermission } from '@/composables/usePermission'
 
 const dictStore = useDictStore()
 const router = useRouter()
+const { hasPermission } = usePermission()
 
 onMounted(() => {
   dictStore.fetchTypes()
@@ -266,7 +268,7 @@ async function handleDeleteItem(row: DictItemRow) {
     <section class="dict-panel dict-panel--types">
       <header class="dict-panel__header">
         <h2 class="dict-panel__title">字典类型</h2>
-        <el-button type="primary" @click="openCreateTypeDialog">新增</el-button>
+        <el-button v-if="hasPermission('DictManagement:dictType:add')" type="primary" @click="openCreateTypeDialog">新增</el-button>
       </header>
 
       <el-input
@@ -300,16 +302,17 @@ async function handleDeleteItem(row: DictItemRow) {
         </el-table-column>
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click.stop="goToTypeDetail(row as DictTypeRow)">详情</el-button>
-            <el-button link type="primary" @click.stop="openEditTypeDialog(row as DictTypeRow)">编辑</el-button>
+            <el-button v-if="hasPermission('DictManagement:dictType:detail')" link type="primary" @click.stop="goToTypeDetail(row as DictTypeRow)">详情</el-button>
+            <el-button v-if="hasPermission('DictManagement:dictType:edit')" link type="primary" @click.stop="openEditTypeDialog(row as DictTypeRow)">编辑</el-button>
             <el-button
               link
               :type="row.status === DICT_STATUS_ENABLED ? 'warning' : 'success'"
+              v-if="row.status === DICT_STATUS_ENABLED ? hasPermission('DictManagement:dictType:disable') : hasPermission('DictManagement:dictType:enable')"
               @click.stop="toggleTypeStatus(row as DictTypeRow)"
             >
               {{ row.status === DICT_STATUS_ENABLED ? '停用' : '启用' }}
             </el-button>
-            <el-button link type="danger" @click.stop="handleDeleteType(row as DictTypeRow)">删除</el-button>
+            <el-button v-if="hasPermission('DictManagement:dictType:delete')" link type="danger" @click.stop="handleDeleteType(row as DictTypeRow)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -331,7 +334,12 @@ async function handleDeleteItem(row: DictItemRow) {
       <header class="dict-panel__header">
         <!-- 未选中左侧任何字典类型时标题保持空白，是本页面刻意的默认态 -->
         <h2 class="dict-panel__title">{{ rightPanelTitle }}</h2>
-        <el-button type="primary" :disabled="dictStore.selectedTypeId === null" @click="openCreateItemDialog">
+        <el-button
+          v-if="hasPermission('DictManagement:dictItem:add')"
+          type="primary"
+          :disabled="dictStore.selectedTypeId === null"
+          @click="openCreateItemDialog"
+        >
           新增
         </el-button>
       </header>
@@ -348,16 +356,17 @@ async function handleDeleteItem(row: DictItemRow) {
         <el-table-column prop="showOrder" label="显示序号" width="90" />
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="goToItemDetail(row as DictItemRow)">详情</el-button>
-            <el-button link type="primary" @click="openEditItemDialog(row as DictItemRow)">编辑</el-button>
+            <el-button v-if="hasPermission('DictManagement:dictItem:detail')" link type="primary" @click="goToItemDetail(row as DictItemRow)">详情</el-button>
+            <el-button v-if="hasPermission('DictManagement:dictItem:edit')" link type="primary" @click="openEditItemDialog(row as DictItemRow)">编辑</el-button>
             <el-button
               link
               :type="row.status === DICT_STATUS_ENABLED ? 'warning' : 'success'"
+              v-if="row.status === DICT_STATUS_ENABLED ? hasPermission('DictManagement:dictItem:disable') : hasPermission('DictManagement:dictItem:enable')"
               @click="toggleItemStatus(row as DictItemRow)"
             >
               {{ row.status === DICT_STATUS_ENABLED ? '停用' : '启用' }}
             </el-button>
-            <el-button link type="danger" @click="handleDeleteItem(row as DictItemRow)">删除</el-button>
+            <el-button v-if="hasPermission('DictManagement:dictItem:delete')" link type="danger" @click="handleDeleteItem(row as DictItemRow)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>

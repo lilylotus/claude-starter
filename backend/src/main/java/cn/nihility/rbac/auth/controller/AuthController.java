@@ -1,12 +1,15 @@
 package cn.nihility.rbac.auth.controller;
 
+import cn.nihility.rbac.auth.context.CurrentUserContext;
 import cn.nihility.rbac.auth.dto.ChangePasswordRequest;
 import cn.nihility.rbac.auth.dto.LoginRequest;
 import cn.nihility.rbac.auth.dto.LoginResponse;
+import cn.nihility.rbac.auth.dto.PermissionCodesVO;
 import cn.nihility.rbac.auth.dto.PublicKeyVO;
 import cn.nihility.rbac.auth.dto.RefreshRequest;
 import cn.nihility.rbac.auth.dto.RefreshResponse;
 import cn.nihility.rbac.auth.service.AuthService;
+import cn.nihility.rbac.auth.service.AuthorizationService;
 import cn.nihility.rbac.common.result.Result;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -18,9 +21,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 登录认证接口：获取 RSA 公钥、口令登录、access-key 刷新、修改密码。前三个接口在
- * {@code IdentityAuthFilter} 白名单内，无需携带 {@code identity-token}；修改密码接口
- * 需要携带有效 {@code identity-token}，但豁免"首登强制改密"拦截。
+ * 登录认证接口：获取 RSA 公钥、口令登录、access-key 刷新、修改密码、查询当前用户权限编码。
+ * 前三个接口在 {@code IdentityAuthFilter} 白名单内，无需携带 {@code identity-token}；
+ * 修改密码、查询权限编码两个接口均需要携带有效 {@code identity-token}，但豁免
+ * "首登强制改密"拦截与"权限编码校验"（详见 {@code IdentityAuthFilter} 类头注释）。
  */
 @RestController
 @RequiredArgsConstructor
@@ -29,6 +33,9 @@ public class AuthController {
 
     /** 登录认证业务逻辑接口。 */
     private final AuthService authService;
+
+    /** 运行时鉴权业务逻辑接口，用于查询当前登录用户拥有的权限编码集合。 */
+    private final AuthorizationService authorizationService;
 
     /**
      * 获取当前生效的 RSA 公钥。
@@ -77,5 +84,19 @@ public class AuthController {
     public Result<Void> changePassword(@Valid @RequestBody ChangePasswordRequest request) {
         authService.changePassword(request);
         return Result.success();
+    }
+
+    /**
+     * 查询当前登录用户当前拥有的全部权限编码集合。
+     *
+     * @return 权限编码集合响应
+     */
+    @Operation(summary = "查询当前用户权限编码",
+            description = "返回当前登录用户当前拥有的全部权限编码集合，供前端过滤菜单/按钮展示；"
+                    + "自助查询，不受目标权限编码本身是否已授权约束")
+    @GetMapping("/api/auth/permissions")
+    public PermissionCodesVO myPermissions() {
+        Long userId = CurrentUserContext.getUserId();
+        return PermissionCodesVO.builder().codes(authorizationService.getGrantedPermissionCodes(userId)).build();
     }
 }

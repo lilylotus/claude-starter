@@ -8,6 +8,9 @@ import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import { FORM_FIELD_BIZ_TYPE_OPTIONS, type FormFieldBizType } from '@/types/metadataField'
 import { FORM_FIELD_STATUS_ENABLED, type FormFieldDefinition } from '@/types/formField'
 import type { ImportFieldConfig } from '@/types/importFieldConfig'
+import { usePermission } from '@/composables/usePermission'
+
+const { hasPermission } = usePermission()
 
 // "导入模板配置" tab：按业务对象类型（组织/人员/任职/应用）维护 Excel 导入字段配置
 // 列表（按 showOrder 升序，后端已排好序），驱动导入模板生成与批量导入的表头匹配、
@@ -238,7 +241,7 @@ async function handleDelete(row: ImportFieldConfig) {
     </el-tabs>
 
     <div class="import-field-config-toolbar">
-      <el-button type="primary" @click="openCreateDialog">新增</el-button>
+      <el-button v-if="hasPermission('FormFieldManagement:importFieldConfig:add')" type="primary" @click="openCreateDialog">新增</el-button>
     </div>
 
     <el-table v-loading="listLoading" :data="list" empty-text="暂无导入字段配置">
@@ -266,9 +269,9 @@ async function handleDelete(row: ImportFieldConfig) {
       <el-table-column prop="showOrder" label="显示序号" width="90" />
       <el-table-column label="操作" width="160" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click="openEditDialog(row as ImportFieldConfig)">编辑</el-button>
+          <el-button v-if="hasPermission('FormFieldManagement:importFieldConfig:edit')" link type="primary" @click="openEditDialog(row as ImportFieldConfig)">编辑</el-button>
           <el-button
-            v-if="!(row as ImportFieldConfig).locked"
+            v-if="!(row as ImportFieldConfig).locked && hasPermission('FormFieldManagement:importFieldConfig:delete')"
             link
             type="danger"
             @click="handleDelete(row as ImportFieldConfig)"

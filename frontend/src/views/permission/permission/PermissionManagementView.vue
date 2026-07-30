@@ -8,9 +8,11 @@ import { usePermissionStore } from '@/stores/permission'
 import * as permissionApi from '@/api/permission'
 import { PERMISSION_STATUS_ENABLED, type PermissionFormRequest, type PermissionRow } from '@/types/permission'
 import { buildPermissionTree, resolvePermissionModuleLabel, type PermissionTreeNode } from '@/utils/permissionTree'
+import { usePermission } from '@/composables/usePermission'
 
 const permissionStore = usePermissionStore()
 const router = useRouter()
+const { hasPermission } = usePermission()
 
 // ---- 按模块分组的两层虚拟树（分组算法复用 src/utils/permissionTree.ts，与角色管理
 // 弹窗内的权限点勾选树共用同一份实现，分组节点的中文模块名解析同样复用共享的
@@ -176,7 +178,7 @@ async function handleDelete(row: PermissionRow) {
         <div class="permission-panel__actions">
           <el-button @click="expandAll">全部展开</el-button>
           <el-button @click="collapseAll">全部收起</el-button>
-          <el-button type="primary" @click="openCreateDialog">新增</el-button>
+          <el-button v-if="hasPermission('PermissionManagement:permission:add')" type="primary" @click="openCreateDialog">新增</el-button>
         </div>
       </header>
 
@@ -202,16 +204,17 @@ async function handleDelete(row: PermissionRow) {
             </el-tag>
             <el-tag v-else type="warning" size="small">停用</el-tag>
             <span class="permission-tree__leaf-actions">
-              <el-button link type="primary" @click.stop="goToDetail(asTreeNode(data).raw!)">详情</el-button>
-              <el-button link type="primary" @click.stop="openEditDialog(asTreeNode(data).raw!)">编辑</el-button>
+              <el-button v-if="hasPermission('PermissionManagement:permission:detail')" link type="primary" @click.stop="goToDetail(asTreeNode(data).raw!)">详情</el-button>
+              <el-button v-if="hasPermission('PermissionManagement:permission:edit')" link type="primary" @click.stop="openEditDialog(asTreeNode(data).raw!)">编辑</el-button>
               <el-button
                 link
                 :type="asTreeNode(data).raw!.status === PERMISSION_STATUS_ENABLED ? 'warning' : 'success'"
+                v-if="asTreeNode(data).raw!.status === PERMISSION_STATUS_ENABLED ? hasPermission('PermissionManagement:permission:disable') : hasPermission('PermissionManagement:permission:enable')"
                 @click.stop="toggleStatus(asTreeNode(data).raw!)"
               >
                 {{ asTreeNode(data).raw!.status === PERMISSION_STATUS_ENABLED ? '停用' : '启用' }}
               </el-button>
-              <el-button link type="danger" @click.stop="handleDelete(asTreeNode(data).raw!)">删除</el-button>
+              <el-button v-if="hasPermission('PermissionManagement:permission:delete')" link type="danger" @click.stop="handleDelete(asTreeNode(data).raw!)">删除</el-button>
             </span>
           </div>
           <div v-else class="permission-tree__group">

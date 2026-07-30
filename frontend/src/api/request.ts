@@ -27,9 +27,15 @@ request.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   if (authStore.accessKey) {
     config.headers.set('identity-token', authStore.accessKey)
   }
-  const permissionKey = router.currentRoute.value.meta.permissionKey
-  if (permissionKey) {
-    config.headers.set('menu', permissionKey)
+  // menu 头优先取调用方显式传入的值（如 getMyPermissions() 这类不依附于当前路由的
+  // 自助接口，调用时机可能早于路由跳转完成，这时 currentRoute 还是旧路由甚至没有
+  // permissionKey，硬取会导致头缺失/错误进而触发下面的"刷新重试"死循环），
+  // 显式值缺失时才回退到当前路由的 permissionKey
+  if (!config.headers.get('menu')) {
+    const permissionKey = router.currentRoute.value.meta.permissionKey
+    if (permissionKey) {
+      config.headers.set('menu', permissionKey)
+    }
   }
   return config
 })

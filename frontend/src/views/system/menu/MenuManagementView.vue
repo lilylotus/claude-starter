@@ -16,9 +16,11 @@ import {
   type MenuResourceRow,
   type MenuResourceTreeNode,
 } from '@/types/menuResource'
+import { usePermission } from '@/composables/usePermission'
 
 const menuStore = useMenuStore()
 const router = useRouter()
+const { hasPermission } = usePermission()
 
 onMounted(() => {
   // 交互模式照抄 OrgManagementView：不在这里主动触发左侧懒加载树的顶级请求
@@ -252,7 +254,7 @@ async function handleDelete(row: MenuResourceRow) {
     <section class="menu-panel menu-panel--table">
       <header class="menu-panel__header">
         <h2 class="menu-panel__title">{{ rightPanelTitle }}</h2>
-        <el-button type="primary" @click="openCreateDialog">新增</el-button>
+        <el-button v-if="hasPermission('MenuManagement:menu:add')" type="primary" @click="openCreateDialog">新增</el-button>
       </header>
 
       <el-table
@@ -276,16 +278,17 @@ async function handleDelete(row: MenuResourceRow) {
         </el-table-column>
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="goToDetail(row as MenuResourceRow)">详情</el-button>
-            <el-button link type="primary" @click="openEditDialog(row as MenuResourceRow)">编辑</el-button>
+            <el-button v-if="hasPermission('MenuManagement:menu:detail')" link type="primary" @click="goToDetail(row as MenuResourceRow)">详情</el-button>
+            <el-button v-if="hasPermission('MenuManagement:menu:edit')" link type="primary" @click="openEditDialog(row as MenuResourceRow)">编辑</el-button>
             <el-button
               link
               :type="row.status === MENU_STATUS_ENABLED ? 'warning' : 'success'"
+              v-if="row.status === MENU_STATUS_ENABLED ? hasPermission('MenuManagement:menu:disable') : hasPermission('MenuManagement:menu:enable')"
               @click="toggleStatus(row as MenuResourceRow)"
             >
               {{ row.status === MENU_STATUS_ENABLED ? '停用' : '启用' }}
             </el-button>
-            <el-button link type="danger" @click="handleDelete(row as MenuResourceRow)">删除</el-button>
+            <el-button v-if="hasPermission('MenuManagement:menu:delete')" link type="danger" @click="handleDelete(row as MenuResourceRow)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>

@@ -1,10 +1,14 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { MENU_GROUPS } from '@/router/menu'
+import { MENU_GROUPS, filterMenuGroups } from '@/router/menu'
+import { usePermission } from '@/composables/usePermission'
 
 defineProps<{ collapsed: boolean }>()
 
 const route = useRoute()
+const { hasPermission } = usePermission()
+const visibleGroups = computed(() => filterMenuGroups(MENU_GROUPS, hasPermission))
 </script>
 
 <template>
@@ -28,7 +32,7 @@ const route = useRoute()
       router
       unique-opened
     >
-      <el-sub-menu v-for="group in MENU_GROUPS" :key="group.key" :index="group.key">
+      <el-sub-menu v-for="group in visibleGroups" :key="group.key" :index="group.key">
         <template #title>
           <el-icon><component :is="group.icon" /></el-icon>
           <span>{{ group.title }}</span>

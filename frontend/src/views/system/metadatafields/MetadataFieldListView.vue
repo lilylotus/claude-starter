@@ -10,6 +10,9 @@ import {
   type FormFieldBizType,
   type MetadataField,
 } from '@/types/metadataField'
+import { usePermission } from '@/composables/usePermission'
+
+const { hasPermission } = usePermission()
 
 // 元数据配置页面：按业务对象类型（组织/人员/任职/应用）切换查看"可开放配置"的表字段目录；
 // 目录只能通过数据库迁移预置，本页面支持编辑字段名称/字段标识（同一 bizType 下唯一）、
@@ -155,11 +158,12 @@ async function toggleStatus(row: MetadataField) {
       </el-table-column>
       <el-table-column label="操作" width="220" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click="openDetailDialog(row as MetadataField)">详情</el-button>
-          <el-button link type="primary" @click="openEditDialog(row as MetadataField)">编辑</el-button>
+          <el-button v-if="hasPermission('MetadataFieldManagement:metadataField:detail')" link type="primary" @click="openDetailDialog(row as MetadataField)">详情</el-button>
+          <el-button v-if="hasPermission('MetadataFieldManagement:metadataField:edit')" link type="primary" @click="openEditDialog(row as MetadataField)">编辑</el-button>
           <el-button
             link
             :type="(row as MetadataField).status === METADATA_FIELD_STATUS_ENABLED ? 'warning' : 'success'"
+            v-if="(row as MetadataField).status === METADATA_FIELD_STATUS_ENABLED ? hasPermission('MetadataFieldManagement:metadataField:disable') : hasPermission('MetadataFieldManagement:metadataField:enable')"
             @click="toggleStatus(row as MetadataField)"
           >
             {{ (row as MetadataField).status === METADATA_FIELD_STATUS_ENABLED ? '停用' : '启用' }}
