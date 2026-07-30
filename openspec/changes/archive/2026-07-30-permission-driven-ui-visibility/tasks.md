@@ -4,7 +4,7 @@
 - [x] 1.2 新增响应 DTO（如 `auth/dto/PermissionCodesVO`，字段 `Set<String> codes`）。
 - [x] 1.3 `AuthController` 注入 `AuthorizationService`，新增 `GET /api/auth/permissions`，从 `CurrentUserContext.getUserId()` 取当前用户 id，加 `@Operation`/`@Tag` 注解说明。
 - [x] 1.4 `IdentityAuthFilter` 的 `FIRST_LOGIN_WHITELIST` 加入 `/api/auth/permissions`，确认类上注释同步说明该路径新增的用途（"查询自身权限，自助操作，不受角色权限点约束"）。
-- [ ] 1.5 手动验证：用不同权限的账号调用该接口，返回的 `codes` 与该账号角色关联的权限点一致；未携带 `identity-token` 调用返回未登录错误。
+- [x] 1.5 手动验证（归档后补做，直接对运行中的后端发请求验证，未通过浏览器）：`admin` 账号登录后携带合法 `identity-token`+`menu` 头调用，返回该账号当前拥有的全量权限编码集合（管理员角色下 ~90+ 条编码）；不携带 `menu` 头返回 `401 缺少合法的操作资源标识`；携带一个伪造/过期的 `identity-token` 返回 `401 登录状态已失效`；完全不携带 `identity-token` 返回 `401 未登录`。未验证"仅分配少量权限点的受限角色账号"这一档（当前种子数据只有管理员账号，需要先建一个受限角色测试账号才能补齐这一半）。
 
 ## 2. 前端：权限编码 store 与复用能力
 
@@ -18,6 +18,7 @@
 
 - [x] 3.1 `router/index.ts` 的 `beforeEach` 里，在现有登录态判断（步骤 1）、首登改密判断（步骤 2）之后新增：若 `authStore.isLoggedIn && authStore.firstLogin === false && !currentUserPermissionStore.loaded`，`await currentUserPermissionStore.loadCodes()`。
 - [x] 3.2 `beforeEach` 里新增权限校验步骤：若 `to.meta.permissionKey` 存在且 `!hasPermission(to.meta.permissionKey)`，`ElMessage.warning('没有权限访问该页面')` 并重定向到 `/dashboard`（不放行本次导航）。
+- [x] 3.4（归档后发现并修复的问题，原任务清单未预见）用户反馈"偶尔点击菜单会刷新整个页面重新加载"。根因：`beforeEach` 里 `await currentUserPermissionStore.loadCodes()` 是一次真实网络请求，当 access-key/refresh-key 均已失效（例如标签页闲置很久后才点菜单）时该请求会失败——`axios` 响应拦截器内部的静默刷新也会失败并调用 `redirectToLogin()`（清空登录态、另外发起一次跳转登录页的导航），但原始的失败还会继续沿 `loadCodes()` → `beforeEach` 往上抛；`<el-menu>`（Element Plus `menu.mjs`）内部触发导航时用的是 `router.push(route).then(...)`，没有写 `.catch()`，异常逃逸出去变成未处理的 Promise rejection，与 `redirectToLogin()` 发起的登录页跳转互相竞争，表现为页面状态被整个刷新重置。修复两处：① `stores/currentUserPermission.ts` 的 `loadCodes()` 改为单飞（与 `request.ts` 里 `triggerRefresh()` 的 `refreshingPromise` 同一模式），避免连续快速点击在首次加载完成前触发多个并发请求；② `router/index.ts` 的 `beforeEach` 给 `await loadCodes()` 包一层 `try/catch`，失败时 `return false` 放弃本次导航，不再让异常向外抛。已用 Node 脚本直接对运行中的后端复现"过期 token/过期 refresh-key 均返回 401"这条根因链路，未能用真实浏览器复现"页面视觉上被重置"这一表现（本环境未安装 Chrome 扩展）。
 - [ ] 3.3 手动验证：用一个只分配了部分权限点的测试角色账号登录后，直接在地址栏输入一个未授权页面的 URL，确认被拦截跳转且看不到目标页面内容；浏览器刷新页面后再次直接访问业务页面，确认权限编码被重新加载（而不是因为内存状态清空而误判无权限）。（未执行——后端 `GET /api/auth/permissions` 接口与本轮前后端并行开发，本次实现时尚未联调验证；已通过代码走查确认逻辑符合设计，待后端接口就绪后需要一次真实登录验证）
 
 ## 4. 前端：侧边栏菜单过滤
@@ -46,3 +47,4 @@
 ## 6. 文档同步
 
 - [x] 6.1 全部实现完成后，调用 `openspec-doc-sync` 对齐本 change 的 `proposal.md`/`design.md`/`tasks.md` 与实际实现结果（如果实现中发现某些视图的按钮编码与本清单不一致，以实际代码为准更新本文档）。实现中发现并修复了一处 design.md 未记录的偏差（路由守卫需豁免 `change-password` 的 `permissionKey` 校验，避免首登无限重定向），已补充进 Decision 6 与 Risks/Trade-offs。
+- [x] 6.2（change 归档后补的两轮修复，同步文档）第一轮：`getMyPermissions()` 未显式携带 `menu` 头导致 `/api/auth/refresh` 与 `/api/auth/permissions` 互相触发死循环，已修复并补充进 Decision 2；第二轮：见 3.4，`beforeEach` 未捕获 `loadCodes()` 失败导致偶发"整页刷新重置"，已修复并补充进 Decision 6。两轮修复也已同步进 `openspec/specs/permission-driven-visibility/spec.md`（主 spec，非本 change 目录下的 delta spec，因为 change 已归档，delta spec 已经完成历史使命）。

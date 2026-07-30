@@ -204,6 +204,38 @@ permissionKey))`。这不是削弱安全边界——`/change-password` 本身要
 新增一个独立字段（如 `skipPermissionCheck: true`）来显式区分这两种语义，而不是继续在
 `beforeEach` 里堆加按路由名判断的特例分支。
 
+**归档后发现并已修复的第二处问题：`loadCodes()` 失败时 `beforeEach` 不能让异常逃逸出去。**
+用户反馈"偶尔点击菜单会刷新整个页面重新加载"。根因：第 1 步 `await currentUserPermissionStore.
+loadCodes()` 是一次真实网络请求，当 access-key 与 refresh-key **同时**已失效（最典型场景：
+标签页闲置超过两者的有效期后才点击菜单）时，这个请求会失败——`api/request.ts` 的响应拦截器
+在内部先尝试静默刷新（`triggerRefresh()`），刷新同样失败后会调用 `redirectToLogin()`
+（清空登录态，另外发起一次 `router.push({ name: 'login' })`），但原始的失败依然会继续沿
+`getMyPermissions()` → `loadCodes()` → `beforeEach` 往上抛出。触发这次导航的
+`<el-menu>`（Element Plus `menu.mjs` 源码）内部是 `router.push(route).then((res) => {...})`，
+**没有写 `.catch()`**，于是这个异常变成一次未处理的 Promise rejection，恰好和
+`redirectToLogin()` 另外发起的登录页跳转互相竞争——两个导航同时发生，表现为页面状态被整个
+刷新重置，用户感知为"点了菜单，整个页面刷新重新加载"。
+
+已用 Node 脚本直接对运行中的后端复现这条根因链路上的每一环（详见 `tasks.md` 3.4）：
+- 不携带 `menu` 头 → `401 缺少合法的操作资源标识`
+- 携带过期/伪造的 `identity-token` → `401 登录状态已失效`
+- 携带过期/伪造的 `refreshKey` 调 `/api/auth/refresh` → `401 刷新令牌无效或已过期`
+
+三个响应码都印证了"两个 token 同时失效时，`loadCodes()` 必然失败"这一假设；受限于本环境未
+安装 Chrome 扩展，没有用真实浏览器复现"页面被视觉上重置"这一表现本身，但网络层面的因果链条
+已经闭环。
+
+修复两处（不改变 Decision 6 第 1、2 步的行为语义，只是让失败路径不再向外抛异常）：
+1. `stores/currentUserPermission.ts` 的 `loadCodes()` 改为单飞（复用 `api/request.ts` 里
+   `triggerRefresh()`/`refreshingPromise` 的同一模式：用一个模块级 `loadingPromise` 变量
+   去重，进行中的加载请求被并发的第二次导航复用同一个 Promise，而不是各打各的请求）——
+   这本身不解决"失败仍会抛出"的问题，但收窄了并发窗口，减少连续快速点击时同时触发多个
+   失败请求、多次竞争的概率。
+2. `router/index.ts` 的 `beforeEach` 给 `await currentUserPermissionStore.loadCodes()`
+   包一层 `try/catch`：加载失败时直接 `return false`（放弃本次导航），不再让异常继续往外
+   传播。`redirectToLogin()` 已经在错误发生的当下把用户带去登录页，`beforeEach` 这里要做的
+   只是"不要再添乱"——两个导航不再竞争，也不会出现未处理的 Promise rejection。
+
 ### Decision 7：按钮级门控只覆盖 12 个已实现业务页面，按 `权限资源.txt` 逐条对齐
 范围：`OrgManagementView`、`UserManagementView`、`PositionManagementView`、
 `AppManagementView`、`RoleManagementView`、`PermissionManagementView`、
@@ -238,3 +270,14 @@ permissionKey))`。这不是削弱安全边界——`/change-password` 本身要
   password'` 豁免条件。记录在此是为了提醒：`meta.permissionKey` 目前混用了"真实业务权限
   点"和"仅供请求头格式占位"两种语义，未来新增此类占位路由时需要同样处理，否则会复现
   同一类无限重定向问题。
+- **[风险，归档后发现并修复] `loadCodes()` 网络请求失败会以未处理 Promise rejection 的形式
+  逃逸，和 `redirectToLogin()` 竞争出"整页刷新重置"的观感**：`beforeEach` 第 1 步引入了本次
+  改动之前从未存在过的"路由守卫内发起真实网络请求"这一新行为——此前 `beforeEach` 全是同步
+  判断，从不会失败；本次改动后，一旦 access-key/refresh-key 同时失效（典型场景：标签页闲置
+  超过两者有效期后才点菜单），`loadCodes()` 会失败，而 `<el-menu>`（Element Plus 内部）触发
+  导航用的 `router.push(route).then(...)` 没有 `.catch()`，异常没人接住。已修复：`loadCodes()`
+  加单飞去重，`beforeEach` 给这一步包 `try/catch` 并在失败时 `return false`（详见上方
+  Decision 6 补充说明、`tasks.md` 3.4）。记录在此是为了提醒：以后如果在 `beforeEach` 里追加
+  更多异步操作，必须同样确保失败路径不会向外抛异常——`vue-router` 的全局导航守卫和触发导航
+  的第三方组件（这里是 Element Plus 的 `<el-menu router>`）之间，没有任何一方会替你兜底这个
+  错误。

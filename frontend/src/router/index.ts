@@ -174,7 +174,17 @@ router.beforeEach(async (to) => {
   //    以及侧边栏菜单过滤使用
   const currentUserPermissionStore = useCurrentUserPermissionStore()
   if (authStore.isLoggedIn && !authStore.firstLogin && !currentUserPermissionStore.loaded) {
-    await currentUserPermissionStore.loadCodes()
+    try {
+      await currentUserPermissionStore.loadCodes()
+    } catch {
+      // 加载失败通常是因为 access-key/refresh-key 均已失效（比如标签页闲置很久后才点
+      // 菜单）：axios 响应拦截器内部已经调用 redirectToLogin() 清空登录态并另外发起了
+      // 一次跳转登录页的导航。这里必须放弃本次导航而不是让异常继续往外抛——
+      // el-menu 的 router.push(route).then(...) 没有写 .catch()（Element Plus
+      // menu.mjs 源码如此），异常逃逸出去会变成一个未处理的 Promise rejection，并且
+      // 和 redirectToLogin() 发起的登录页跳转互相竞争，表现为页面状态被整个刷新重置
+      return false
+    }
   }
 
   // 4. 目标路由声明了 permissionKey，但当前用户不拥有该权限编码：拦截导航，
