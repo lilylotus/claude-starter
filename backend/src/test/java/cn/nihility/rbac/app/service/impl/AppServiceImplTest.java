@@ -14,6 +14,7 @@ import cn.nihility.rbac.app.dto.AppUpdateRequest;
 import cn.nihility.rbac.app.dto.AppVO;
 import cn.nihility.rbac.app.entity.AppEntity;
 import cn.nihility.rbac.app.mapper.AppMapper;
+import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
@@ -22,10 +23,16 @@ import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.apache.ibatis.session.Configuration;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -64,21 +71,40 @@ class AppServiceImplTest {
     @Mock
     private FormFieldSnapshotSupport formFieldSnapshotSupport;
 
+    /** 被测服务的管辖组织范围解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private OrgScopeService orgScopeService;
+
     /** 被测服务实例。 */
     private AppServiceImpl appService;
 
     /**
+     * MyBatis-Plus 的 {@code LambdaQueryWrapper} 需要先有实体的 {@code TableInfo} 缓存才能在
+     * 脱离 Spring 容器的纯单元测试里调用 {@code getSqlSegment()} 做条件断言（正常启动时该
+     * 缓存由 Spring Boot 扫描 Mapper 时自动建立），这里手动触发一次初始化，仅供本测试类使用。
+     */
+    @BeforeAll
+    static void primeLambdaColumnCache() {
+        Configuration configuration = new Configuration();
+        MapperBuilderAssistant assistant = new MapperBuilderAssistant(configuration, "appServiceImplTest");
+        assistant.setCurrentNamespace(AppEntity.class.getName());
+        TableInfoHelper.initTableInfo(assistant, AppEntity.class);
+    }
+
+    /**
      * 每个用例执行前重新构造被测服务；实体/DTO 转换通过 {@code AppConvert.INSTANCE}
      * 静态调用完成，无需在此注入或 mock。动态字段定义默认桩为空列表，各分支逻辑测试
-     * 不受"表单字段定义"驱动的校验管线影响。
+     * 不受"表单字段定义"驱动的校验管线影响。管辖组织范围默认桩为 {@code Optional.empty()}
+     * （不受限制），受限场景在下方单独的用例中覆盖。
      */
     @BeforeEach
     void setUp() {
         appService = new AppServiceImpl(appMapper, userMapper, orgMapper, operationLogRecorder,
-                formFieldDefinitionService, formFieldSnapshotSupport);
+                formFieldDefinitionService, formFieldSnapshotSupport, orgScopeService);
         lenient().when(userMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
+        lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.empty());
     }
 
     /**
@@ -98,6 +124,42 @@ class AppServiceImplTest {
         assertThat(pageResult.getPageSize()).isEqualTo(10);
         assertThat(pageResult.getRecords()).hasSize(1);
         assertThat(pageResult.getRecords().get(0).getId()).isEqualTo(10L);
+    }
+
+    /**
+     * 分页查询受限时，应追加 org_id IN (:allowedOrgIds) 过滤条件
+     * （org-scope-data-permission change design.md Decision 6）。
+     */
+    @Test
+    void getPage_shouldAppendOrgIdInCondition_whenScopeRestricted() {
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(100L, 200L)));
+        Page<AppEntity> resultPage = new Page<>(1, 10, 0L);
+        resultPage.setRecords(List.of());
+        when(appMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(resultPage);
+
+        appService.getPage(1, 10);
+
+        ArgumentCaptor<LambdaQueryWrapper<AppEntity>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(appMapper).selectPage(any(Page.class), captor.capture());
+        assertThat(captor.getValue().getSqlSegment()).contains("orgId IN");
+    }
+
+    /**
+     * 分页查询受限且管辖范围解析结果意外为空集合时，应改用恒不匹配的哨兵条件，
+     * 不直接把空集合传给 {@code .in(...)}（design.md Decision 6 防御性写法）。
+     */
+    @Test
+    void getPage_shouldUseSentinelCondition_whenAllowedOrgIdsUnexpectedlyEmpty() {
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of()));
+        Page<AppEntity> resultPage = new Page<>(1, 10, 0L);
+        resultPage.setRecords(List.of());
+        when(appMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(resultPage);
+
+        appService.getPage(1, 10);
+
+        ArgumentCaptor<LambdaQueryWrapper<AppEntity>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(appMapper).selectPage(any(Page.class), captor.capture());
+        assertThat(captor.getValue().getSqlSegment()).contains("id = ").doesNotContain("orgId IN");
     }
 
     /**

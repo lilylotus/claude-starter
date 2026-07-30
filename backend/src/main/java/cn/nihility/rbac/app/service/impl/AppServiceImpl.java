@@ -8,6 +8,8 @@ import cn.nihility.rbac.app.entity.AppEntity;
 import cn.nihility.rbac.app.mapper.AppMapper;
 import cn.nihility.rbac.app.mapstruct.AppConvert;
 import cn.nihility.rbac.app.service.AppService;
+import cn.nihility.rbac.auth.context.CurrentUserContext;
+import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.formfield.constant.FormFieldBizType;
@@ -28,6 +30,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -73,6 +76,12 @@ public class AppServiceImpl implements AppService {
     private final FormFieldSnapshotSupport formFieldSnapshotSupport;
 
     /**
+     * 管辖组织范围解析业务逻辑接口，用于按当前登录用户的管辖组织范围过滤应用列表
+     * （org-scope-data-permission change design.md Decision 6）。
+     */
+    private final OrgScopeService orgScopeService;
+
+    /**
      * {@inheritDoc}
      */
     @Override
@@ -81,6 +90,23 @@ public class AppServiceImpl implements AppService {
                 .ne(AppEntity::getStatus, AppStatus.DELETED)
                 .orderByDesc(AppEntity::getShowOrder)
                 .orderByAsc(AppEntity::getId);
+
+        // 该接口此前完全没有组织维度的过滤逻辑；受限时追加 org_id IN (:allowedOrgIds)
+        // 过滤条件，不受限时行为不变（org-scope-data-permission change design.md
+        // Decision 6）。
+        Optional<Set<Long>> allowedOrgIds = orgScopeService.resolveAllowedOrgIds(CurrentUserContext.getUserId());
+        if (allowedOrgIds.isPresent()) {
+            Set<Long> allowed = allowedOrgIds.get();
+            if (allowed.isEmpty()) {
+                // 防御性写法：按设计 resolveAllowedOrgIds 返回非空 Optional 时其内部 Set
+                // 理论上必然非空，但不依赖这个隐含前提，避免不同版本 MyBatis-Plus 对空集合
+                // .in() 生成的 SQL 行为不一致（可能生成恒真或语法错误的 SQL），改用恒不匹配
+                // 的哨兵条件。
+                wrapper.eq(AppEntity::getId, -1L);
+            } else {
+                wrapper.in(AppEntity::getOrgId, allowed);
+            }
+        }
 
         Page<AppEntity> queryPage = new Page<>(page, pageSize);
         Page<AppEntity> resultPage = appMapper.selectPage(queryPage, wrapper);

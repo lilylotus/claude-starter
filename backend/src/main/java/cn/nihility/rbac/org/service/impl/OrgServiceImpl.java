@@ -1,5 +1,7 @@
 package cn.nihility.rbac.org.service.impl;
 
+import cn.nihility.rbac.auth.context.CurrentUserContext;
+import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.formfield.constant.FormFieldBizType;
@@ -26,6 +28,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -68,11 +71,28 @@ public class OrgServiceImpl implements OrgService {
     private final FormFieldSnapshotSupport formFieldSnapshotSupport;
 
     /**
+     * 管辖组织范围解析业务逻辑接口，用于按当前登录用户的管辖组织范围过滤组织树/列表
+     * （org-scope-data-permission change design.md Decision 4）。
+     */
+    private final OrgScopeService orgScopeService;
+
+    /**
      * {@inheritDoc}
      */
     @Override
     public List<OrgTreeNodeVO> getTree() {
         List<OrgEntity> entities = listAllUndeletedOrdered();
+
+        // 受限时先按"id 在允许集合内"过滤，再用下面完全不变的既有树组装算法组装：过滤后的
+        // 实体列表里，某个允许节点的真实上级组织 id 可能已经不在过滤后的 nodeMap 里，
+        // 导致该节点在原算法眼里"找不到父节点"从而被收进 roots——这就是"虚拟根节点"效果，
+        // 是过滤 + 复用原算法的自然结果，不要在这里另写"虚拟根节点"的特判分支
+        // （org-scope-data-permission change design.md Decision 4）。
+        Optional<Set<Long>> allowedOrgIds = orgScopeService.resolveAllowedOrgIds(CurrentUserContext.getUserId());
+        if (allowedOrgIds.isPresent()) {
+            Set<Long> allowed = allowedOrgIds.get();
+            entities = entities.stream().filter(entity -> allowed.contains(entity.getId())).toList();
+        }
 
         Map<Long, OrgTreeNodeVO> nodeMap = new LinkedHashMap<>();
         for (OrgEntity entity : entities) {
@@ -98,10 +118,20 @@ public class OrgServiceImpl implements OrgService {
     @Override
     public PageResult<OrgVO> getChildren(Long parentId, Integer page, Integer pageSize) {
         long effectiveParentId = parentId != null ? parentId : ROOT_PARENT_ID;
-        Page<OrgEntity> queryPage = new Page<>(page, pageSize);
-        Page<OrgEntity> resultPage = orgMapper.selectPage(queryPage, childrenQueryWrapper(effectiveParentId));
-        List<OrgVO> records = toVOListWithParentName(resultPage.getRecords());
-        return PageResult.of(records, resultPage);
+
+        // 不受限时行为完全不变：继续用 orgMapper.selectPage 做数据库侧分页，分页元信息
+        // 直接取自其 IPage 返回值。受限时过滤发生在应用层（见 queryChildrenRespectingScope），
+        // 不能再依赖 selectPage 的 IPage 元信息（那是过滤前的总数），需要基于过滤后的列表
+        // 手工计算分页（org-scope-data-permission change design.md Decision 4 / tasks 4.4）。
+        if (orgScopeService.resolveAllowedOrgIds(CurrentUserContext.getUserId()).isEmpty()) {
+            Page<OrgEntity> queryPage = new Page<>(page, pageSize);
+            Page<OrgEntity> resultPage = orgMapper.selectPage(queryPage, childrenQueryWrapper(effectiveParentId));
+            List<OrgVO> records = toVOListWithParentName(resultPage.getRecords());
+            return PageResult.of(records, resultPage);
+        }
+
+        List<OrgEntity> filtered = queryChildrenRespectingScope(effectiveParentId);
+        return paginateFiltered(filtered, page, pageSize);
     }
 
     /**
@@ -110,7 +140,7 @@ public class OrgServiceImpl implements OrgService {
     @Override
     public List<OrgTreeNodeVO> getChildrenTreeNodes(Long parentId) {
         long effectiveParentId = parentId != null ? parentId : ROOT_PARENT_ID;
-        List<OrgEntity> entities = orgMapper.selectList(childrenQueryWrapper(effectiveParentId));
+        List<OrgEntity> entities = queryChildrenRespectingScope(effectiveParentId);
 
         List<OrgTreeNodeVO> nodes = new ArrayList<>();
         for (OrgEntity entity : entities) {
@@ -262,6 +292,71 @@ public class OrgServiceImpl implements OrgService {
                 .ne(OrgEntity::getStatus, OrgStatus.DELETED)
                 .orderByDesc(OrgEntity::getShowOrder)
                 .orderByAsc(OrgEntity::getId);
+    }
+
+    /**
+     * 按当前用户管辖组织范围查询某个上级组织的全部直属子组织实体，供 {@link #getChildren}
+     * 与 {@link #getChildrenTreeNodes} 共用（org-scope-data-permission change design.md
+     * Decision 4）。不受限时行为完全不变，直接走原有 {@link #childrenQueryWrapper} 查询；
+     * 受限时：
+     * <ul>
+     * <li>{@code effectiveParentId == 0}（顶层查询）：不能再简单按 {@code parentId = 0} 查——
+     * 管辖范围中间层节点的真实 {@code parentId} 不是 0，直接查会漏掉它，改为在全部未删除组织中
+     * 过滤出"id 在允许集合内，且真实 parentId 不在允许集合内"的节点，这正是"虚拟根节点"
+     * 的定义（自身可见，但上级不可见，所以对当前调用者而言它就是顶层）。</li>
+     * <li>{@code effectiveParentId != 0}：若该 id 本身不在允许集合内，直接返回空列表
+     * （不区分"该 id 不存在"和"存在但不在管辖范围内"，避免用错误信息反向确认某个 org id
+     * 是否存在）；若在允许集合内，按原查询条件查询后再按允许集合过滤一次（正常情况下这层
+     * 过滤是多余的——include_children 展开已保证任何允许节点的直属子节点也在允许集合里——
+     * 但作为防御性兜底保留）。</li>
+     * </ul>
+     *
+     * @param effectiveParentId 上级组织 id，0 表示顶层
+     * @return 直属子组织实体列表（受限顶层查询时可能是不同真实 parentId 的"虚拟根节点"集合）
+     */
+    private List<OrgEntity> queryChildrenRespectingScope(long effectiveParentId) {
+        Optional<Set<Long>> allowedOrgIdsOpt = orgScopeService.resolveAllowedOrgIds(CurrentUserContext.getUserId());
+        if (allowedOrgIdsOpt.isEmpty()) {
+            return orgMapper.selectList(childrenQueryWrapper(effectiveParentId));
+        }
+
+        Set<Long> allowedOrgIds = allowedOrgIdsOpt.get();
+        if (effectiveParentId == ROOT_PARENT_ID) {
+            return listAllUndeletedOrdered().stream()
+                    .filter(entity -> allowedOrgIds.contains(entity.getId())
+                            && !allowedOrgIds.contains(entity.getParentId()))
+                    .toList();
+        }
+
+        if (!allowedOrgIds.contains(effectiveParentId)) {
+            return List.of();
+        }
+        return orgMapper.selectList(childrenQueryWrapper(effectiveParentId)).stream()
+                .filter(entity -> allowedOrgIds.contains(entity.getId()))
+                .toList();
+    }
+
+    /**
+     * 对已按管辖范围过滤好的组织实体列表在应用层手工做分页切片并构造分页响应
+     * （org-scope-data-permission change design.md Decision 4 / tasks 4.4）：过滤发生在
+     * 应用层之后，不能再依赖 {@code orgMapper.selectPage} 返回的 {@code IPage} 元信息
+     * （那是过滤前的总数），分页的 {@code total}/{@code page}/{@code pageSize} 需要基于
+     * 过滤后的列表自行计算。
+     *
+     * @param filtered 已按管辖范围过滤好的组织实体列表（未分页）
+     * @param page     页码，从 1 开始
+     * @param pageSize 每页条数
+     * @return 分页响应
+     */
+    private PageResult<OrgVO> paginateFiltered(List<OrgEntity> filtered, Integer page, Integer pageSize) {
+        int effectivePage = page != null && page > 0 ? page : 1;
+        int effectivePageSize = pageSize != null && pageSize > 0 ? pageSize : filtered.size();
+        long total = filtered.size();
+
+        int fromIndex = Math.min((effectivePage - 1) * effectivePageSize, filtered.size());
+        int toIndex = Math.min(fromIndex + effectivePageSize, filtered.size());
+        List<OrgVO> records = toVOListWithParentName(filtered.subList(fromIndex, toIndex));
+        return new PageResult<>(records, total, effectivePage, effectivePageSize);
     }
 
     /**

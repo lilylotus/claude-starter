@@ -24,4 +24,14 @@ public interface AdminOrgScopeMapper extends BaseMapper<AdminOrgScopeEntity> {
      * @return 组织管辖范围视图对象列表，按组织显示序号降序、id 升序排列
      */
     List<AdminOrgScopeVO> selectOrgScopesByAdminId(@Param("adminId") Long adminId);
+
+    /**
+     * 按登录用户 id（经 {@code tab_admin} 关联到启用状态的管理员身份）查询其全部组织
+     * 管辖范围原始行，供 {@code OrgScopeService} 解析管辖范围时消费；不回填组织名称
+     * （不是给界面展示用），与 {@link #selectOrgScopesByAdminId} 用途不同、不合并复用。
+     *
+     * @param userId 登录用户 id（{@code tab_user.id}）
+     * @return 组织管辖范围实体列表，用户没有启用状态的管理员身份或未配置任何范围时返回空列表
+     */
+    List<AdminOrgScopeEntity> selectOrgScopesByUserId(@Param("userId") Long userId);
 }

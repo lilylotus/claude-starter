@@ -4,10 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
@@ -24,6 +26,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -53,19 +57,26 @@ class OrgServiceImplTest {
     @Mock
     private FormFieldSnapshotSupport formFieldSnapshotSupport;
 
+    /** 被测服务的管辖组织范围解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private OrgScopeService orgScopeService;
+
     /** 被测服务实例。 */
     private OrgServiceImpl orgService;
 
     /**
      * 每个用例执行前重新构造被测服务；实体/DTO 转换通过 {@code OrgConvert.INSTANCE}
      * 静态调用完成，无需在此注入或 mock。动态字段定义默认桩为空列表，
-     * 各分支逻辑测试不受"表单字段定义"驱动的校验管线影响。
+     * 各分支逻辑测试不受"表单字段定义"驱动的校验管线影响。管辖组织范围默认桩为
+     * {@code Optional.empty()}（不受限制），使既有分支逻辑测试不受本次新增的
+     * 管辖范围过滤影响，虚拟根节点等受限场景在下方单独的用例中覆盖。
      */
     @BeforeEach
     void setUp() {
         orgService = new OrgServiceImpl(orgMapper, operationLogRecorder, formFieldDefinitionService,
-                formFieldSnapshotSupport);
+                formFieldSnapshotSupport, orgScopeService);
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
+        lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.empty());
     }
 
     /**
@@ -132,6 +143,67 @@ class OrgServiceImplTest {
 
         assertThat(nodes).hasSize(1);
         assertThat(nodes.get(0).getParentId()).isEqualTo(0L);
+    }
+
+    /**
+     * 组织树受限（管辖范围为组织树中间层的一个节点）时，该节点应表现为"虚拟根节点"——
+     * 其祖先节点不出现在响应中；不需要额外的"虚拟根节点"特判分支，这是过滤 +
+     * 既有树组装算法的自然结果（org-scope-data-permission change design.md Decision 4）。
+     */
+    @Test
+    void getTree_shouldExposeVirtualRoot_whenScopeRestrictedToMiddleOrg() {
+        OrgEntity root = buildEntity(1L, "总公司", "ROOT", 0L, OrgStatus.ENABLED, 10);
+        OrgEntity middle = buildEntity(2L, "研发中心", "RDC", 1L, OrgStatus.ENABLED, 5);
+        OrgEntity leaf = buildEntity(3L, "研发一部", "RD1", 2L, OrgStatus.ENABLED, 1);
+        when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(root, middle, leaf));
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(2L, 3L)));
+
+        List<OrgTreeNodeVO> tree = orgService.getTree();
+
+        assertThat(tree).hasSize(1);
+        OrgTreeNodeVO virtualRoot = tree.get(0);
+        assertThat(virtualRoot.getId()).isEqualTo(2L);
+        assertThat(virtualRoot.getChildren()).hasSize(1);
+        assertThat(virtualRoot.getChildren().get(0).getId()).isEqualTo(3L);
+    }
+
+    /**
+     * 分页查询直属子组织受限且请求顶层（parentId 为 0）时，管辖范围中间层节点应作为
+     * "虚拟根节点"被识别出来，分页元信息需要基于过滤后的列表手工计算，不能再依赖
+     * {@code orgMapper.selectPage} 的 {@code IPage} 元信息（design.md Decision 4 / tasks 4.4）。
+     */
+    @Test
+    void getChildren_shouldPaginateManually_whenTopLevelRestricted() {
+        OrgEntity root = buildEntity(1L, "总公司", "ROOT", 0L, OrgStatus.ENABLED, 10);
+        OrgEntity branchB = buildEntity(2L, "分公司B", "B", 1L, OrgStatus.ENABLED, 9);
+        OrgEntity branchBChild = buildEntity(3L, "分公司B下级", "C", 2L, OrgStatus.ENABLED, 8);
+        OrgEntity branchD = buildEntity(4L, "分公司D", "D", 1L, OrgStatus.ENABLED, 7);
+        when(orgMapper.selectList(any(LambdaQueryWrapper.class)))
+                .thenReturn(List.of(branchB, branchBChild, branchD, root));
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(2L, 3L, 4L)));
+
+        PageResult<OrgVO> pageResult = orgService.getChildren(null, 1, 1);
+
+        assertThat(pageResult.getTotal()).isEqualTo(2L);
+        assertThat(pageResult.getPage()).isEqualTo(1);
+        assertThat(pageResult.getPageSize()).isEqualTo(1);
+        assertThat(pageResult.getRecords()).hasSize(1);
+        assertThat(pageResult.getRecords().get(0).getId()).isEqualTo(2L);
+    }
+
+    /**
+     * 树懒加载查询下钻某个具体节点时，若该 parentId 本身不在管辖范围内，应直接返回空列表，
+     * 不发起任何数据库查询——不区分"该 id 不存在"和"存在但不在管辖范围内"，避免用查询
+     * 结果反向确认某个 org id 是否存在（design.md Decision 4）。
+     */
+    @Test
+    void getChildrenTreeNodes_shouldReturnEmptyList_whenParentIdOutOfScope() {
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(5L)));
+
+        List<OrgTreeNodeVO> nodes = orgService.getChildrenTreeNodes(10L);
+
+        assertThat(nodes).isEmpty();
+        verify(orgMapper, never()).selectList(any(LambdaQueryWrapper.class));
     }
 
     /**

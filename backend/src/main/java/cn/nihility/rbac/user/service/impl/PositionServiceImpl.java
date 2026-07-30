@@ -1,5 +1,7 @@
 package cn.nihility.rbac.user.service.impl;
 
+import cn.nihility.rbac.auth.context.CurrentUserContext;
+import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
@@ -17,8 +19,11 @@ import cn.nihility.rbac.user.service.support.PositionLogSnapshotSupport;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -52,12 +57,28 @@ public class PositionServiceImpl implements PositionService {
     private final PositionLogSnapshotSupport positionLogSnapshotSupport;
 
     /**
+     * 管辖组织范围解析业务逻辑接口，用于按当前登录用户的管辖组织范围过滤任职列表
+     * （org-scope-data-permission change design.md Decision 5）。
+     */
+    private final OrgScopeService orgScopeService;
+
+    /**
      * {@inheritDoc}
      */
     @Override
     public PageResult<PositionVO> getPage(Long orgId, Integer page, Integer pageSize) {
         if (orgId == null) {
             throw new BusinessException("所属组织不能为空");
+        }
+
+        // 受限且请求的 orgId 不在允许集合内时，直接返回空分页而不是报错：这个接口的既有
+        // 语义是"某个组织下没有任职记录时也是返回空分页，不是报错"，管辖范围之外的组织
+        // 对当前调用者而言观感上应该和"这个组织下没有任职记录"一致，不额外暴露"这个 orgId
+        // 存在但你无权查看"这种更具体的越权探测信号（org-scope-data-permission change
+        // design.md Decision 5）。
+        Optional<Set<Long>> allowedOrgIds = orgScopeService.resolveAllowedOrgIds(CurrentUserContext.getUserId());
+        if (allowedOrgIds.isPresent() && !allowedOrgIds.get().contains(orgId)) {
+            return new PageResult<>(List.of(), 0L, page, pageSize);
         }
 
         IPage<PositionVO> resultPage = userPositionMapper.selectPositionPage(

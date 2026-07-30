@@ -10,6 +10,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.dict.service.DictItemService;
@@ -31,6 +32,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -74,6 +77,10 @@ class PositionServiceImplTest {
     @Mock
     private DictItemService dictItemService;
 
+    /** 被测服务的管辖组织范围解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private OrgScopeService orgScopeService;
+
     /** 被测服务实例。 */
     private PositionServiceImpl positionService;
 
@@ -84,7 +91,8 @@ class PositionServiceImplTest {
      * 已打桩的 {@code formFieldDefinitionService}/{@code userPositionMapper} 构造真实实例，
      * 不额外 mock；{@link PositionLogSnapshotSupport} 同理，直接用已打桩的
      * {@code userMapper}/{@code orgMapper}/{@code formFieldDefinitionService}/
-     * {@code formFieldSnapshotSupport}/{@code dictItemService} 构造真实实例。
+     * {@code formFieldSnapshotSupport}/{@code dictItemService} 构造真实实例。管辖组织范围
+     * 默认桩为 {@code Optional.empty()}（不受限制），受限场景在下方单独的用例中覆盖。
      */
     @BeforeEach
     void setUp() {
@@ -93,8 +101,9 @@ class PositionServiceImplTest {
         PositionLogSnapshotSupport positionLogSnapshotSupport = new PositionLogSnapshotSupport(userMapper, orgMapper,
                 formFieldDefinitionService, formFieldSnapshotSupport, dictItemService);
         positionService = new PositionServiceImpl(userPositionMapper, operationLogRecorder,
-                positionDynamicFieldSupport, positionLogSnapshotSupport);
+                positionDynamicFieldSupport, positionLogSnapshotSupport, orgScopeService);
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
+        lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.empty());
     }
 
     /**
@@ -129,6 +138,39 @@ class PositionServiceImplTest {
         assertThat(pageResult.getRecords().get(0).getId()).isEqualTo(10L);
         assertThat(pageResult.getRecords().get(0).getUserName()).isEqualTo("张三");
         assertThat(pageResult.getRecords().get(0).getOrgName()).isEqualTo("研发部");
+    }
+
+    /**
+     * 分页查询时若受限且请求的 orgId 不在管辖范围内，应直接返回空分页而不是报错，且不
+     * 发起真正的分页查询（org-scope-data-permission change design.md Decision 5）。
+     */
+    @Test
+    void getPage_shouldReturnEmptyPageResult_whenOrgIdOutOfScope() {
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(200L)));
+
+        PageResult<PositionVO> pageResult = positionService.getPage(100L, 1, 10);
+
+        assertThat(pageResult.getTotal()).isZero();
+        assertThat(pageResult.getRecords()).isEmpty();
+        verify(userPositionMapper, never()).selectPositionPage(any(), any(), anyInt());
+    }
+
+    /**
+     * 分页查询时若受限但请求的 orgId 在管辖范围内，应正常发起分页查询。
+     */
+    @Test
+    void getPage_shouldQueryNormally_whenOrgIdInScope() {
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(100L)));
+        PositionVO record = buildVO(10L, 1L, "张三", 100L, "研发部", PositionStatus.ENABLED);
+        Page<PositionVO> resultPage = new Page<>(1, 10, 1L);
+        resultPage.setRecords(List.of(record));
+        when(userPositionMapper.selectPositionPage(any(IPage.class), eq(100L), eq(PositionStatus.DELETED)))
+                .thenReturn(resultPage);
+
+        PageResult<PositionVO> pageResult = positionService.getPage(100L, 1, 10);
+
+        assertThat(pageResult.getTotal()).isEqualTo(1L);
+        assertThat(pageResult.getRecords()).hasSize(1);
     }
 
     /**

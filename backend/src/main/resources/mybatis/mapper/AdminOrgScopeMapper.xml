@@ -18,4 +18,14 @@
         ORDER BY o.show_order DESC, o.id ASC
     </select>
 
+    <!-- 按登录用户 id 解析管辖组织范围：经 tab_admin 关联到其启用状态（status = 2000）的
+         管理员身份，取该管理员配置的全部管辖范围原始行。不回填组织名称，供 OrgScopeService
+         的过滤逻辑内部消费，不是界面展示用途。 -->
+    <select id="selectOrgScopesByUserId" resultType="cn.nihility.rbac.admin.entity.AdminOrgScopeEntity">
+        SELECT s.*
+        FROM tab_admin_org_scope s
+        INNER JOIN tab_admin a ON a.id = s.admin_id AND a.status = 2000
+        WHERE a.user_id = #{userId}
+    </select>
+
 </mapper>
