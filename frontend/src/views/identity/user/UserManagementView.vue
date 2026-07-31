@@ -340,6 +340,13 @@ async function handleResetPassword(row: UserRow) {
             <span v-else-if="col.controlType === FORM_FIELD_CONTROL_TYPE_MULTI_DICT">
               {{ userFields.dictOptionLabels(col, (row as Record<string, unknown>)[col.columnName]) }}
             </span>
+            <el-tooltip
+              v-else-if="col.columnName === 'remark' && String((row as Record<string, unknown>)[col.columnName] ?? '').length > 6"
+              :content="String((row as Record<string, unknown>)[col.columnName] ?? '')"
+              placement="top"
+            >
+              <span class="user-cell--truncate">{{ (row as Record<string, unknown>)[col.columnName] }}</span>
+            </el-tooltip>
             <span v-else>{{ (row as Record<string, unknown>)[col.columnName] }}</span>
           </template>
         </el-table-column>
@@ -566,6 +573,15 @@ async function handleResetPassword(row: UserRow) {
   border-radius: var(--radius-md);
   padding: 20px;
   box-shadow: var(--shadow-sm);
+}
+
+.user-cell--truncate {
+  display: inline-block;
+  max-width: 6em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
 }
 
 .user-panel__header {

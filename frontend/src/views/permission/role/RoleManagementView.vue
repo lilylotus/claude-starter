@@ -236,7 +236,6 @@ async function handleDelete(row: RoleRow) {
             show-checkbox
             node-key="id"
             :props="{ label: 'label', children: 'children' }"
-            default-expand-all
             empty-text="暂无可分配的权限点"
           />
         </el-form-item>
