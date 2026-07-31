@@ -15,6 +15,8 @@ import cn.nihility.rbac.auth.service.PasswordService;
 import cn.nihility.rbac.auth.service.TokenService;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.common.util.RsaJdkUtils;
+import cn.nihility.rbac.loginlog.constant.LoginFailReason;
+import cn.nihility.rbac.loginlog.service.LoginLogRecorder;
 import cn.nihility.rbac.user.constant.UserStatus;
 import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
@@ -49,6 +51,9 @@ public class AuthServiceImpl implements AuthService {
     /** 会话令牌业务逻辑接口。 */
     private final TokenService tokenService;
 
+    /** 登录日志记录组件，记录每一次登录尝试（成功 + 失败）。 */
+    private final LoginLogRecorder loginLogRecorder;
+
     /**
      * {@inheritDoc}
      */
@@ -62,17 +67,40 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     public LoginResponse login(LoginRequest request) {
-        String account = decrypt(request.getAccount());
-        String password = decrypt(request.getPassword());
+        String account;
+        String password;
+        try {
+            account = decrypt(request.getAccount());
+            password = decrypt(request.getPassword());
+        } catch (BusinessException e) {
+            // 解密失败根本拿不到明文账号，不记录密文本身——密文不是登录日志该保留的信息。
+            loginLogRecorder.recordFailure(null, null, null, LoginFailReason.DECRYPT_FAILED);
+            throw e;
+        }
 
+        // 不再 .ne(status, DELETED)：查询本身排除已删除账号会导致"账号不存在"与"账号已
+        // 删除"两种情况在 SQL 层面就已经合并成同一个 null 结果，Java 代码无论怎么写都
+        // 区分不出来，交给下面的显式分支按状态判断。
         UserEntity user = userMapper.selectOne(new LambdaQueryWrapper<UserEntity>()
-                .eq(UserEntity::getCode, account)
-                .ne(UserEntity::getStatus, UserStatus.DELETED));
-        if (user == null || !Objects.equals(user.getStatus(), UserStatus.ENABLED)
-                || !passwordService.verifyPassword(user.getId(), password)) {
+                .eq(UserEntity::getCode, account));
+        if (user == null) {
+            loginLogRecorder.recordFailure(account, null, null, LoginFailReason.ACCOUNT_NOT_FOUND);
+            throw new BusinessException(LOGIN_FAILED_MESSAGE);
+        }
+        if (Objects.equals(user.getStatus(), UserStatus.DELETED)) {
+            loginLogRecorder.recordFailure(account, user.getId(), user.getName(), LoginFailReason.ACCOUNT_DELETED);
+            throw new BusinessException(LOGIN_FAILED_MESSAGE);
+        }
+        if (!Objects.equals(user.getStatus(), UserStatus.ENABLED)) {
+            loginLogRecorder.recordFailure(account, user.getId(), user.getName(), LoginFailReason.ACCOUNT_DISABLED);
+            throw new BusinessException(LOGIN_FAILED_MESSAGE);
+        }
+        if (!passwordService.verifyPassword(user.getId(), password)) {
+            loginLogRecorder.recordFailure(account, user.getId(), user.getName(), LoginFailReason.PASSWORD_MISMATCH);
             throw new BusinessException(LOGIN_FAILED_MESSAGE);
         }
 
+        loginLogRecorder.recordSuccess(account, user.getId(), user.getName());
         TokenPair tokenPair = tokenService.issue(user.getId());
         boolean firstLogin = passwordService.isFirstLogin(user.getId());
         return LoginResponse.builder()

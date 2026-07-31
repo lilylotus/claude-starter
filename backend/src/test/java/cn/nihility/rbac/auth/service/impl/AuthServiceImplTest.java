@@ -20,6 +20,8 @@ import cn.nihility.rbac.auth.service.PasswordService;
 import cn.nihility.rbac.auth.service.TokenService;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.common.util.RsaJdkUtils;
+import cn.nihility.rbac.loginlog.constant.LoginFailReason;
+import cn.nihility.rbac.loginlog.service.LoginLogRecorder;
 import cn.nihility.rbac.user.constant.UserStatus;
 import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
@@ -54,6 +56,10 @@ class AuthServiceImplTest {
     @Mock
     private TokenService tokenService;
 
+    /** 被测服务的登录日志记录依赖，使用 Mockito 打桩，校验各失败/成功分支的记录调用。 */
+    @Mock
+    private LoginLogRecorder loginLogRecorder;
+
     /** 测试用 RSA 公钥。 */
     private String publicKey;
 
@@ -76,7 +82,7 @@ class AuthServiceImplTest {
         loginProperties.setPublicKey(publicKey);
         loginProperties.setPrivateKey(privateKey);
 
-        authService = new AuthServiceImpl(loginProperties, userMapper, passwordService, tokenService);
+        authService = new AuthServiceImpl(loginProperties, userMapper, passwordService, tokenService, loginLogRecorder);
         CurrentUserContext.clear();
     }
 
@@ -110,6 +116,8 @@ class AuthServiceImplTest {
         assertThat(response.getAccessKey()).isEqualTo("access-key");
         assertThat(response.getRefreshKey()).isEqualTo("refresh-key");
         assertThat(response.getFirstLogin()).isTrue();
+        verify(loginLogRecorder).recordSuccess("U001", 1L, "张三");
+        verify(loginLogRecorder, never()).recordFailure(any(), any(), any(), any());
     }
 
     /**
@@ -122,6 +130,8 @@ class AuthServiceImplTest {
         assertThatThrownBy(() -> authService.login(loginRequest("unknown", "Default#123456")))
                 .isInstanceOf(BusinessException.class);
         verify(tokenService, never()).issue(anyLong());
+        verify(loginLogRecorder).recordFailure("unknown", null, null, LoginFailReason.ACCOUNT_NOT_FOUND);
+        verify(loginLogRecorder, never()).recordSuccess(any(), any(), any());
     }
 
     /**
@@ -136,6 +146,8 @@ class AuthServiceImplTest {
         assertThatThrownBy(() -> authService.login(loginRequest("U001", "wrong-password")))
                 .isInstanceOf(BusinessException.class);
         verify(tokenService, never()).issue(anyLong());
+        verify(loginLogRecorder).recordFailure("U001", 1L, "张三", LoginFailReason.PASSWORD_MISMATCH);
+        verify(loginLogRecorder, never()).recordSuccess(any(), any(), any());
     }
 
     /**
@@ -150,6 +162,42 @@ class AuthServiceImplTest {
                 .isInstanceOf(BusinessException.class);
         verify(passwordService, never()).verifyPassword(anyLong(), any());
         verify(tokenService, never()).issue(anyLong());
+        verify(loginLogRecorder).recordFailure("U001", 1L, "张三", LoginFailReason.ACCOUNT_DISABLED);
+        verify(loginLogRecorder, never()).recordSuccess(any(), any(), any());
+    }
+
+    /**
+     * 账号已删除时登录失败，不签发令牌，也不再校验密码，与"账号不存在"分别记录不同的失败原因
+     * （spec.md "账号已停用或已删除时登录失败" Scenario，design.md Decision 1）。
+     */
+    @Test
+    void login_shouldThrowBusinessException_whenAccountDeleted() {
+        UserEntity user = buildUser(1L, "U001", UserStatus.DELETED);
+        when(userMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(user);
+
+        assertThatThrownBy(() -> authService.login(loginRequest("U001", "Default#123456")))
+                .isInstanceOf(BusinessException.class);
+        verify(passwordService, never()).verifyPassword(anyLong(), any());
+        verify(tokenService, never()).issue(anyLong());
+        verify(loginLogRecorder).recordFailure("U001", 1L, "张三", LoginFailReason.ACCOUNT_DELETED);
+        verify(loginLogRecorder, never()).recordSuccess(any(), any(), any());
+    }
+
+    /**
+     * 账号/密码密文解密失败时登录失败，记录日志时不带明文账号（本来就解不出来），也不查询用户、
+     * 不签发令牌（design.md Decision 1 解密阶段场景）。
+     */
+    @Test
+    void login_shouldThrowBusinessException_whenDecryptFailed() {
+        LoginRequest request = new LoginRequest();
+        request.setAccount("not-a-valid-base64-cipher-text");
+        request.setPassword(RsaJdkUtils.encrypt("Default#123456", publicKey));
+
+        assertThatThrownBy(() -> authService.login(request)).isInstanceOf(BusinessException.class);
+        verify(userMapper, never()).selectOne(any(LambdaQueryWrapper.class));
+        verify(tokenService, never()).issue(anyLong());
+        verify(loginLogRecorder).recordFailure(null, null, null, LoginFailReason.DECRYPT_FAILED);
+        verify(loginLogRecorder, never()).recordSuccess(any(), any(), any());
     }
 
     /**

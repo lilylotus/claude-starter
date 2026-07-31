@@ -17,6 +17,7 @@ declare module 'vue-router' {
 const stubDescriptions: Record<string, string> = {
   '/application/secret': '查看和轮换应用的访问密钥，密钥仅在生成时完整显示一次。',
   '/system/logs': '记录关键操作的审计日志：谁在什么时候对什么资源做了什么变更。',
+  '/system/login-logs': '记录每一次登录尝试的审计日志：谁在什么时候、用什么设备尝试登录，是否成功。',
 }
 
 // 已经落地真实业务组件的路由，按 path 覆盖默认的占位组件
@@ -33,6 +34,7 @@ const implementedComponents: Record<string, () => Promise<unknown>> = {
   '/system/metadata-fields': () => import('@/views/system/metadatafields/MetadataFieldListView.vue'),
   '/system/form-fields': () => import('@/views/system/formfields/FormFieldListView.vue'),
   '/system/logs': () => import('@/views/system/log/OperationLogManagementView.vue'),
+  '/system/login-logs': () => import('@/views/system/log/LoginLogManagementView.vue'),
 }
 
 const menuRoutes = MENU_GROUPS.flatMap((group) =>

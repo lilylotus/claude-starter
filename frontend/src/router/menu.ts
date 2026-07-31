@@ -42,6 +42,7 @@ export const MENU_GROUPS: MenuGroup[] = [
       { title: '元数据配置', path: '/system/metadata-fields', permissionKey: 'MetadataFieldManagement:metadataField:view' },
       { title: '表单管理', path: '/system/form-fields', permissionKey: 'FormFieldManagement:formField:view' },
       { title: '操作日志', path: '/system/logs', permissionKey: 'OperationLogManagement:log:view' },
+      { title: '登录日志', path: '/system/login-logs', permissionKey: 'LoginLogManagement:loginLog:view' },
     ],
   },
 ]
