@@ -5,12 +5,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.auth.service.PasswordService;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.dict.service.DictItemService;
@@ -21,10 +23,12 @@ import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
 import cn.nihility.rbac.formfield.support.FormFieldSnapshotSupport;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.mapper.OrgMapper;
+import cn.nihility.rbac.user.constant.PositionStatus;
 import cn.nihility.rbac.user.constant.UserStatus;
 import cn.nihility.rbac.user.dto.UserCreateRequest;
 import cn.nihility.rbac.user.dto.UserPositionRequest;
 import cn.nihility.rbac.user.dto.UserUpdateRequest;
+import cn.nihility.rbac.user.dto.UserVO;
 import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.entity.UserPositionEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
@@ -32,10 +36,13 @@ import cn.nihility.rbac.user.mapper.UserPositionMapper;
 import cn.nihility.rbac.user.service.support.PositionDynamicFieldSupport;
 import cn.nihility.rbac.user.service.support.PositionLogSnapshotSupport;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -83,6 +90,10 @@ class UserServiceImplTest {
     @Mock
     private PasswordService passwordService;
 
+    /** 被测服务的管辖组织范围解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private OrgScopeService orgScopeService;
+
     /** 被测服务实例。 */
     private UserServiceImpl userService;
 
@@ -96,6 +107,8 @@ class UserServiceImplTest {
      * {@code userMapper}/{@code orgMapper}/{@code formFieldDefinitionService}/
      * {@code formFieldSnapshotSupport}/{@code dictItemService} 构造真实实例，
      * 用于验证 {@code syncPositions} 新增/更新/物理删除分支追加的操作日志记录调用。
+     * 管辖组织范围默认桩为 {@code Optional.empty()}（不受限制），受限场景在下方单独的
+     * 用例中覆盖（user-org-scope-data-permission change）。
      */
     @BeforeEach
     void setUp() {
@@ -105,9 +118,10 @@ class UserServiceImplTest {
                 formFieldDefinitionService, formFieldSnapshotSupport, dictItemService);
         userService = new UserServiceImpl(userMapper, userPositionMapper, orgMapper, operationLogRecorder,
                 formFieldDefinitionService, formFieldSnapshotSupport, dictItemService, positionDynamicFieldSupport,
-                positionLogSnapshotSupport, passwordService);
+                positionLogSnapshotSupport, passwordService, orgScopeService);
         lenient().when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
+        lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.empty());
     }
 
     /**
@@ -386,23 +400,65 @@ class UserServiceImplTest {
 
     /**
      * 分页查询组合姓名与手机号条件时（同时提供两个可选搜索参数），应正常执行查询并
-     * 返回按分页元信息组装的结果，不因组合条件而出错（具体的“与”关系由 MyBatis-Plus
-     * {@code LambdaQueryWrapper} 依次叠加 {@code like} 条件的默认行为保证）。
+     * 返回按分页元信息组装的结果，不因组合条件而出错；跨表的组合条件、模糊搜索均已
+     * 下沉到 {@code UserMapper.xml} 的 SQL 里，本用例只验证 service 层的参数透传与
+     * 分页结果组装（user-org-scope-data-permission change design.md Decision 4）。
      */
     @Test
     void getPage_shouldReturnPageResult_whenCombiningNameAndMobileConditions() {
-        UserEntity matched = buildUserEntity(1L, "张三", "U001", UserStatus.ENABLED);
-        com.baomidou.mybatisplus.extension.plugins.pagination.Page<UserEntity> resultPage =
-                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(1, 10, 1L);
+        UserVO matched = buildUserVO(1L, "张三", "U001", UserStatus.ENABLED);
+        Page<UserVO> resultPage = new Page<>(1, 10, 1L);
         resultPage.setRecords(List.of(matched));
-        when(userMapper.selectPage(any(), any(LambdaQueryWrapper.class))).thenReturn(resultPage);
+        when(userMapper.selectUserPage(any(), eq("张"), eq("138"), isNull(), isNull(), eq(UserStatus.DELETED),
+                eq(PositionStatus.DELETED))).thenReturn(resultPage);
 
         var pageResult = userService.getPage("张", "138", null, 1, 10);
 
         assertThat(pageResult.getTotal()).isEqualTo(1L);
         assertThat(pageResult.getRecords()).hasSize(1);
         assertThat(pageResult.getRecords().get(0).getName()).isEqualTo("张三");
-        verify(userMapper).selectPage(any(), any(LambdaQueryWrapper.class));
+        verify(userMapper).selectUserPage(any(), eq("张"), eq("138"), isNull(), isNull(), eq(UserStatus.DELETED),
+                eq(PositionStatus.DELETED));
+    }
+
+    /**
+     * 未配置管辖组织范围（{@link OrgScopeService#resolveAllowedOrgIds} 返回空 {@link Optional}）
+     * 时，应传 {@code null} 给 {@code allowedOrgIds} 参数，行为与改动前一致，不受限
+     * （user-org-scope-data-permission change design.md Decision 1）。
+     */
+    @Test
+    void getPage_shouldPassNullAllowedOrgIds_whenNotRestricted() {
+        Page<UserVO> resultPage = new Page<>(1, 10, 0L);
+        resultPage.setRecords(List.of());
+        when(userMapper.selectUserPage(any(), any(), any(), any(), isNull(), eq(UserStatus.DELETED),
+                eq(PositionStatus.DELETED))).thenReturn(resultPage);
+
+        userService.getPage(null, null, null, 1, 10);
+
+        verify(userMapper).selectUserPage(any(), any(), any(), any(), isNull(), eq(UserStatus.DELETED),
+                eq(PositionStatus.DELETED));
+    }
+
+    /**
+     * 配置了管辖组织范围时，应把解析出的允许组织 id 集合透传给 {@code selectUserPage}，
+     * 由 XML 里的 {@code EXISTS} 子查询按"任一任职落在范围内即可见"的语义过滤
+     * （user-org-scope-data-permission change design.md Decision 2）。
+     */
+    @Test
+    void getPage_shouldPassAllowedOrgIds_whenScopeRestricted() {
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(100L, 200L)));
+        UserVO matched = buildUserVO(1L, "张三", "U001", UserStatus.ENABLED);
+        Page<UserVO> resultPage = new Page<>(1, 10, 1L);
+        resultPage.setRecords(List.of(matched));
+        when(userMapper.selectUserPage(any(), any(), any(), any(), eq(Set.of(100L, 200L)), eq(UserStatus.DELETED),
+                eq(PositionStatus.DELETED))).thenReturn(resultPage);
+
+        var pageResult = userService.getPage(null, null, null, 1, 10);
+
+        assertThat(pageResult.getTotal()).isEqualTo(1L);
+        assertThat(pageResult.getRecords()).hasSize(1);
+        verify(userMapper).selectUserPage(any(), any(), any(), any(), eq(Set.of(100L, 200L)), eq(UserStatus.DELETED),
+                eq(PositionStatus.DELETED));
     }
 
     /**
@@ -524,6 +580,25 @@ class UserServiceImplTest {
      */
     private UserEntity buildUserEntity(long id, String name, String code, int status) {
         return UserEntity.builder()
+                .id(id)
+                .name(name)
+                .code(code)
+                .status(status)
+                .showOrder(0)
+                .build();
+    }
+
+    /**
+     * 构造一个测试用的用户视图对象，模拟 {@code selectUserPage} 返回的分页记录。
+     *
+     * @param id     主键 id
+     * @param name   用户姓名
+     * @param code   用户编号
+     * @param status 状态
+     * @return 用户视图对象
+     */
+    private UserVO buildUserVO(long id, String name, String code, int status) {
+        return UserVO.builder()
                 .id(id)
                 .name(name)
                 .code(code)

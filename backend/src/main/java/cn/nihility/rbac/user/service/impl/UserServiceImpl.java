@@ -1,5 +1,7 @@
 package cn.nihility.rbac.user.service.impl;
 
+import cn.nihility.rbac.auth.context.CurrentUserContext;
+import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.auth.service.PasswordService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
@@ -30,6 +32,7 @@ import cn.nihility.rbac.user.service.UserService;
 import cn.nihility.rbac.user.service.support.PositionDynamicFieldSupport;
 import cn.nihility.rbac.user.service.support.PositionLogSnapshotSupport;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
 import java.util.HashSet;
@@ -37,12 +40,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
 
 /**
  * 用户业务逻辑实现。
@@ -110,22 +113,27 @@ public class UserServiceImpl implements UserService {
     private final PasswordService passwordService;
 
     /**
+     * 管辖组织范围解析业务逻辑接口，用于按当前登录用户的管辖组织范围过滤用户列表
+     * （user-org-scope-data-permission change design.md Decision 1）。
+     */
+    private final OrgScopeService orgScopeService;
+
+    /**
      * {@inheritDoc}
+     * <p>
+     * 受限时（管辖范围非空）追加"存在至少一条未删除、所属组织落在管辖范围内的任职记录"
+     * 过滤条件，跨表条件写在 {@link UserMapper#selectUserPage} 对应的 XML 里，不在 Java
+     * 端用 {@link LambdaQueryWrapper} 拼接（design.md Decision 2/4）。
      */
     @Override
     public PageResult<UserVO> getPage(String name, String mobile, String idCard, Integer page, Integer pageSize) {
-        LambdaQueryWrapper<UserEntity> wrapper = new LambdaQueryWrapper<UserEntity>()
-                .ne(UserEntity::getStatus, UserStatus.DELETED)
-                .like(StringUtils.hasText(name), UserEntity::getName, name)
-                .like(StringUtils.hasText(mobile), UserEntity::getMobile, mobile)
-                .like(StringUtils.hasText(idCard), UserEntity::getIdCard, idCard)
-                .orderByDesc(UserEntity::getShowOrder)
-                .orderByAsc(UserEntity::getId);
+        Optional<Set<Long>> allowedOrgIdsOptional = orgScopeService.resolveAllowedOrgIds(CurrentUserContext.getUserId());
+        Set<Long> allowedOrgIds = allowedOrgIdsOptional.orElse(null);
 
-        Page<UserEntity> queryPage = new Page<>(page, pageSize);
-        Page<UserEntity> resultPage = userMapper.selectPage(queryPage, wrapper);
-        List<UserVO> records = UserConvert.INSTANCE.toVOList(resultPage.getRecords());
-        return PageResult.of(records, resultPage);
+        Page<UserVO> queryPage = new Page<>(page, pageSize);
+        IPage<UserVO> resultPage = userMapper.selectUserPage(queryPage, name, mobile, idCard, allowedOrgIds,
+                UserStatus.DELETED, PositionStatus.DELETED);
+        return PageResult.of(resultPage.getRecords(), resultPage);
     }
 
     /**
