@@ -24,6 +24,6 @@ public class RbacLoginProperties {
     /** access-key 有效期（秒），默认 7200 秒（2 小时）。 */
     private long accessTokenExpireSeconds = 7200;
 
-    /** refresh-key 有效期（秒），默认 604800 秒（7 天）。 */
-    private long refreshTokenExpireSeconds = 604800;
+    /** refresh-key 有效期（秒），默认 14400 秒（4 小时）。 */
+    private long refreshTokenExpireSeconds = 14400;
 }

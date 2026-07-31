@@ -7,7 +7,9 @@ import { useCurrentUserPermissionStore } from '@/stores/currentUserPermission'
 
 const STORAGE_KEY = 'rbac_auth_session'
 
-// 本地持久化的登录态快照
+// 登录态快照，存放于 sessionStorage：生命周期限定在当前浏览器标签页/窗口内，
+// 浏览器（或最后一个使用该站点的标签页/窗口）关闭后自动清空，不跨浏览器进程存活
+// （fix-login-session-expiry change design.md Decision 2）
 interface AuthSession {
   accessKey: string
   accessExpireAt: number
@@ -20,7 +22,7 @@ interface AuthSession {
 }
 
 function loadSession(): Partial<AuthSession> {
-  const raw = localStorage.getItem(STORAGE_KEY)
+  const raw = sessionStorage.getItem(STORAGE_KEY)
   if (!raw) return {}
   try {
     return JSON.parse(raw) as AuthSession
@@ -48,7 +50,7 @@ export const useAuthStore = defineStore('auth', () => {
       firstLogin: firstLogin.value,
       accountCode: accountCode.value,
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(session))
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(session))
   }
 
   // access-key 是否仍在本地判定的有效期内
@@ -92,7 +94,7 @@ export const useAuthStore = defineStore('auth', () => {
     refreshExpireAt.value = 0
     firstLogin.value = false
     accountCode.value = ''
-    localStorage.removeItem(STORAGE_KEY)
+    sessionStorage.removeItem(STORAGE_KEY)
     // 清空上一个用户的权限编码，避免下一个登录的用户短暂"继承"残留权限展示
     const permissionStore = useCurrentUserPermissionStore()
     permissionStore.reset()
