@@ -155,11 +155,15 @@ FormFieldManagement（表单管理，/system/form-fields）
 分类下预置的人员编号/组织编码两条系统保护配置不可删除，也不可取消主键/必填标记，页面按此隐藏删除入口
 并禁用对应开关，没有独立的 detail/enable/disable）
 
-OperationLogManagement（操作日志管理，/system/logs）
+
+日志管理
+--------
+
+OperationLogManagement（操作日志管理，/log/operation-logs）
 - OperationLogManagement:log:view      操作日志管理页面访问
 （只读页面，仅支持分页查询与详情，没有 add/edit/enable/disable/delete）
 
-LoginLogManagement（登录日志管理，/system/login-logs）
+LoginLogManagement（登录日志管理，/log/login-logs）
 - LoginLogManagement:loginLog:view      登录日志管理页面访问
 （只读页面，仅支持分页查询，没有 add/edit/enable/disable/delete）
 

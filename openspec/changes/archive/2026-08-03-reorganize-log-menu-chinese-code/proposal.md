@@ -9,7 +9,7 @@
   - 补上 `LoginLogManagement: '登录日志管理'` 这一条映射即可让两处树形展示都变成中文，属于 bug 修复，不涉及 spec 行为变更。
 - 新增一级菜单"日志管理"（`tab_menu` 顶级节点，`parent_id=0`），把"操作日志""登录日志"两个二级菜单从"系统管理"下移出，改挂到"日志管理"下；前端侧边栏、路由 path（`/system/logs`→`/log/operation-logs`，`/system/login-logs`→`/log/login-logs`）同步调整。挂载调整只改 `parent_id`/前端 path，两个权限点/菜单的 `code` 保持不变（`OperationLogManagement:log:view`、`LoginLogManagement:loginLog:view`）。
 - 同步更新仓库根目录《权限资源.txt》，把这两条从"系统管理"小节移到新的"日志管理"小节，编码本身不变。
-- 直接改写尚未提交 git 的 `V8__add_login_log.sql` 迁移文件（新增"日志管理"顶级菜单插入、登录日志菜单挂载到新分组、追加对已提交的 `V1` 中操作日志菜单记录的 `parent_id` UPDATE），不新开迁移文件；不涉及任何 `UPDATE ... SET code` 语句。
+- 新增 `V9__reorganize_log_menu.sql` 迁移文件（`V8__add_login_log.sql` 已随 `9d3e587 feat(日志): 日志菜单调整` 提交并推送到 `origin/develop`，视为已发布，不再回头改写）：插入"日志管理"顶级菜单，追加两条 `UPDATE tab_menu` 语句把操作日志（`V1` 插入）、登录日志（`V8` 插入）两个菜单节点的 `parent_id` 改挂到日志管理节点；不涉及任何 `UPDATE ... SET code` 语句。
 
 ## Capabilities
 
@@ -28,6 +28,6 @@
 
 - 前端：`frontend/src/router/menu.ts`（新增日志管理分组、调整 system 分组、path 调整）、`frontend/src/router/index.ts`（path 相关的两个映射表 key）、`frontend/src/utils/permissionTree.ts`（补上 `LoginLogManagement: '登录日志管理'` 这一条缺失的映射）。
 - 后端：无代码改动（不涉及权限编码格式、`IdentityAuthFilter` 等）。
-- 数据库：`backend/src/main/resources/db/migration/V8__add_login_log.sql`（改写，新增"日志管理"顶级菜单插入、登录日志菜单挂载调整 + 对 `V1` 中操作日志菜单记录的 `parent_id` UPDATE，均不涉及 `code` 变更）。
+- 数据库：新增 `backend/src/main/resources/db/migration/V9__reorganize_log_menu.sql`（新增"日志管理"顶级菜单插入 + 对 `V1` 操作日志、`V8` 登录日志两条菜单记录的 `parent_id` UPDATE，均不涉及 `code` 变更），`V8__add_login_log.sql` 本身不再改动。
 - 文档：仓库根目录《权限资源.txt》（系统管理/日志管理两个小节的条目调整，编码本身不变）。
-- 依赖此次改动生效前提：`V8` 尚未提交 git、尚未在任何环境执行过，可以直接改写而不是追加新迁移。
+- 前提变更：原方案假设 `V8` 尚未提交 git、可直接改写；实际排查发现 `V8__add_login_log.sql` 已随 `9d3e587` 提交并推送到 `origin/develop`，视为已发布迁移，因此改为新增 `V9`，不回头改写 `V8`。

@@ -1,6 +1,6 @@
 ## Context
 
-`add-login-log` change 已经把登录日志页面、菜单、权限点落地，但整个 change（包括其归档记录 `openspec/changes/archive/2026-07-31-add-login-log/`）都还没有提交 git。操作日志模块更早落地，已经随 `V1__init_schema.sql`（顶级菜单结构、操作日志菜单节点）与 `V6__seed_permissions_and_super_admin.sql`（权限点种子数据）一起提交。
+`add-login-log` change 已经把登录日志页面、菜单、权限点落地，且该 change（含其归档记录 `openspec/changes/archive/2026-07-31-add-login-log/`）已随提交 `9d3e587 feat(日志): 日志菜单调整` 一并提交并推送到 `origin/develop`（本设计文档编写时最初假设它还没提交，实现前重新核对 `git log`/`git status` 时发现已推送，见下方"约束"与 Decision 1 的更新）。操作日志模块更早落地，已经随 `V1__init_schema.sql`（顶级菜单结构、操作日志菜单节点）与 `V6__seed_permissions_and_super_admin.sql`（权限点种子数据）一起提交。
 
 本次要在 `add-login-log` 提交之前修正两个问题：
 1. `frontend/src/utils/permissionTree.ts` 里的 `PERMISSION_MODULE_LABELS`（权限点编码"模块"前缀 → 中文展示名的映射表）已经登记了 `OperationLogManagement: '操作日志管理'`，但漏掉了 `LoginLogManagement`，导致角色管理弹窗的权限点勾选树、权限点管理页面的列表树在登录日志这个分组上退化成展示原始英文编码前缀，而不是中文名。
@@ -9,8 +9,7 @@
 用户已经明确澄清：**权限点编码本身不改**（`OperationLogManagement:log:view`、`LoginLogManagement:loginLog:view` 保持英文三段式），只是要把遗漏的中文展示名映射条目补上；菜单归属调整只涉及 `parent_id`/前端路由 path，不涉及 `code` 变更。
 
 约束：
-- `V1`/`V6` 已提交、视为"已发布"的迁移，不能回头直接改写内容，只能通过后续迁移追加 `UPDATE` 语句。
-- `V8__add_login_log.sql` 是唯一还未提交 git 的迁移文件，本身就是 `add-login-log` change 的一部分，视为"还在暂存区"，可以直接改写，不需要新开 `V9`。
+- `V1`/`V6`/`V8` 均已提交并推送到 `origin/develop`，视为"已发布"的迁移，都不能回头直接改写内容，只能通过后续迁移追加 `UPDATE` 语句。
 
 ## Goals / Non-Goals
 
@@ -27,9 +26,9 @@
 
 ## Decisions
 
-### 1. 直接改写 `V8__add_login_log.sql`，不新开 `V9`
+### 1. 新增 `V9__reorganize_log_menu.sql`，不改写 `V8`
 
-`V8` 尚未提交 git，等价于本地暂存区里的未完成工作，改写它不会破坏任何已应用环境的 Flyway checksum。`V1` 已提交，视为已发布，操作日志菜单节点的 `parent_id` 调整只能用 `UPDATE` 语句在 `V8` 里追加，不能回头改 `V1` 本身；`V6` 里操作日志的权限点种子数据本身不需要任何改动（`code` 不变），不涉及。
+原方案曾计划直接改写 `V8__add_login_log.sql`（当时判断它还没提交 git，等价于暂存区里的未完成工作）。实现前重新核对 `git log`/`git status` 发现 `V8` 已随 `9d3e587` 提交并推送到 `origin/develop`——与 `V1`/`V6` 一样应视为"已发布"迁移，回头改写会破坏任何已拉取/已跑过该迁移环境的 Flyway checksum。因此改为新增 `V9__reorganize_log_menu.sql`：插入"日志管理"顶级菜单，并用两条 `UPDATE` 语句分别把操作日志（`V1` 插入）、登录日志（`V8` 插入）菜单节点的 `parent_id` 改挂到新节点；`V6` 里操作日志的权限点种子数据本身不需要任何改动（`code` 不变），不涉及。
 
 ### 2. 顶级菜单"日志管理"的 `code` 用英文短标识 `log`
 
@@ -49,14 +48,14 @@
 
 - [风险] 前端路由 path 变化后，如果有遗漏的硬编码引用（如收藏的 URL、外部书签）仍指向旧 path，会 404。
   → 缓解：这是一个尚未对外发布的内部管理系统页面（`add-login-log` 本身还没提交），不存在需要兼容的历史外部链接；已对全仓库 grep 确认代码内部没有遗漏引用旧 path 的地方。
-- [风险] `V8` 里对 `V1` 记录的 `UPDATE` 语句如果条件写错（比如按已经变化的字段匹配导致找不到记录），本地重跑迁移可能"更新 0 行"而不报错，容易被忽略。
-  → 缓解：`UPDATE` 语句按操作日志菜单节点稳定不变的 `code`（`OperationLogManagement:log:view`）精确匹配一次即可；tasks.md 包含"跑一次全新库的迁移，人工核对 `tab_menu` 最终数据"的验证步骤。
+- [风险] `V9` 里对 `V1`/`V8` 记录的 `UPDATE` 语句如果条件写错（比如按已经变化的字段匹配导致找不到记录），本地重跑迁移可能"更新 0 行"而不报错，容易被忽略。
+  → 缓解：两条 `UPDATE` 语句分别按操作日志、登录日志菜单节点稳定不变的 `code`（`OperationLogManagement:log:view`、`LoginLogManagement:loginLog:view`）精确匹配一次即可；tasks.md 包含"跑一次全新库的迁移，人工核对 `tab_menu` 最终数据"的验证步骤。
 
 ## Migration Plan
 
-1. 改写 `V8__add_login_log.sql`：建表逻辑不变，菜单/权限点部分按"新增日志管理顶级菜单 → 插入登录日志菜单（挂载到日志管理，`code` 不变）→ UPDATE 操作日志菜单的 `parent_id`（挂载到日志管理，`code` 不变）→ 插入登录日志权限点（`code` 不变）→ 给 SUPER_ADMIN 追加登录日志权限关联"的顺序重写。
-2. 本地清空开发库（或删除 `flyway_schema_history`）后跑一次 `./gradlew bootRun`（或对应的 Flyway 命令），确认迁移无报错，且 `tab_menu` 最终数据符合预期（日志管理顶级节点存在、操作日志与登录日志都挂在其下，两者 `code` 均未变化）。
-3. 因为 `V8` 尚未提交 git、没有在任何共享环境执行过，这次改写不需要额外的回滚脚本；如果发现问题，直接继续修改 `V8` 本身即可。
+1. 新增 `V9__reorganize_log_menu.sql`：插入"日志管理"顶级菜单（`code='log'`，`parent_id=0`，`show_order=5`）→ UPDATE 操作日志菜单（`code='OperationLogManagement:log:view'`）的 `parent_id` → UPDATE 登录日志菜单（`code='LoginLogManagement:loginLog:view'`）的 `parent_id`；两条 `UPDATE` 均不改 `code`，`V8` 本身不做任何改动。
+2. 本地清空开发库（或删除 `flyway_schema_history`）后跑一次 `./gradlew bootRun`（或对应的 Flyway 命令），确认 `V8`+`V9` 依序迁移无报错，且 `tab_menu` 最终数据符合预期（日志管理顶级节点存在、操作日志与登录日志都挂在其下，两者 `code` 均未变化）。
+3. `V9` 是新增迁移，不涉及对已发布迁移的回写，天然不产生 Flyway checksum 冲突；如果发现问题，直接继续修改 `V9` 本身即可（因为 `V9` 自身此时也还未提交/未在共享环境执行）。
 
 ## Open Questions
 

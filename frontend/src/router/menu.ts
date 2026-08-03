@@ -1,4 +1,4 @@
-import { UserFilled, Grid, Lock, Setting } from '@element-plus/icons-vue'
+import { UserFilled, Grid, Lock, Setting, Document } from '@element-plus/icons-vue'
 import type { MenuGroup } from '@/types/menu'
 
 // 侧边栏的四个一级菜单及其子菜单，供 Sidebar 渲染，也是 router 子路由的数据来源。
@@ -41,8 +41,15 @@ export const MENU_GROUPS: MenuGroup[] = [
       { title: '字典管理', path: '/system/dicts', permissionKey: 'DictManagement:dictType:view' },
       { title: '元数据配置', path: '/system/metadata-fields', permissionKey: 'MetadataFieldManagement:metadataField:view' },
       { title: '表单管理', path: '/system/form-fields', permissionKey: 'FormFieldManagement:formField:view' },
-      { title: '操作日志', path: '/system/logs', permissionKey: 'OperationLogManagement:log:view' },
-      { title: '登录日志', path: '/system/login-logs', permissionKey: 'LoginLogManagement:loginLog:view' },
+    ],
+  },
+  {
+    key: 'log',
+    title: '日志管理',
+    icon: Document,
+    children: [
+      { title: '操作日志', path: '/log/operation-logs', permissionKey: 'OperationLogManagement:log:view' },
+      { title: '登录日志', path: '/log/login-logs', permissionKey: 'LoginLogManagement:loginLog:view' },
     ],
   },
 ]

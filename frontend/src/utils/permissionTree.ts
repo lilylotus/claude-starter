@@ -65,6 +65,7 @@ export const PERMISSION_MODULE_LABELS: Record<string, string> = {
   MetadataFieldManagement: '元数据配置',
   FormFieldManagement: '表单管理',
   OperationLogManagement: '操作日志管理',
+  LoginLogManagement: '登录日志管理',
 }
 
 // 未在 PERMISSION_MODULE_LABELS 中登记的模块名（如后续新增模块但还没来得及补充映射）
