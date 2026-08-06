@@ -159,6 +159,10 @@ Java 代码遵循 `java-code-style` skill 的规范（4 空格缩进、K&R 大�
 
 git代码提交格式按照Angular提交信息规范
 提交格式，每次提交必须包含页眉内容，用1,2...列出具体的变更内容。
+注意：
+1. 不要添加 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com> 提示
+2. 若是功能描述过多可以精简提交说明
+
 
 ```
 <type>(<scope>): <subject>
