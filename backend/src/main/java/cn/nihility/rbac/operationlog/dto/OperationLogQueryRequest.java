@@ -2,6 +2,7 @@ package cn.nihility.rbac.operationlog.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
+import java.util.List;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -29,9 +30,15 @@ public class OperationLogQueryRequest {
     @Schema(description = "操作类型：1=新增，2=编辑，3=启用，4=停用，5=删除")
     private Integer operationType;
 
-    /** 操作人，精确匹配，可选。 */
+    /** 操作人，精确匹配（前端输入的账号编码或姓名文本），可选。 */
     @Schema(description = "操作人，精确匹配")
     private String createBy;
+
+    /**
+     * 按 {@link #createBy}（前端输入的账号编码/姓名文本）解析出的候选用户 id 列表，
+     * 由 service 层查询回填，不接受外部输入，不对外暴露。
+     */
+    private List<String> createByUserIds;
 
     /** 操作发起时间范围起点（含），可选。 */
     @Schema(description = "操作发起时间范围起点（含）")

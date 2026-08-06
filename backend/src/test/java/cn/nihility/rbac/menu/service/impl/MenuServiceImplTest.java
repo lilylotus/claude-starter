@@ -19,6 +19,7 @@ import cn.nihility.rbac.menu.dto.MenuVO;
 import cn.nihility.rbac.menu.entity.MenuEntity;
 import cn.nihility.rbac.menu.mapper.MenuMapper;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.util.List;
@@ -44,9 +45,13 @@ class MenuServiceImplTest {
     @Mock
     private OperationLogRecorder operationLogRecorder;
 
-    /** 被测服务的当前登录操作人账号编码解析依赖，使用 Mockito 打桩。 */
+    /** 被测服务的当前登录操作人用户 id 解析依赖，使用 Mockito 打桩。 */
     @Mock
     private CurrentOperatorService currentOperatorService;
+
+    /** 被测服务的审计字段展示名批量解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private UserDisplayService userDisplayService;
 
     /** 被测服务实例。 */
     private MenuServiceImpl menuService;
@@ -57,8 +62,10 @@ class MenuServiceImplTest {
      */
     @BeforeEach
     void setUp() {
-        menuService = new MenuServiceImpl(menuMapper, operationLogRecorder, currentOperatorService);
-        lenient().when(currentOperatorService.resolveCode()).thenReturn("test-operator");
+        menuService = new MenuServiceImpl(menuMapper, operationLogRecorder, currentOperatorService,
+                userDisplayService);
+        lenient().when(currentOperatorService.resolveUserId()).thenReturn(1L);
+        lenient().when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
     }
 
     /**

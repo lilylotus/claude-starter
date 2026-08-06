@@ -15,6 +15,9 @@ import org.mapstruct.factory.Mappers;
  * {@code OperationSource.label(int)} 计算，{@code changeDetail} 由持久化的 JSON
  * 字符串反序列化得到，均不在本转换器内处理，转换后由调用方另行赋值；
  * {@code operateSource} 字段名在 entity/VO 间完全一致，按同名字段默认映射。
+ * {@code createBy} 在 entity 中落库为用户 id 的字符串形式，转换后需要由调用方查询并
+ * 回填为"姓名（账号编码）"形式的人可读展示名，本转换器不做同名映射（VO 均无
+ * {@code updateBy} 字段，仅 {@code createBy} 需要处理）。
  */
 @Mapper
 public interface OperationLogConvert {
@@ -24,7 +27,7 @@ public interface OperationLogConvert {
 
     /**
      * 实体转列表行视图对象，{@code operationTypeLabel}/{@code operateSourceLabel}/
-     * {@code changeDetail} 由调用方另行赋值。
+     * {@code changeDetail}/{@code createBy} 由调用方另行赋值。
      *
      * @param entity 操作日志实体
      * @return 列表行视图对象
@@ -32,6 +35,7 @@ public interface OperationLogConvert {
     @Mapping(target = "operationTypeLabel", ignore = true)
     @Mapping(target = "operateSourceLabel", ignore = true)
     @Mapping(target = "changeDetail", ignore = true)
+    @Mapping(target = "createBy", ignore = true)
     OperationLogVO toVO(OperationLogEntity entity);
 
     /**
@@ -44,7 +48,7 @@ public interface OperationLogConvert {
 
     /**
      * 实体转详情视图对象，{@code operationTypeLabel}/{@code operateSourceLabel}/
-     * {@code changeDetail} 由调用方另行赋值。
+     * {@code changeDetail}/{@code createBy} 由调用方另行赋值。
      *
      * @param entity 操作日志实体
      * @return 详情视图对象
@@ -52,5 +56,6 @@ public interface OperationLogConvert {
     @Mapping(target = "operationTypeLabel", ignore = true)
     @Mapping(target = "operateSourceLabel", ignore = true)
     @Mapping(target = "changeDetail", ignore = true)
+    @Mapping(target = "createBy", ignore = true)
     OperationLogDetailVO toDetailVO(OperationLogEntity entity);
 }

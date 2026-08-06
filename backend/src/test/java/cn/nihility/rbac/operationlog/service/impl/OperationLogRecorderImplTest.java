@@ -35,7 +35,7 @@ class OperationLogRecorderImplTest {
     @Mock
     private OperationLogMapper operationLogMapper;
 
-    /** 被测服务的当前登录操作人账号编码解析依赖，使用 Mockito 打桩。 */
+    /** 被测服务的当前登录操作人用户 id 解析依赖，使用 Mockito 打桩。 */
     @Mock
     private CurrentOperatorService currentOperatorService;
 
@@ -48,7 +48,7 @@ class OperationLogRecorderImplTest {
     @BeforeEach
     void setUp() {
         operationLogRecorder = new OperationLogRecorderImpl(operationLogMapper, currentOperatorService);
-        when(currentOperatorService.resolveCode()).thenReturn("test-operator");
+        when(currentOperatorService.resolveUserId()).thenReturn(100L);
     }
 
     /**
@@ -78,8 +78,8 @@ class OperationLogRecorderImplTest {
         assertThat(captured.getResourceName())
                 .isEqualTo(OperationLogResourceType.resourceName(OperationLogResourceType.ROLE));
         assertThat(captured.getChangeDetail()).doesNotContain("\"oldValue\"").contains("\"newValue\":\"测试角色\"");
-        assertThat(captured.getCreateBy()).isEqualTo("test-operator");
-        assertThat(captured.getUpdateBy()).isEqualTo("test-operator");
+        assertThat(captured.getCreateBy()).isEqualTo(String.valueOf(100L));
+        assertThat(captured.getUpdateBy()).isEqualTo(String.valueOf(100L));
     }
 
     /**

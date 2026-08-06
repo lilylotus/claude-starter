@@ -29,6 +29,7 @@ import cn.nihility.rbac.metadata.entity.MetadataFieldEntity;
 import cn.nihility.rbac.metadata.mapper.MetadataFieldMapper;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
@@ -37,7 +38,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -64,8 +67,11 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
     /** 操作日志记录组件。 */
     private final OperationLogRecorder operationLogRecorder;
 
-    /** 当前登录操作人账号编码解析服务。 */
+    /** 当前登录操作人用户 id 解析服务。 */
     private final CurrentOperatorService currentOperatorService;
+
+    /** 审计字段（{@code createBy}/{@code updateBy}）展示名批量解析服务。 */
+    private final UserDisplayService userDisplayService;
 
     /**
      * {@inheritDoc}
@@ -113,7 +119,7 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
         if (!FormFieldControlType.DICT_TYPES.contains(entity.getControlType())) {
             entity.setDictTypeCode(null);
         }
-        String operator = currentOperatorService.resolveCode();
+        String operator = Objects.toString(currentOperatorService.resolveUserId(), null);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(FormFieldStatus.ENABLED);
         entity.setCreateBy(operator);
@@ -169,7 +175,7 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
         if (!FormFieldControlType.DICT_TYPES.contains(entity.getControlType())) {
             entity.setDictTypeCode(null);
         }
-        entity.setUpdateBy(currentOperatorService.resolveCode());
+        entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         formFieldDefinitionMapper.updateById(entity);
 
@@ -211,7 +217,7 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(FormFieldStatus.DELETED);
-        entity.setUpdateBy(currentOperatorService.resolveCode());
+        entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         formFieldDefinitionMapper.updateById(entity);
 
@@ -284,7 +290,7 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(status);
-        entity.setUpdateBy(currentOperatorService.resolveCode());
+        entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         formFieldDefinitionMapper.updateById(entity);
 
@@ -366,7 +372,8 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
 
     /**
      * 把实体列表转换为详情视图对象列表，并批量回填 {@code columnName}/
-     * {@code dictTypeName}/{@code locked}，避免逐条查询元数据字段表/字典类型表。
+     * {@code dictTypeName}/{@code locked}，避免逐条查询元数据字段表/字典类型表；
+     * 同时批量回填 {@code createBy}/{@code updateBy} 审计字段展示名。
      *
      * @param entities 表单字段定义实体列表
      * @return 详情视图对象列表
@@ -379,6 +386,10 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
 
         Map<Long, MetadataFieldEntity> metadataMap = fetchMetadataMap(entities);
         Map<String, String> dictTypeNameMap = fetchDictTypeNameMap(entities);
+        Set<String> auditUserIdTexts = entities.stream()
+                .flatMap(entity -> Stream.of(entity.getCreateBy(), entity.getUpdateBy()))
+                .collect(Collectors.toSet());
+        Map<String, String> displayNames = userDisplayService.resolveDisplayNames(auditUserIdTexts);
 
         for (int i = 0; i < vos.size(); i++) {
             FormFieldDefinitionVO vo = vos.get(i);
@@ -391,8 +402,25 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
             if (entity.getDictTypeCode() != null) {
                 vo.setDictTypeName(dictTypeNameMap.get(entity.getDictTypeCode()));
             }
+            vo.setCreateBy(resolveDisplayName(entity.getCreateBy(), displayNames));
+            vo.setUpdateBy(resolveDisplayName(entity.getUpdateBy(), displayNames));
         }
         return vos;
+    }
+
+    /**
+     * 把审计字段原始存储的用户 id 文本解析为人可读展示名，查不到时兜底为"未知用户"，
+     * 避免直接把不可读的 id 数字暴露给前端。
+     *
+     * @param userIdText   审计字段原始存储的用户 id 文本
+     * @param displayNames 批量解析得到的用户 id 文本到展示名的映射
+     * @return 人可读展示名
+     */
+    private String resolveDisplayName(String userIdText, Map<String, String> displayNames) {
+        if (!StringUtils.hasText(userIdText)) {
+            return "";
+        }
+        return displayNames.getOrDefault(userIdText, "未知用户");
     }
 
     /**

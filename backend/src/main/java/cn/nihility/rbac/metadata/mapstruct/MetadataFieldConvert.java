@@ -20,11 +20,15 @@ public interface MetadataFieldConvert {
     MetadataFieldConvert INSTANCE = Mappers.getMapper(MetadataFieldConvert.class);
 
     /**
-     * 实体转详情视图对象。
+     * 实体转详情视图对象；{@code createBy}/{@code updateBy} 落库存的是用户 id 文本，
+     * 需由调用方批量查询后回填为"姓名（账号编码）"形式的展示名，故显式 ignore，
+     * 避免 MapStruct 把不可读的 id 文本原样复制到视图对象上。
      *
      * @param entity 元数据字段实体
      * @return 详情视图对象
      */
+    @Mapping(target = "createBy", ignore = true)
+    @Mapping(target = "updateBy", ignore = true)
     MetadataFieldVO toVO(MetadataFieldEntity entity);
 
     /**

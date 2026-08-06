@@ -19,7 +19,9 @@ import cn.nihility.rbac.formfield.constant.FormFieldStatus;
 import cn.nihility.rbac.formfield.entity.FormFieldDefinitionEntity;
 import cn.nihility.rbac.formfield.mapper.FormFieldDefinitionMapper;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.user.service.UserDisplayService;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -47,9 +49,13 @@ class ImportFieldConfigServiceImplTest {
     @Mock
     private OperationLogRecorder operationLogRecorder;
 
-    /** 被测服务的当前登录操作人账号编码解析依赖，使用 Mockito 打桩。 */
+    /** 被测服务的当前登录操作人用户 id 解析依赖，使用 Mockito 打桩。 */
     @Mock
     private CurrentOperatorService currentOperatorService;
+
+    /** 被测服务的审计字段展示名批量解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private UserDisplayService userDisplayService;
 
     /** 被测服务实例。 */
     private ImportFieldConfigServiceImpl importFieldConfigService;
@@ -61,8 +67,9 @@ class ImportFieldConfigServiceImplTest {
     @BeforeEach
     void setUp() {
         importFieldConfigService = new ImportFieldConfigServiceImpl(importFieldConfigMapper,
-                formFieldDefinitionMapper, operationLogRecorder, currentOperatorService);
-        lenient().when(currentOperatorService.resolveCode()).thenReturn("test-operator");
+                formFieldDefinitionMapper, operationLogRecorder, currentOperatorService, userDisplayService);
+        lenient().when(currentOperatorService.resolveUserId()).thenReturn(1L);
+        lenient().when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
     }
 
     /**

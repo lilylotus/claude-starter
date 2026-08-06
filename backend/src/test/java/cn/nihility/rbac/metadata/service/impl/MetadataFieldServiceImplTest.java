@@ -20,8 +20,10 @@ import cn.nihility.rbac.metadata.exception.MetadataFieldCodeDuplicateException;
 import cn.nihility.rbac.metadata.exception.MetadataFieldInUseException;
 import cn.nihility.rbac.metadata.mapper.MetadataFieldMapper;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -48,9 +50,13 @@ class MetadataFieldServiceImplTest {
     @Mock
     private OperationLogRecorder operationLogRecorder;
 
-    /** 被测服务的当前登录操作人账号编码解析依赖，使用 Mockito 打桩。 */
+    /** 被测服务的当前登录操作人用户 id 解析依赖，使用 Mockito 打桩。 */
     @Mock
     private CurrentOperatorService currentOperatorService;
+
+    /** 被测服务的审计字段展示名批量解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private UserDisplayService userDisplayService;
 
     /** 被测服务实例。 */
     private MetadataFieldServiceImpl metadataFieldService;
@@ -62,8 +68,9 @@ class MetadataFieldServiceImplTest {
     @BeforeEach
     void setUp() {
         metadataFieldService = new MetadataFieldServiceImpl(metadataFieldMapper, formFieldDefinitionMapper,
-                operationLogRecorder, currentOperatorService);
-        lenient().when(currentOperatorService.resolveCode()).thenReturn("test-operator");
+                operationLogRecorder, currentOperatorService, userDisplayService);
+        lenient().when(currentOperatorService.resolveUserId()).thenReturn(1L);
+        lenient().when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
     }
 
     /**

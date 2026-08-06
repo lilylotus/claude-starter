@@ -21,13 +21,17 @@ public interface AppConvert {
     AppConvert INSTANCE = Mappers.getMapper(AppConvert.class);
 
     /**
-     * 实体转详情视图对象，{@code ownerName}/{@code orgName} 需要由调用方另行解析并回填。
+     * 实体转详情视图对象，{@code ownerName}/{@code orgName} 需要由调用方另行解析并回填；
+     * {@code createBy}/{@code updateBy} entity 侧落库为用户 id 文本，VO 侧需要展示为
+     * 人可读展示名，两者语义不同，禁止 MapStruct 按同名字段直接复制，由调用方另行回填。
      *
      * @param entity 应用实体
      * @return 详情视图对象
      */
     @Mapping(target = "ownerName", ignore = true)
     @Mapping(target = "orgName", ignore = true)
+    @Mapping(target = "createBy", ignore = true)
+    @Mapping(target = "updateBy", ignore = true)
     AppVO toVO(AppEntity entity);
 
     /**

@@ -23,6 +23,7 @@ import cn.nihility.rbac.org.dto.OrgUpdateRequest;
 import cn.nihility.rbac.org.dto.OrgVO;
 import cn.nihility.rbac.org.entity.OrgEntity;
 import cn.nihility.rbac.org.mapper.OrgMapper;
+import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.util.List;
@@ -62,9 +63,13 @@ class OrgServiceImplTest {
     @Mock
     private OrgScopeService orgScopeService;
 
-    /** 被测服务的当前登录操作人账号编码解析依赖，使用 Mockito 打桩。 */
+    /** 被测服务的当前登录操作人用户 id 解析依赖，使用 Mockito 打桩。 */
     @Mock
     private CurrentOperatorService currentOperatorService;
+
+    /** 被测服务的审计字段展示名批量解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private UserDisplayService userDisplayService;
 
     /** 被测服务实例。 */
     private OrgServiceImpl orgService;
@@ -79,10 +84,11 @@ class OrgServiceImplTest {
     @BeforeEach
     void setUp() {
         orgService = new OrgServiceImpl(orgMapper, operationLogRecorder, formFieldDefinitionService,
-                formFieldSnapshotSupport, orgScopeService, currentOperatorService);
+                formFieldSnapshotSupport, orgScopeService, currentOperatorService, userDisplayService);
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
         lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.empty());
-        lenient().when(currentOperatorService.resolveCode()).thenReturn("test-operator");
+        lenient().when(currentOperatorService.resolveUserId()).thenReturn(1L);
+        lenient().when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
     }
 
     /**

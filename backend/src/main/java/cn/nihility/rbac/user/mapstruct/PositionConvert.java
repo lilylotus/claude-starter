@@ -21,18 +21,24 @@ public interface PositionConvert {
     PositionConvert INSTANCE = Mappers.getMapper(PositionConvert.class);
 
     /**
-     * 实体转详情视图对象，{@code userName}/{@code orgName} 需要由调用方另行解析并回填。
+     * 实体转详情视图对象，{@code userName}/{@code orgName} 需要由调用方另行解析并回填；
+     * {@code createBy}/{@code updateBy} 落库内容是登录用户 id 的字符串，需要由调用方查询后
+     * 回填为 "姓名（账号编码）" 展示名，此处显式 ignore 避免 MapStruct 把 id 文本原样当
+     * 展示名复制。
      *
      * @param entity 任职记录实体
      * @return 详情视图对象
      */
     @Mapping(target = "userName", ignore = true)
     @Mapping(target = "orgName", ignore = true)
+    @Mapping(target = "createBy", ignore = true)
+    @Mapping(target = "updateBy", ignore = true)
     PositionVO toVO(UserPositionEntity entity);
 
     /**
      * 实体列表批量转详情视图对象列表，{@code userName}/{@code orgName} 需要由调用方
-     * 另行解析并回填。
+     * 另行解析并回填；{@code createBy}/{@code updateBy} 同 {@link #toVO} 需要由调用方
+     * 另行回填展示名。
      *
      * @param entities 任职记录实体列表
      * @return 详情视图对象列表

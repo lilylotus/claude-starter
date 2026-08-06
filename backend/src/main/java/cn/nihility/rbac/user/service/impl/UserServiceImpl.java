@@ -29,6 +29,7 @@ import cn.nihility.rbac.user.entity.UserPositionEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import cn.nihility.rbac.user.mapper.UserPositionMapper;
 import cn.nihility.rbac.user.mapstruct.UserConvert;
+import cn.nihility.rbac.user.service.UserDisplayService;
 import cn.nihility.rbac.user.service.UserService;
 import cn.nihility.rbac.user.service.support.PositionDynamicFieldSupport;
 import cn.nihility.rbac.user.service.support.PositionLogSnapshotSupport;
@@ -44,9 +45,11 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 /**
  * 用户业务逻辑实现。
@@ -116,15 +119,20 @@ public class UserServiceImpl implements UserService {
      */
     private final OrgScopeService orgScopeService;
 
-    /** 当前登录操作人账号编码解析服务。 */
+    /** 当前登录操作人用户 id 解析服务。 */
     private final CurrentOperatorService currentOperatorService;
+
+    /** 审计字段（{@code createBy}/{@code updateBy}）展示名批量解析服务。 */
+    private final UserDisplayService userDisplayService;
 
     /**
      * {@inheritDoc}
      * <p>
      * 受限时（管辖范围非空）追加"存在至少一条未删除、所属组织落在管辖范围内的任职记录"
      * 过滤条件，跨表条件写在 {@link UserMapper#selectUserPage} 对应的 XML 里，不在 Java
-     * 端用 {@link LambdaQueryWrapper} 拼接（design.md Decision 2/4）。
+     * 端用 {@link LambdaQueryWrapper} 拼接（design.md Decision 2/4）。{@code selectUserPage}
+     * 直接把 {@code tab_user} 整行映射到 {@link UserVO}，{@code createBy}/{@code updateBy}
+     * 是登录用户 id 的原始字符串，需要就地批量回填为展示名。
      */
     @Override
     public PageResult<UserVO> getPage(String name, String mobile, String idCard, Integer page, Integer pageSize) {
@@ -134,7 +142,9 @@ public class UserServiceImpl implements UserService {
         Page<UserVO> queryPage = new Page<>(page, pageSize);
         IPage<UserVO> resultPage = userMapper.selectUserPage(queryPage, name, mobile, idCard, allowedOrgIds,
                 UserStatus.DELETED, PositionStatus.DELETED);
-        return PageResult.of(resultPage.getRecords(), resultPage);
+        List<UserVO> records = resultPage.getRecords();
+        fillAuditDisplayNames(records);
+        return PageResult.of(records, resultPage);
     }
 
     /**
@@ -145,6 +155,11 @@ public class UserServiceImpl implements UserService {
         UserEntity entity = getExistingEntity(id);
         UserVO vo = UserConvert.INSTANCE.toVO(entity);
         vo.setPositions(listPositionsWithOrgName(id));
+
+        Map<String, String> displayNames = userDisplayService.resolveDisplayNames(
+                Stream.of(entity.getCreateBy(), entity.getUpdateBy()).collect(Collectors.toSet()));
+        vo.setCreateBy(resolveDisplayName(entity.getCreateBy(), displayNames));
+        vo.setUpdateBy(resolveDisplayName(entity.getUpdateBy(), displayNames));
         return vo;
     }
 
@@ -161,7 +176,7 @@ public class UserServiceImpl implements UserService {
         validateDynamicFields(request, true, null);
         validatePositionsDynamicFields(request.getPositions());
 
-        String operator = currentOperatorService.resolveCode();
+        String operator = Objects.toString(currentOperatorService.resolveUserId(), null);
         UserEntity entity = UserConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(UserStatus.ENABLED);
@@ -192,7 +207,7 @@ public class UserServiceImpl implements UserService {
         validatePositionsDynamicFields(request.getPositions());
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
-        String operator = currentOperatorService.resolveCode();
+        String operator = Objects.toString(currentOperatorService.resolveUserId(), null);
         UserConvert.INSTANCE.updateEntity(request, entity);
         entity.setUpdateBy(operator);
         entity.setUpdateTime(LocalDateTime.now());
@@ -231,7 +246,7 @@ public class UserServiceImpl implements UserService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(UserStatus.DELETED);
-        entity.setUpdateBy(currentOperatorService.resolveCode());
+        entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         userMapper.updateById(entity);
 
@@ -259,7 +274,7 @@ public class UserServiceImpl implements UserService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(status);
-        entity.setUpdateBy(currentOperatorService.resolveCode());
+        entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         userMapper.updateById(entity);
 
@@ -358,7 +373,8 @@ public class UserServiceImpl implements UserService {
     }
 
     /**
-     * 把任职记录实体列表转换为视图对象列表，并批量解析所属组织名称，避免逐条查询组织表。
+     * 把任职记录实体列表转换为视图对象列表，并批量解析所属组织名称、审计字段展示名，
+     * 避免逐条查询组织表/用户表。
      *
      * @param entities 任职记录实体列表
      * @return 任职记录视图对象列表
@@ -374,10 +390,54 @@ public class UserServiceImpl implements UserService {
         Map<Long, String> orgNameMap = orgs.stream()
                 .collect(Collectors.toMap(OrgEntity::getId, OrgEntity::getName, (left, right) -> left));
 
-        for (UserPositionVO vo : result) {
+        Set<String> auditUserIdTexts = entities.stream()
+                .flatMap(entity -> Stream.of(entity.getCreateBy(), entity.getUpdateBy()))
+                .collect(Collectors.toSet());
+        Map<String, String> displayNames = userDisplayService.resolveDisplayNames(auditUserIdTexts);
+
+        for (int i = 0; i < entities.size(); i++) {
+            UserPositionVO vo = result.get(i);
             vo.setOrgName(orgNameMap.get(vo.getOrgId()));
+            vo.setCreateBy(resolveDisplayName(entities.get(i).getCreateBy(), displayNames));
+            vo.setUpdateBy(resolveDisplayName(entities.get(i).getUpdateBy(), displayNames));
         }
         return result;
+    }
+
+    /**
+     * 批量把一批用户视图对象自身携带的 {@code createBy}/{@code updateBy}（{@code selectUserPage}
+     * 直接由 SQL 映射得到，原始内容是登录用户 id 的字符串）就地回填为"姓名（账号编码）"
+     * 展示名，避免逐条查询造成 N+1。
+     *
+     * @param voList 用户视图对象列表，原地修改
+     */
+    private void fillAuditDisplayNames(List<UserVO> voList) {
+        if (voList.isEmpty()) {
+            return;
+        }
+        Set<String> auditUserIdTexts = voList.stream()
+                .flatMap(vo -> Stream.of(vo.getCreateBy(), vo.getUpdateBy()))
+                .collect(Collectors.toSet());
+        Map<String, String> displayNames = userDisplayService.resolveDisplayNames(auditUserIdTexts);
+        for (UserVO vo : voList) {
+            vo.setCreateBy(resolveDisplayName(vo.getCreateBy(), displayNames));
+            vo.setUpdateBy(resolveDisplayName(vo.getUpdateBy(), displayNames));
+        }
+    }
+
+    /**
+     * 把审计字段原始值（登录用户 id 的字符串）解析为展示名；空白值回退空字符串，
+     * 查不到对应用户（如账号已被物理清理）时回退"未知用户"文案。
+     *
+     * @param userIdText   审计字段原始值
+     * @param displayNames 批量解析得到的"用户 id 文本 -> 展示名"映射
+     * @return 展示名
+     */
+    private String resolveDisplayName(String userIdText, Map<String, String> displayNames) {
+        if (!StringUtils.hasText(userIdText)) {
+            return "";
+        }
+        return displayNames.getOrDefault(userIdText, "未知用户");
     }
 
     /**
@@ -393,7 +453,7 @@ public class UserServiceImpl implements UserService {
      *
      * @param userId    用户 id
      * @param positions 请求中的任职记录列表，可为空（视为清空全部既有任职记录）
-     * @param operator  操作人账号编码，由调用方在方法内只解析一次后传入，避免重复解析
+     * @param operator  操作人用户 id 的字符串，由调用方在方法内只解析一次后传入，避免重复解析
      */
     private void syncPositions(Long userId, List<UserPositionRequest> positions, String operator) {
         List<UserPositionRequest> requests = positions != null ? positions : List.of();

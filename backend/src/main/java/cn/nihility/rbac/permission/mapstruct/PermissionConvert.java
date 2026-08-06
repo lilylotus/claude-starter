@@ -22,11 +22,15 @@ public interface PermissionConvert {
     PermissionConvert INSTANCE = Mappers.getMapper(PermissionConvert.class);
 
     /**
-     * 实体转详情视图对象。
+     * 实体转详情视图对象；{@code createBy}/{@code updateBy} 在实体上落库的是用户 id 文本，
+     * 需要由服务层查询后回填成人可读的展示名，此处显式忽略，避免 MapStruct 把 id 文本
+     * 原样复制到 VO 上冒充展示名。
      *
      * @param entity 权限点实体
      * @return 详情视图对象
      */
+    @Mapping(target = "createBy", ignore = true)
+    @Mapping(target = "updateBy", ignore = true)
     PermissionVO toVO(PermissionEntity entity);
 
     /**

@@ -16,6 +16,7 @@ import cn.nihility.rbac.dict.mapstruct.DictConvert;
 import cn.nihility.rbac.dict.service.DictItemService;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
@@ -23,9 +24,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 /**
  * 字典项业务逻辑实现。
@@ -43,8 +47,11 @@ public class DictItemServiceImpl implements DictItemService {
     /** 操作日志记录组件。 */
     private final OperationLogRecorder operationLogRecorder;
 
-    /** 当前登录操作人账号编码解析服务。 */
+    /** 当前登录操作人用户 id 解析服务。 */
     private final CurrentOperatorService currentOperatorService;
+
+    /** 审计字段（{@code createBy}/{@code updateBy}）展示名批量解析服务。 */
+    private final UserDisplayService userDisplayService;
 
     /**
      * {@inheritDoc}
@@ -79,7 +86,7 @@ public class DictItemServiceImpl implements DictItemService {
     public DictItemVO create(DictItemCreateRequest request) {
         checkCodeUnique(request.getDictTypeId(), request.getCode(), null);
 
-        String operator = currentOperatorService.resolveCode();
+        String operator = Objects.toString(currentOperatorService.resolveUserId(), null);
         DictItemEntity entity = DictConvert.INSTANCE.toItemEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(DictStatus.ENABLED);
@@ -105,7 +112,7 @@ public class DictItemServiceImpl implements DictItemService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         DictConvert.INSTANCE.updateItemEntity(request, entity);
-        entity.setUpdateBy(currentOperatorService.resolveCode());
+        entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         dictItemMapper.updateById(entity);
 
@@ -140,7 +147,7 @@ public class DictItemServiceImpl implements DictItemService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(DictStatus.DELETED);
-        entity.setUpdateBy(currentOperatorService.resolveCode());
+        entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         dictItemMapper.updateById(entity);
 
@@ -179,7 +186,7 @@ public class DictItemServiceImpl implements DictItemService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(status);
-        entity.setUpdateBy(currentOperatorService.resolveCode());
+        entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         dictItemMapper.updateById(entity);
 
@@ -224,7 +231,8 @@ public class DictItemServiceImpl implements DictItemService {
     }
 
     /**
-     * 把字典项实体列表转换为详情视图对象列表，并批量解析所属字典类型名称。
+     * 把字典项实体列表转换为详情视图对象列表，并批量解析所属字典类型名称、
+     * {@code createBy}/{@code updateBy} 审计字段展示名。
      *
      * @param entities 字典项实体列表
      * @return 详情视图对象列表
@@ -241,10 +249,33 @@ public class DictItemServiceImpl implements DictItemService {
         Map<Long, String> dictTypeNameMap = dictTypes.stream()
                 .collect(Collectors.toMap(DictTypeEntity::getId, DictTypeEntity::getName, (left, right) -> left));
 
-        for (DictItemVO vo : result) {
+        Set<String> auditUserIdTexts = entities.stream()
+                .flatMap(entity -> Stream.of(entity.getCreateBy(), entity.getUpdateBy()))
+                .collect(Collectors.toSet());
+        Map<String, String> displayNames = userDisplayService.resolveDisplayNames(auditUserIdTexts);
+
+        for (int i = 0; i < entities.size(); i++) {
+            DictItemVO vo = result.get(i);
             vo.setDictTypeName(dictTypeNameMap.get(vo.getDictTypeId()));
+            vo.setCreateBy(resolveDisplayName(entities.get(i).getCreateBy(), displayNames));
+            vo.setUpdateBy(resolveDisplayName(entities.get(i).getUpdateBy(), displayNames));
         }
         return result;
+    }
+
+    /**
+     * 把审计字段原始存储的用户 id 文本解析为人可读展示名，查不到时兜底为"未知用户"，
+     * 避免直接把不可读的 id 数字暴露给前端。
+     *
+     * @param userIdText   审计字段原始存储的用户 id 文本
+     * @param displayNames 批量解析得到的用户 id 文本到展示名的映射
+     * @return 人可读展示名
+     */
+    private String resolveDisplayName(String userIdText, Map<String, String> displayNames) {
+        if (!StringUtils.hasText(userIdText)) {
+            return "";
+        }
+        return displayNames.getOrDefault(userIdText, "未知用户");
     }
 
     /**

@@ -23,12 +23,16 @@ public interface RoleConvert {
 
     /**
      * 实体转详情视图对象，{@code permissions}（已分配权限点列表）由服务层查询
-     * {@code tab_role_permission} 关联后另行赋值，不参与本次转换。
+     * {@code tab_role_permission} 关联后另行赋值，不参与本次转换；{@code createBy}/
+     * {@code updateBy} 在实体上落库的是用户 id 文本，需要由服务层查询后回填成人可读的
+     * 展示名，此处显式忽略，避免 MapStruct 把 id 文本原样复制到 VO 上冒充展示名。
      *
      * @param entity 角色实体
      * @return 详情视图对象
      */
     @Mapping(target = "permissions", ignore = true)
+    @Mapping(target = "createBy", ignore = true)
+    @Mapping(target = "updateBy", ignore = true)
     RoleVO toVO(RoleEntity entity);
 
     /**

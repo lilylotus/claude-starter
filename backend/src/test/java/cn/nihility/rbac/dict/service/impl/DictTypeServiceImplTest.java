@@ -16,6 +16,7 @@ import cn.nihility.rbac.dict.entity.DictTypeEntity;
 import cn.nihility.rbac.dict.mapper.DictItemMapper;
 import cn.nihility.rbac.dict.mapper.DictTypeMapper;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,9 +44,13 @@ class DictTypeServiceImplTest {
     @Mock
     private OperationLogRecorder operationLogRecorder;
 
-    /** 被测服务的当前登录操作人账号编码解析依赖，使用 Mockito 打桩。 */
+    /** 被测服务的当前登录操作人用户 id 解析依赖，使用 Mockito 打桩。 */
     @Mock
     private CurrentOperatorService currentOperatorService;
+
+    /** 被测服务的审计字段展示名批量解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private UserDisplayService userDisplayService;
 
     /** 被测服务实例。 */
     private DictTypeServiceImpl dictTypeService;
@@ -57,8 +62,9 @@ class DictTypeServiceImplTest {
     @BeforeEach
     void setUp() {
         dictTypeService = new DictTypeServiceImpl(dictTypeMapper, dictItemMapper, operationLogRecorder,
-                currentOperatorService);
-        lenient().when(currentOperatorService.resolveCode()).thenReturn("test-operator");
+                currentOperatorService, userDisplayService);
+        lenient().when(currentOperatorService.resolveUserId()).thenReturn(1L);
+        lenient().when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
     }
 
     /**

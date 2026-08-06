@@ -17,6 +17,7 @@ import cn.nihility.rbac.role.mapper.RoleMapper;
 import cn.nihility.rbac.role.mapper.RolePermissionMapper;
 import cn.nihility.rbac.role.mapstruct.RoleConvert;
 import cn.nihility.rbac.role.service.RoleService;
+import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
@@ -24,9 +25,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 /**
  * 角色管理业务逻辑实现。角色权限点关联（{@code tab_role_permission}）在每次创建/更新时
@@ -45,8 +49,11 @@ public class RoleServiceImpl implements RoleService {
     /** 操作日志记录组件。 */
     private final OperationLogRecorder operationLogRecorder;
 
-    /** 当前登录操作人账号编码解析服务。 */
+    /** 当前登录操作人用户 id 解析服务。 */
     private final CurrentOperatorService currentOperatorService;
+
+    /** 审计字段（{@code createBy}/{@code updateBy}）展示名批量解析服务。 */
+    private final UserDisplayService userDisplayService;
 
     /**
      * {@inheritDoc}
@@ -60,7 +67,7 @@ public class RoleServiceImpl implements RoleService {
 
         Page<RoleEntity> queryPage = new Page<>(page, pageSize);
         Page<RoleEntity> resultPage = roleMapper.selectPage(queryPage, wrapper);
-        List<RoleVO> records = RoleConvert.INSTANCE.toVOList(resultPage.getRecords());
+        List<RoleVO> records = toVOListWithDisplayNames(resultPage.getRecords());
         return PageResult.of(records, resultPage);
     }
 
@@ -70,7 +77,7 @@ public class RoleServiceImpl implements RoleService {
     @Override
     public RoleVO getById(Long id) {
         RoleEntity entity = getExistingEntity(id);
-        RoleVO vo = RoleConvert.INSTANCE.toVO(entity);
+        RoleVO vo = toVOListWithDisplayNames(List.of(entity)).get(0);
         vo.setPermissions(rolePermissionMapper.selectPermissionsByRoleId(id));
         return vo;
     }
@@ -82,7 +89,7 @@ public class RoleServiceImpl implements RoleService {
     public RoleVO create(RoleCreateRequest request) {
         checkCodeUnique(request.getCode(), null);
 
-        String operator = currentOperatorService.resolveCode();
+        String operator = Objects.toString(currentOperatorService.resolveUserId(), null);
         RoleEntity entity = RoleConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(RoleStatus.ENABLED);
@@ -109,7 +116,7 @@ public class RoleServiceImpl implements RoleService {
         checkCodeUnique(request.getCode(), id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
-        String operator = currentOperatorService.resolveCode();
+        String operator = Objects.toString(currentOperatorService.resolveUserId(), null);
         RoleConvert.INSTANCE.updateEntity(request, entity);
         entity.setUpdateBy(operator);
         entity.setUpdateTime(LocalDateTime.now());
@@ -148,7 +155,7 @@ public class RoleServiceImpl implements RoleService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(RoleStatus.DELETED);
-        entity.setUpdateBy(currentOperatorService.resolveCode());
+        entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         roleMapper.updateById(entity);
 
@@ -179,7 +186,7 @@ public class RoleServiceImpl implements RoleService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(status);
-        entity.setUpdateBy(currentOperatorService.resolveCode());
+        entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         roleMapper.updateById(entity);
 
@@ -228,7 +235,7 @@ public class RoleServiceImpl implements RoleService {
      *
      * @param roleId        角色 id
      * @param permissionIds 请求中的权限点 id 列表，可为空（视为清空全部既有权限点关联）
-     * @param operator      操作人账号编码，由调用方在方法内只解析一次后传入，避免重复解析
+     * @param operator      操作人用户 id 文本，由调用方在方法内只解析一次后传入，避免重复解析
      */
     private void syncPermissions(Long roleId, List<Long> permissionIds, String operator) {
         rolePermissionMapper.delete(
@@ -250,6 +257,43 @@ public class RoleServiceImpl implements RoleService {
                     .build();
             rolePermissionMapper.insert(entity);
         }
+    }
+
+    /**
+     * 把角色实体列表转换为详情视图对象列表，并批量解析 {@code createBy}/{@code updateBy}
+     * 审计字段展示名。
+     *
+     * @param entities 角色实体列表
+     * @return 详情视图对象列表
+     */
+    private List<RoleVO> toVOListWithDisplayNames(List<RoleEntity> entities) {
+        List<RoleVO> voList = RoleConvert.INSTANCE.toVOList(entities);
+
+        Set<String> auditUserIdTexts = entities.stream()
+                .flatMap(entity -> Stream.of(entity.getCreateBy(), entity.getUpdateBy()))
+                .collect(Collectors.toSet());
+        Map<String, String> displayNames = userDisplayService.resolveDisplayNames(auditUserIdTexts);
+
+        for (int i = 0; i < entities.size(); i++) {
+            voList.get(i).setCreateBy(resolveDisplayName(entities.get(i).getCreateBy(), displayNames));
+            voList.get(i).setUpdateBy(resolveDisplayName(entities.get(i).getUpdateBy(), displayNames));
+        }
+        return voList;
+    }
+
+    /**
+     * 把审计字段原始存储的用户 id 文本解析为人可读展示名，查不到时兜底为"未知用户"，
+     * 避免直接把不可读的 id 数字暴露给前端。
+     *
+     * @param userIdText   审计字段原始存储的用户 id 文本
+     * @param displayNames 批量解析得到的用户 id 文本到展示名的映射
+     * @return 人可读展示名
+     */
+    private String resolveDisplayName(String userIdText, Map<String, String> displayNames) {
+        if (!StringUtils.hasText(userIdText)) {
+            return "";
+        }
+        return displayNames.getOrDefault(userIdText, "未知用户");
     }
 
     /**

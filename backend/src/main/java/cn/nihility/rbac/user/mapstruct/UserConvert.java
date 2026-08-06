@@ -24,16 +24,21 @@ public interface UserConvert {
     UserConvert INSTANCE = Mappers.getMapper(UserConvert.class);
 
     /**
-     * 用户实体转详情视图对象，{@code positions} 需要由调用方另行查询并回填。
+     * 用户实体转详情视图对象，{@code positions} 需要由调用方另行查询并回填；{@code createBy}/
+     * {@code updateBy} 落库内容是登录用户 id 的字符串，需要由调用方查询后回填为
+     * "姓名（账号编码）" 展示名，此处显式 ignore 避免 MapStruct 把 id 文本原样当展示名复制。
      *
      * @param entity 用户实体
      * @return 详情视图对象
      */
     @Mapping(target = "positions", ignore = true)
+    @Mapping(target = "createBy", ignore = true)
+    @Mapping(target = "updateBy", ignore = true)
     UserVO toVO(UserEntity entity);
 
     /**
-     * 用户实体列表批量转详情视图对象列表，{@code positions} 不会被填充（列表查询不需要）。
+     * 用户实体列表批量转详情视图对象列表，{@code positions} 不会被填充（列表查询不需要）；
+     * {@code createBy}/{@code updateBy} 同 {@link #toVO} 需要由调用方另行回填展示名。
      *
      * @param entities 用户实体列表
      * @return 详情视图对象列表
@@ -105,16 +110,21 @@ public interface UserConvert {
     void updatePositionEntity(UserPositionRequest request, @MappingTarget UserPositionEntity entity);
 
     /**
-     * 任职记录实体转视图对象，{@code orgName} 需要由调用方另行解析并回填。
+     * 任职记录实体转视图对象，{@code orgName} 需要由调用方另行解析并回填；{@code createBy}/
+     * {@code updateBy} 落库内容是登录用户 id 的字符串，需要由调用方查询后回填为
+     * "姓名（账号编码）" 展示名，此处显式 ignore 避免 MapStruct 把 id 文本原样当展示名复制。
      *
      * @param entity 任职记录实体
      * @return 任职记录视图对象
      */
     @Mapping(target = "orgName", ignore = true)
+    @Mapping(target = "createBy", ignore = true)
+    @Mapping(target = "updateBy", ignore = true)
     UserPositionVO toPositionVO(UserPositionEntity entity);
 
     /**
-     * 任职记录实体列表批量转视图对象列表，{@code orgName} 需要由调用方另行解析并回填。
+     * 任职记录实体列表批量转视图对象列表，{@code orgName} 需要由调用方另行解析并回填；
+     * {@code createBy}/{@code updateBy} 同 {@link #toPositionVO} 需要由调用方另行回填展示名。
      *
      * @param entities 任职记录实体列表
      * @return 任职记录视图对象列表

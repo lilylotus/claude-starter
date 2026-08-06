@@ -18,6 +18,7 @@ import cn.nihility.rbac.permission.dto.PermissionUpdateRequest;
 import cn.nihility.rbac.permission.dto.PermissionVO;
 import cn.nihility.rbac.permission.entity.PermissionEntity;
 import cn.nihility.rbac.permission.mapper.PermissionMapper;
+import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -49,9 +50,13 @@ class PermissionServiceImplTest {
     @Mock
     private OperationLogRecorder operationLogRecorder;
 
-    /** 被测服务的当前登录操作人账号编码解析依赖，使用 Mockito 打桩。 */
+    /** 被测服务的当前登录操作人用户 id 解析依赖，使用 Mockito 打桩。 */
     @Mock
     private CurrentOperatorService currentOperatorService;
+
+    /** 被测服务的审计字段展示名批量解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private UserDisplayService userDisplayService;
 
     /** 被测服务实例。 */
     private PermissionServiceImpl permissionService;
@@ -75,8 +80,10 @@ class PermissionServiceImplTest {
      */
     @BeforeEach
     void setUp() {
-        permissionService = new PermissionServiceImpl(permissionMapper, operationLogRecorder, currentOperatorService);
-        lenient().when(currentOperatorService.resolveCode()).thenReturn("test-operator");
+        permissionService = new PermissionServiceImpl(permissionMapper, operationLogRecorder, currentOperatorService,
+                userDisplayService);
+        lenient().when(currentOperatorService.resolveUserId()).thenReturn(1L);
+        lenient().when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
     }
 
     /**

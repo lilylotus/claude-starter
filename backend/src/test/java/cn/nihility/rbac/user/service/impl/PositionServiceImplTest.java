@@ -26,6 +26,7 @@ import cn.nihility.rbac.user.dto.PositionVO;
 import cn.nihility.rbac.user.entity.UserPositionEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import cn.nihility.rbac.user.mapper.UserPositionMapper;
+import cn.nihility.rbac.user.service.UserDisplayService;
 import cn.nihility.rbac.user.service.support.PositionDynamicFieldSupport;
 import cn.nihility.rbac.user.service.support.PositionLogSnapshotSupport;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -82,9 +83,13 @@ class PositionServiceImplTest {
     @Mock
     private OrgScopeService orgScopeService;
 
-    /** 被测服务的当前登录操作人账号编码解析依赖，使用 Mockito 打桩。 */
+    /** 被测服务的当前登录操作人用户 id 解析依赖，使用 Mockito 打桩。 */
     @Mock
     private CurrentOperatorService currentOperatorService;
+
+    /** 被测服务的审计字段展示名批量解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private UserDisplayService userDisplayService;
 
     /** 被测服务实例。 */
     private PositionServiceImpl positionService;
@@ -106,10 +111,12 @@ class PositionServiceImplTest {
         PositionLogSnapshotSupport positionLogSnapshotSupport = new PositionLogSnapshotSupport(userMapper, orgMapper,
                 formFieldDefinitionService, formFieldSnapshotSupport, dictItemService);
         positionService = new PositionServiceImpl(userPositionMapper, operationLogRecorder,
-                positionDynamicFieldSupport, positionLogSnapshotSupport, orgScopeService, currentOperatorService);
+                positionDynamicFieldSupport, positionLogSnapshotSupport, orgScopeService, currentOperatorService,
+                userDisplayService);
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
         lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.empty());
-        lenient().when(currentOperatorService.resolveCode()).thenReturn("test-operator");
+        lenient().when(currentOperatorService.resolveUserId()).thenReturn(1L);
+        lenient().when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
     }
 
     /**

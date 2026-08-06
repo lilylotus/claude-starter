@@ -22,6 +22,7 @@ import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
+import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -30,9 +31,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 /**
  * 管理员管理业务逻辑实现。角色关联（{@code tab_admin_role}）与组织管辖范围
@@ -58,8 +62,11 @@ public class AdminServiceImpl implements AdminService {
     /** 操作日志记录组件。 */
     private final OperationLogRecorder operationLogRecorder;
 
-    /** 当前登录操作人账号编码解析服务。 */
+    /** 当前登录操作人用户 id 解析服务。 */
     private final CurrentOperatorService currentOperatorService;
+
+    /** 审计字段（{@code createBy}/{@code updateBy}）展示名批量解析服务。 */
+    private final UserDisplayService userDisplayService;
 
     /**
      * {@inheritDoc}
@@ -67,6 +74,7 @@ public class AdminServiceImpl implements AdminService {
     @Override
     public PageResult<AdminVO> getPage(Integer page, Integer pageSize) {
         IPage<AdminVO> resultPage = adminMapper.selectAdminPage(new Page<>(page, pageSize), AdminStatus.DELETED);
+        backfillDisplayNames(resultPage.getRecords());
         return PageResult.of(resultPage.getRecords(), resultPage);
     }
 
@@ -86,7 +94,7 @@ public class AdminServiceImpl implements AdminService {
         checkCodeUnique(request.getCode(), null);
         checkUserIdUnique(request.getUserId(), null);
 
-        String operator = currentOperatorService.resolveCode();
+        String operator = Objects.toString(currentOperatorService.resolveUserId(), null);
         AdminEntity entity = AdminConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(AdminStatus.ENABLED);
@@ -115,7 +123,7 @@ public class AdminServiceImpl implements AdminService {
         checkUserIdUnique(request.getUserId(), id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
-        String operator = currentOperatorService.resolveCode();
+        String operator = Objects.toString(currentOperatorService.resolveUserId(), null);
         AdminConvert.INSTANCE.updateEntity(request, entity);
         entity.setUpdateBy(operator);
         entity.setUpdateTime(LocalDateTime.now());
@@ -155,7 +163,7 @@ public class AdminServiceImpl implements AdminService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(AdminStatus.DELETED);
-        entity.setUpdateBy(currentOperatorService.resolveCode());
+        entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         adminMapper.updateById(entity);
 
@@ -174,7 +182,7 @@ public class AdminServiceImpl implements AdminService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(status);
-        entity.setUpdateBy(currentOperatorService.resolveCode());
+        entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         adminMapper.updateById(entity);
 
@@ -211,6 +219,7 @@ public class AdminServiceImpl implements AdminService {
         }
         vo.setRoles(adminRoleMapper.selectRolesByAdminId(id));
         vo.setOrgScopes(adminOrgScopeMapper.selectOrgScopesByAdminId(id));
+        backfillDisplayNames(List.of(vo));
         return vo;
     }
 
@@ -258,7 +267,7 @@ public class AdminServiceImpl implements AdminService {
      *
      * @param adminId  管理员 id
      * @param roleIds  请求中的角色 id 列表，可为空（视为清空全部既有角色关联）
-     * @param operator 操作人账号编码，由调用方在方法内只解析一次后传入，避免重复解析
+     * @param operator 操作人用户 id 文本，由调用方在方法内只解析一次后传入，避免重复解析
      */
     private void syncRoles(Long adminId, List<Long> roleIds, String operator) {
         adminRoleMapper.delete(new LambdaQueryWrapper<AdminRoleEntity>().eq(AdminRoleEntity::getAdminId, adminId));
@@ -287,7 +296,7 @@ public class AdminServiceImpl implements AdminService {
      *
      * @param adminId   管理员 id
      * @param orgScopes 请求中的管辖组织范围列表，可为空（视为清空全部既有管辖组织范围）
-     * @param operator  操作人账号编码，由调用方在方法内只解析一次后传入，避免重复解析
+     * @param operator  操作人用户 id 文本，由调用方在方法内只解析一次后传入，避免重复解析
      */
     private void syncOrgScopes(Long adminId, List<AdminOrgScopeRequest> orgScopes, String operator) {
         adminOrgScopeMapper.delete(new LambdaQueryWrapper<AdminOrgScopeEntity>()
@@ -310,6 +319,40 @@ public class AdminServiceImpl implements AdminService {
                     .build();
             adminOrgScopeMapper.insert(entity);
         }
+    }
+
+    /**
+     * 批量把管理员详情/列表视图对象的 {@code createBy}/{@code updateBy} 字段（此时仍是
+     * {@link cn.nihility.rbac.admin.mapper.AdminMapper} 的 XML 查询直接落入的用户 id 文本，
+     * 而非经由 {@link AdminConvert} 转换得到）就地覆盖为人可读展示名。
+     *
+     * @param voList 待回填的管理员详情/列表视图对象列表
+     */
+    private void backfillDisplayNames(List<AdminVO> voList) {
+        Set<String> auditUserIdTexts = voList.stream()
+                .flatMap(vo -> Stream.of(vo.getCreateBy(), vo.getUpdateBy()))
+                .collect(Collectors.toSet());
+        Map<String, String> displayNames = userDisplayService.resolveDisplayNames(auditUserIdTexts);
+
+        for (AdminVO vo : voList) {
+            vo.setCreateBy(resolveDisplayName(vo.getCreateBy(), displayNames));
+            vo.setUpdateBy(resolveDisplayName(vo.getUpdateBy(), displayNames));
+        }
+    }
+
+    /**
+     * 把审计字段原始存储的用户 id 文本解析为人可读展示名，查不到时兜底为"未知用户"，
+     * 避免直接把不可读的 id 数字暴露给前端。
+     *
+     * @param userIdText   审计字段原始存储的用户 id 文本
+     * @param displayNames 批量解析得到的用户 id 文本到展示名的映射
+     * @return 人可读展示名
+     */
+    private String resolveDisplayName(String userIdText, Map<String, String> displayNames) {
+        if (!StringUtils.hasText(userIdText)) {
+            return "";
+        }
+        return displayNames.getOrDefault(userIdText, "未知用户");
     }
 
     /**

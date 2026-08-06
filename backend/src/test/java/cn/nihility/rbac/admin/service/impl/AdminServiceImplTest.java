@@ -26,6 +26,7 @@ import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.user.mapper.UserMapper;
+import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
@@ -66,9 +67,13 @@ class AdminServiceImplTest {
     @Mock
     private OperationLogRecorder operationLogRecorder;
 
-    /** 被测服务的当前登录操作人账号编码解析依赖，使用 Mockito 打桩。 */
+    /** 被测服务的当前登录操作人用户 id 解析依赖，使用 Mockito 打桩。 */
     @Mock
     private CurrentOperatorService currentOperatorService;
+
+    /** 被测服务的审计字段展示名批量解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private UserDisplayService userDisplayService;
 
     /** 被测服务实例。 */
     private AdminServiceImpl adminService;
@@ -80,10 +85,11 @@ class AdminServiceImplTest {
     @BeforeEach
     void setUp() {
         adminService = new AdminServiceImpl(adminMapper, adminRoleMapper, adminOrgScopeMapper, userMapper,
-                operationLogRecorder, currentOperatorService);
+                operationLogRecorder, currentOperatorService, userDisplayService);
         lenient().when(adminRoleMapper.selectRolesByAdminId(anyLong())).thenReturn(List.of());
         lenient().when(adminOrgScopeMapper.selectOrgScopesByAdminId(anyLong())).thenReturn(List.of());
-        lenient().when(currentOperatorService.resolveCode()).thenReturn("test-operator");
+        lenient().when(currentOperatorService.resolveUserId()).thenReturn(1L);
+        lenient().when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
     }
 
     /**

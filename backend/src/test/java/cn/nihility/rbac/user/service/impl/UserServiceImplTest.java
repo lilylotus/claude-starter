@@ -34,6 +34,7 @@ import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.entity.UserPositionEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import cn.nihility.rbac.user.mapper.UserPositionMapper;
+import cn.nihility.rbac.user.service.UserDisplayService;
 import cn.nihility.rbac.user.service.support.PositionDynamicFieldSupport;
 import cn.nihility.rbac.user.service.support.PositionLogSnapshotSupport;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -95,9 +96,13 @@ class UserServiceImplTest {
     @Mock
     private OrgScopeService orgScopeService;
 
-    /** 被测服务的当前登录操作人账号编码解析依赖，使用 Mockito 打桩。 */
+    /** 被测服务的当前登录操作人用户 id 解析依赖，使用 Mockito 打桩。 */
     @Mock
     private CurrentOperatorService currentOperatorService;
+
+    /** 被测服务的审计字段展示名批量解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private UserDisplayService userDisplayService;
 
     /** 被测服务实例。 */
     private UserServiceImpl userService;
@@ -123,11 +128,13 @@ class UserServiceImplTest {
                 formFieldDefinitionService, formFieldSnapshotSupport, dictItemService);
         userService = new UserServiceImpl(userMapper, userPositionMapper, orgMapper, operationLogRecorder,
                 formFieldDefinitionService, formFieldSnapshotSupport, dictItemService, positionDynamicFieldSupport,
-                positionLogSnapshotSupport, passwordService, orgScopeService, currentOperatorService);
+                positionLogSnapshotSupport, passwordService, orgScopeService, currentOperatorService,
+                userDisplayService);
         lenient().when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
         lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.empty());
-        lenient().when(currentOperatorService.resolveCode()).thenReturn("test-operator");
+        lenient().when(currentOperatorService.resolveUserId()).thenReturn(1L);
+        lenient().when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
     }
 
     /**
@@ -283,7 +290,7 @@ class UserServiceImplTest {
         UserPositionEntity inserted = captor.getValue();
         assertThat(inserted.getUserId()).isEqualTo(1L);
         assertThat(inserted.getOrgId()).isEqualTo(100L);
-        assertThat(inserted.getCreateBy()).isEqualTo("test-operator");
+        assertThat(inserted.getCreateBy()).isEqualTo(String.valueOf(1L));
         assertThat(inserted.getCreateTime()).isNotNull();
         verify(userPositionMapper, never()).deleteByIds(anyList());
         verify(operationLogRecorder).recordCreate(eq("position"), any(), any(), any(Map.class));

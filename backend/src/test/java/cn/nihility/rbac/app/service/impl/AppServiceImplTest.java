@@ -23,6 +23,7 @@ import cn.nihility.rbac.formfield.support.FormFieldSnapshotSupport;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.user.mapper.UserMapper;
+import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -76,9 +77,13 @@ class AppServiceImplTest {
     @Mock
     private OrgScopeService orgScopeService;
 
-    /** 被测服务的当前登录操作人账号编码解析依赖，使用 Mockito 打桩。 */
+    /** 被测服务的当前登录操作人用户 id 解析依赖，使用 Mockito 打桩。 */
     @Mock
     private CurrentOperatorService currentOperatorService;
+
+    /** 被测服务的审计字段展示名批量解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private UserDisplayService userDisplayService;
 
     /** 被测服务实例。 */
     private AppServiceImpl appService;
@@ -105,12 +110,14 @@ class AppServiceImplTest {
     @BeforeEach
     void setUp() {
         appService = new AppServiceImpl(appMapper, userMapper, orgMapper, operationLogRecorder,
-                formFieldDefinitionService, formFieldSnapshotSupport, orgScopeService, currentOperatorService);
+                formFieldDefinitionService, formFieldSnapshotSupport, orgScopeService, currentOperatorService,
+                userDisplayService);
         lenient().when(userMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
         lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.empty());
-        lenient().when(currentOperatorService.resolveCode()).thenReturn("test-operator");
+        lenient().when(currentOperatorService.resolveUserId()).thenReturn(1L);
+        lenient().when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
     }
 
     /**
@@ -193,7 +200,7 @@ class AppServiceImplTest {
         assertThat(captured.getCode()).isEqualTo("app001");
         assertThat(captured.getOwnerId()).isEqualTo(1L);
         assertThat(captured.getOrgId()).isEqualTo(100L);
-        assertThat(captured.getCreateBy()).isEqualTo("test-operator");
+        assertThat(captured.getCreateBy()).isEqualTo("1");
         assertThat(captured.getCreateTime()).isNotNull();
         verify(operationLogRecorder).recordCreate(org.mockito.ArgumentMatchers.eq("app"), any(),
                 org.mockito.ArgumentMatchers.eq("测试应用"), any(Map.class));

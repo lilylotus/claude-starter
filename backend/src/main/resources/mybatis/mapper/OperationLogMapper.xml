@@ -22,8 +22,11 @@
             <if test="query.operationType != null">
                 AND operation_type = #{query.operationType}
             </if>
-            <if test="query.createBy != null and query.createBy != ''">
-                AND create_by = #{query.createBy}
+            <if test="query.createByUserIds != null and !query.createByUserIds.isEmpty()">
+                AND create_by IN
+                <foreach collection="query.createByUserIds" item="id" open="(" separator="," close=")">
+                    #{id}
+                </foreach>
             </if>
             <if test="query.startTime != null">
                 AND create_time &gt;= #{query.startTime}

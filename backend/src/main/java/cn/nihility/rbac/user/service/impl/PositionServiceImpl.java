@@ -15,6 +15,7 @@ import cn.nihility.rbac.user.entity.UserPositionEntity;
 import cn.nihility.rbac.user.mapper.UserPositionMapper;
 import cn.nihility.rbac.user.mapstruct.PositionConvert;
 import cn.nihility.rbac.user.service.PositionService;
+import cn.nihility.rbac.user.service.UserDisplayService;
 import cn.nihility.rbac.user.service.support.PositionDynamicFieldSupport;
 import cn.nihility.rbac.user.service.support.PositionLogSnapshotSupport;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -25,8 +26,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 /**
  * 任职管理业务逻辑实现，复用用户管理模块既有的 {@code tab_user_position} 表/实体/Mapper，
@@ -60,11 +64,17 @@ public class PositionServiceImpl implements PositionService {
      */
     private final OrgScopeService orgScopeService;
 
-    /** 当前登录操作人账号编码解析服务。 */
+    /** 当前登录操作人用户 id 解析服务。 */
     private final CurrentOperatorService currentOperatorService;
+
+    /** 审计字段（{@code createBy}/{@code updateBy}）展示名批量解析服务。 */
+    private final UserDisplayService userDisplayService;
 
     /**
      * {@inheritDoc}
+     * <p>
+     * {@code selectPositionPage} 直接由 SQL JOIN 映射到 {@link PositionVO}，
+     * {@code createBy}/{@code updateBy} 是登录用户 id 的原始字符串，需要就地批量回填为展示名。
      */
     @Override
     public PageResult<PositionVO> getPage(Long orgId, Integer page, Integer pageSize) {
@@ -84,11 +94,16 @@ public class PositionServiceImpl implements PositionService {
 
         IPage<PositionVO> resultPage = userPositionMapper.selectPositionPage(
                 new Page<>(page, pageSize), orgId, PositionStatus.DELETED);
-        return PageResult.of(resultPage.getRecords(), resultPage);
+        List<PositionVO> records = resultPage.getRecords();
+        fillAuditDisplayNames(records);
+        return PageResult.of(records, resultPage);
     }
 
     /**
      * {@inheritDoc}
+     * <p>
+     * {@code selectPositionDetail} 直接由 SQL JOIN 映射到 {@link PositionVO}，
+     * {@code createBy}/{@code updateBy} 是登录用户 id 的原始字符串，需要就地回填为展示名。
      */
     @Override
     public PositionVO getById(Long id) {
@@ -96,6 +111,7 @@ public class PositionServiceImpl implements PositionService {
         if (vo == null) {
             throw new BusinessException("任职记录不存在");
         }
+        fillAuditDisplayNames(List.of(vo));
         return vo;
     }
 
@@ -106,7 +122,7 @@ public class PositionServiceImpl implements PositionService {
     public PositionVO create(PositionCreateRequest request) {
         positionDynamicFieldSupport.validate(request, true, null);
 
-        String operator = currentOperatorService.resolveCode();
+        String operator = Objects.toString(currentOperatorService.resolveUserId(), null);
         UserPositionEntity entity = PositionConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(PositionStatus.ENABLED);
@@ -132,7 +148,7 @@ public class PositionServiceImpl implements PositionService {
         Map<String, Object> beforeSnapshot = positionLogSnapshotSupport.snapshot(entity);
 
         PositionConvert.INSTANCE.updateEntity(request, entity);
-        entity.setUpdateBy(currentOperatorService.resolveCode());
+        entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         userPositionMapper.updateById(entity);
 
@@ -168,7 +184,7 @@ public class PositionServiceImpl implements PositionService {
         Map<String, Object> beforeSnapshot = positionLogSnapshotSupport.snapshot(entity);
 
         entity.setStatus(PositionStatus.DELETED);
-        entity.setUpdateBy(currentOperatorService.resolveCode());
+        entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         userPositionMapper.updateById(entity);
 
@@ -188,7 +204,7 @@ public class PositionServiceImpl implements PositionService {
         Map<String, Object> beforeSnapshot = positionLogSnapshotSupport.snapshot(entity);
 
         entity.setStatus(status);
-        entity.setUpdateBy(currentOperatorService.resolveCode());
+        entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         userPositionMapper.updateById(entity);
 
@@ -210,5 +226,41 @@ public class PositionServiceImpl implements PositionService {
             throw new BusinessException("任职记录不存在");
         }
         return entity;
+    }
+
+    /**
+     * 批量把一批任职记录视图对象自身携带的 {@code createBy}/{@code updateBy}（{@code selectPositionPage}/
+     * {@code selectPositionDetail} 直接由 SQL JOIN 映射得到，原始内容是登录用户 id 的字符串）
+     * 就地回填为"姓名（账号编码）"展示名，避免逐条查询造成 N+1。
+     *
+     * @param voList 任职记录视图对象列表，原地修改
+     */
+    private void fillAuditDisplayNames(List<PositionVO> voList) {
+        if (voList.isEmpty()) {
+            return;
+        }
+        Set<String> auditUserIdTexts = voList.stream()
+                .flatMap(vo -> Stream.of(vo.getCreateBy(), vo.getUpdateBy()))
+                .collect(Collectors.toSet());
+        Map<String, String> displayNames = userDisplayService.resolveDisplayNames(auditUserIdTexts);
+        for (PositionVO vo : voList) {
+            vo.setCreateBy(resolveDisplayName(vo.getCreateBy(), displayNames));
+            vo.setUpdateBy(resolveDisplayName(vo.getUpdateBy(), displayNames));
+        }
+    }
+
+    /**
+     * 把审计字段原始值（登录用户 id 的字符串）解析为展示名；空白值回退空字符串，
+     * 查不到对应用户（如账号已被物理清理）时回退"未知用户"文案。
+     *
+     * @param userIdText   审计字段原始值
+     * @param displayNames 批量解析得到的"用户 id 文本 -> 展示名"映射
+     * @return 展示名
+     */
+    private String resolveDisplayName(String userIdText, Map<String, String> displayNames) {
+        if (!StringUtils.hasText(userIdText)) {
+            return "";
+        }
+        return displayNames.getOrDefault(userIdText, "未知用户");
     }
 }

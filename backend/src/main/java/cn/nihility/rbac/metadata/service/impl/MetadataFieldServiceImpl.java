@@ -17,6 +17,7 @@ import cn.nihility.rbac.metadata.mapstruct.MetadataFieldConvert;
 import cn.nihility.rbac.metadata.service.MetadataFieldService;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
@@ -25,6 +26,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -45,8 +49,11 @@ public class MetadataFieldServiceImpl implements MetadataFieldService {
     /** 操作日志记录组件。 */
     private final OperationLogRecorder operationLogRecorder;
 
-    /** 当前登录操作人账号编码解析服务。 */
+    /** 当前登录操作人用户 id 解析服务。 */
     private final CurrentOperatorService currentOperatorService;
+
+    /** 审计字段（{@code createBy}/{@code updateBy}）展示名批量解析服务。 */
+    private final UserDisplayService userDisplayService;
 
     /**
      * {@inheritDoc}
@@ -59,7 +66,7 @@ public class MetadataFieldServiceImpl implements MetadataFieldService {
 
         Page<MetadataFieldEntity> queryPage = new Page<>(page, pageSize);
         Page<MetadataFieldEntity> resultPage = metadataFieldMapper.selectPage(queryPage, wrapper);
-        List<MetadataFieldVO> records = MetadataFieldConvert.INSTANCE.toVOList(resultPage.getRecords());
+        List<MetadataFieldVO> records = toVOListWithDisplayName(resultPage.getRecords());
         return PageResult.of(records, resultPage);
     }
 
@@ -68,7 +75,7 @@ public class MetadataFieldServiceImpl implements MetadataFieldService {
      */
     @Override
     public MetadataFieldVO getById(Long id) {
-        return MetadataFieldConvert.INSTANCE.toVO(getExistingEntity(id));
+        return toVOListWithDisplayName(List.of(getExistingEntity(id))).get(0);
     }
 
     /**
@@ -83,7 +90,7 @@ public class MetadataFieldServiceImpl implements MetadataFieldService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         MetadataFieldConvert.INSTANCE.updateEntity(request, entity);
-        entity.setUpdateBy(currentOperatorService.resolveCode());
+        entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         metadataFieldMapper.updateById(entity);
 
@@ -141,7 +148,7 @@ public class MetadataFieldServiceImpl implements MetadataFieldService {
                 && available.stream().noneMatch(entity -> entity.getId().equals(currentlyBound.getId()))) {
             available.add(currentlyBound);
         }
-        return MetadataFieldConvert.INSTANCE.toVOList(available);
+        return toVOListWithDisplayName(available);
     }
 
     /**
@@ -179,7 +186,7 @@ public class MetadataFieldServiceImpl implements MetadataFieldService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(status);
-        entity.setUpdateBy(currentOperatorService.resolveCode());
+        entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         metadataFieldMapper.updateById(entity);
 
@@ -218,6 +225,47 @@ public class MetadataFieldServiceImpl implements MetadataFieldService {
             throw new BusinessException("元数据字段不存在");
         }
         return entity;
+    }
+
+    /**
+     * 把元数据字段实体列表转换为详情视图对象列表，并批量回填
+     * {@code createBy}/{@code updateBy} 审计字段展示名。
+     *
+     * @param entities 元数据字段实体列表
+     * @return 详情视图对象列表
+     */
+    private List<MetadataFieldVO> toVOListWithDisplayName(List<MetadataFieldEntity> entities) {
+        List<MetadataFieldVO> result = MetadataFieldConvert.INSTANCE.toVOList(entities);
+        if (result.isEmpty()) {
+            return result;
+        }
+
+        Set<String> auditUserIdTexts = entities.stream()
+                .flatMap(entity -> Stream.of(entity.getCreateBy(), entity.getUpdateBy()))
+                .collect(Collectors.toSet());
+        Map<String, String> displayNames = userDisplayService.resolveDisplayNames(auditUserIdTexts);
+
+        for (int i = 0; i < entities.size(); i++) {
+            MetadataFieldVO vo = result.get(i);
+            vo.setCreateBy(resolveDisplayName(entities.get(i).getCreateBy(), displayNames));
+            vo.setUpdateBy(resolveDisplayName(entities.get(i).getUpdateBy(), displayNames));
+        }
+        return result;
+    }
+
+    /**
+     * 把审计字段原始存储的用户 id 文本解析为人可读展示名，查不到时兜底为"未知用户"，
+     * 避免直接把不可读的 id 数字暴露给前端。
+     *
+     * @param userIdText   审计字段原始存储的用户 id 文本
+     * @param displayNames 批量解析得到的用户 id 文本到展示名的映射
+     * @return 人可读展示名
+     */
+    private String resolveDisplayName(String userIdText, Map<String, String> displayNames) {
+        if (!StringUtils.hasText(userIdText)) {
+            return "";
+        }
+        return displayNames.getOrDefault(userIdText, "未知用户");
     }
 
     /**

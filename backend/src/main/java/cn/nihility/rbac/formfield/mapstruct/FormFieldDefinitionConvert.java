@@ -22,7 +22,9 @@ public interface FormFieldDefinitionConvert {
 
     /**
      * 实体转详情视图对象，{@code columnName}/{@code dictTypeName}/{@code locked}
-     * 需要由调用方另行解析/计算并回填。
+     * 需要由调用方另行解析/计算并回填；{@code createBy}/{@code updateBy} entity 侧
+     * 落库为用户 id 文本，VO 侧需要展示为人可读展示名，两者语义不同，禁止 MapStruct
+     * 按同名字段直接复制，由调用方另行回填。
      *
      * @param entity 表单字段定义实体
      * @return 详情视图对象
@@ -30,6 +32,8 @@ public interface FormFieldDefinitionConvert {
     @Mapping(target = "columnName", ignore = true)
     @Mapping(target = "dictTypeName", ignore = true)
     @Mapping(target = "locked", ignore = true)
+    @Mapping(target = "createBy", ignore = true)
+    @Mapping(target = "updateBy", ignore = true)
     FormFieldDefinitionVO toVO(FormFieldDefinitionEntity entity);
 
     /**

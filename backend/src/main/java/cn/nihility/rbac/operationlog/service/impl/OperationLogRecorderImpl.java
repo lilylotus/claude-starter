@@ -28,7 +28,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
  * {@link OperationLogRecorder} 的默认实现：对 before/after 快照做逐字段 diff、
  * 通过 {@link RequestContextHolder} 获取当前 HTTP 请求解析操作 IP 与 User-Agent
  * 相关信息，最终写入 {@code tab_operation_log}。操作人取自
- * {@link CurrentOperatorService#resolveCode()} 解析出的当前登录账号编码。
+ * {@link CurrentOperatorService#resolveUserId()} 解析出的当前登录用户 id 的字符串形式。
  */
 @Slf4j
 @Service
@@ -44,7 +44,7 @@ public class OperationLogRecorderImpl implements OperationLogRecorder {
     /** 操作日志数据访问接口。 */
     private final OperationLogMapper operationLogMapper;
 
-    /** 当前登录操作人账号编码解析服务。 */
+    /** 当前登录操作人用户 id 解析服务。 */
     private final CurrentOperatorService currentOperatorService;
 
     /**
@@ -98,7 +98,7 @@ public class OperationLogRecorderImpl implements OperationLogRecorder {
 
         HttpServletRequest request = currentRequest();
         LocalDateTime now = LocalDateTime.now();
-        String operator = currentOperatorService.resolveCode();
+        String operator = Objects.toString(currentOperatorService.resolveUserId(), null);
         OperationLogEntity entity = OperationLogEntity.builder()
                 .module(OperationLogResourceType.module(resourceType))
                 .resourceType(resourceType)
