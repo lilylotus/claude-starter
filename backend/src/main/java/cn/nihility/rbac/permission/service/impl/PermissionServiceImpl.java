@@ -1,5 +1,6 @@
 package cn.nihility.rbac.permission.service.impl;
 
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
@@ -30,14 +31,14 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class PermissionServiceImpl implements PermissionService {
 
-    /** 当前项目尚未接入登录鉴权，创建人/更新人暂时固定为该值。 */
-    private static final String DEFAULT_OPERATOR = "admin";
-
     /** 权限点数据访问接口。 */
     private final PermissionMapper permissionMapper;
 
     /** 操作日志记录组件。 */
     private final OperationLogRecorder operationLogRecorder;
+
+    /** 当前登录操作人账号编码解析服务。 */
+    private final CurrentOperatorService currentOperatorService;
 
     /**
      * {@inheritDoc}
@@ -71,12 +72,13 @@ public class PermissionServiceImpl implements PermissionService {
     public PermissionVO create(PermissionCreateRequest request) {
         checkCodeUnique(request.getCode(), null);
 
+        String operator = currentOperatorService.resolveCode();
         PermissionEntity entity = PermissionConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(PermissionStatus.ENABLED);
-        entity.setCreateBy(DEFAULT_OPERATOR);
+        entity.setCreateBy(operator);
         entity.setCreateTime(now);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(operator);
         entity.setUpdateTime(now);
         permissionMapper.insert(entity);
 
@@ -96,7 +98,7 @@ public class PermissionServiceImpl implements PermissionService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         PermissionConvert.INSTANCE.updateEntity(request, entity);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         permissionMapper.updateById(entity);
 
@@ -131,7 +133,7 @@ public class PermissionServiceImpl implements PermissionService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(PermissionStatus.DELETED);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         permissionMapper.updateById(entity);
 
@@ -174,7 +176,7 @@ public class PermissionServiceImpl implements PermissionService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(status);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         permissionMapper.updateById(entity);
 

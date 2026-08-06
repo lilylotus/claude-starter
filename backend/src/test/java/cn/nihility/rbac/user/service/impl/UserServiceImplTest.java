@@ -12,6 +12,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.auth.service.PasswordService;
 import cn.nihility.rbac.common.exception.BusinessException;
@@ -94,6 +95,10 @@ class UserServiceImplTest {
     @Mock
     private OrgScopeService orgScopeService;
 
+    /** 被测服务的当前登录操作人账号编码解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private CurrentOperatorService currentOperatorService;
+
     /** 被测服务实例。 */
     private UserServiceImpl userService;
 
@@ -118,10 +123,11 @@ class UserServiceImplTest {
                 formFieldDefinitionService, formFieldSnapshotSupport, dictItemService);
         userService = new UserServiceImpl(userMapper, userPositionMapper, orgMapper, operationLogRecorder,
                 formFieldDefinitionService, formFieldSnapshotSupport, dictItemService, positionDynamicFieldSupport,
-                positionLogSnapshotSupport, passwordService, orgScopeService);
+                positionLogSnapshotSupport, passwordService, orgScopeService, currentOperatorService);
         lenient().when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
         lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.empty());
+        lenient().when(currentOperatorService.resolveCode()).thenReturn("test-operator");
     }
 
     /**
@@ -277,7 +283,7 @@ class UserServiceImplTest {
         UserPositionEntity inserted = captor.getValue();
         assertThat(inserted.getUserId()).isEqualTo(1L);
         assertThat(inserted.getOrgId()).isEqualTo(100L);
-        assertThat(inserted.getCreateBy()).isNotNull();
+        assertThat(inserted.getCreateBy()).isEqualTo("test-operator");
         assertThat(inserted.getCreateTime()).isNotNull();
         verify(userPositionMapper, never()).deleteByIds(anyList());
         verify(operationLogRecorder).recordCreate(eq("position"), any(), any(), any(Map.class));

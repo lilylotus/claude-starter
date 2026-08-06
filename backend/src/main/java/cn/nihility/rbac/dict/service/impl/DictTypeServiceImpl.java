@@ -1,5 +1,6 @@
 package cn.nihility.rbac.dict.service.impl;
 
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.dict.constant.DictStatus;
@@ -32,9 +33,6 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class DictTypeServiceImpl implements DictTypeService {
 
-    /** 当前项目尚未接入登录鉴权，创建人/更新人暂时固定为该值。 */
-    private static final String DEFAULT_OPERATOR = "admin";
-
     /** 字典类型数据访问接口。 */
     private final DictTypeMapper dictTypeMapper;
 
@@ -43,6 +41,9 @@ public class DictTypeServiceImpl implements DictTypeService {
 
     /** 操作日志记录组件。 */
     private final OperationLogRecorder operationLogRecorder;
+
+    /** 当前登录操作人账号编码解析服务。 */
+    private final CurrentOperatorService currentOperatorService;
 
     /**
      * {@inheritDoc}
@@ -80,12 +81,13 @@ public class DictTypeServiceImpl implements DictTypeService {
     public DictTypeVO create(DictTypeCreateRequest request) {
         checkCodeUnique(request.getCode(), null);
 
+        String operator = currentOperatorService.resolveCode();
         DictTypeEntity entity = DictConvert.INSTANCE.toTypeEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(DictStatus.ENABLED);
-        entity.setCreateBy(DEFAULT_OPERATOR);
+        entity.setCreateBy(operator);
         entity.setCreateTime(now);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(operator);
         entity.setUpdateTime(now);
         dictTypeMapper.insert(entity);
 
@@ -105,7 +107,7 @@ public class DictTypeServiceImpl implements DictTypeService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         DictConvert.INSTANCE.updateTypeEntity(request, entity);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         dictTypeMapper.updateById(entity);
 
@@ -147,7 +149,7 @@ public class DictTypeServiceImpl implements DictTypeService {
 
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
         entity.setStatus(DictStatus.DELETED);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         dictTypeMapper.updateById(entity);
 
@@ -166,7 +168,7 @@ public class DictTypeServiceImpl implements DictTypeService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(status);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         dictTypeMapper.updateById(entity);
 

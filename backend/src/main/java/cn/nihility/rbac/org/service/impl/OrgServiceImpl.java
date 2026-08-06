@@ -1,6 +1,7 @@
 package cn.nihility.rbac.org.service.impl;
 
 import cn.nihility.rbac.auth.context.CurrentUserContext;
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
@@ -44,9 +45,6 @@ public class OrgServiceImpl implements OrgService {
     /** 顶级组织的上级 id。 */
     private static final long ROOT_PARENT_ID = 0L;
 
-    /** 当前项目尚未接入登录鉴权，创建人/更新人暂时固定为该值。 */
-    private static final String DEFAULT_OPERATOR = "admin";
-
     /**
      * {@code bizType=ORG} 下允许被动态字段唯一性校验拼进 {@code ${column}} 的列名
      * 白名单，取自 {@code tab_metadata_field} 目录里 ORG 的原有可配置列 +
@@ -75,6 +73,9 @@ public class OrgServiceImpl implements OrgService {
      * （org-scope-data-permission change design.md Decision 4）。
      */
     private final OrgScopeService orgScopeService;
+
+    /** 当前登录操作人账号编码解析服务。 */
+    private final CurrentOperatorService currentOperatorService;
 
     /**
      * {@inheritDoc}
@@ -168,12 +169,13 @@ public class OrgServiceImpl implements OrgService {
         checkCodeUnique(request.getCode(), null);
         validateDynamicFields(request, true, null);
 
+        String operator = currentOperatorService.resolveCode();
         OrgEntity entity = OrgConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(OrgStatus.ENABLED);
-        entity.setCreateBy(DEFAULT_OPERATOR);
+        entity.setCreateBy(operator);
         entity.setCreateTime(now);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(operator);
         entity.setUpdateTime(now);
         orgMapper.insert(entity);
 
@@ -197,7 +199,7 @@ public class OrgServiceImpl implements OrgService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         OrgConvert.INSTANCE.updateEntity(request, entity);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         orgMapper.updateById(entity);
 
@@ -239,7 +241,7 @@ public class OrgServiceImpl implements OrgService {
 
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
         entity.setStatus(OrgStatus.DELETED);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         orgMapper.updateById(entity);
 
@@ -258,7 +260,7 @@ public class OrgServiceImpl implements OrgService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(status);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         orgMapper.updateById(entity);
 

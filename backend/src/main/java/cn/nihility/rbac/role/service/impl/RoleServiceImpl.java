@@ -1,5 +1,6 @@
 package cn.nihility.rbac.role.service.impl;
 
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
@@ -35,9 +36,6 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class RoleServiceImpl implements RoleService {
 
-    /** 当前项目尚未接入登录鉴权，创建人/更新人暂时固定为该值。 */
-    private static final String DEFAULT_OPERATOR = "admin";
-
     /** 角色数据访问接口。 */
     private final RoleMapper roleMapper;
 
@@ -46,6 +44,9 @@ public class RoleServiceImpl implements RoleService {
 
     /** 操作日志记录组件。 */
     private final OperationLogRecorder operationLogRecorder;
+
+    /** 当前登录操作人账号编码解析服务。 */
+    private final CurrentOperatorService currentOperatorService;
 
     /**
      * {@inheritDoc}
@@ -81,16 +82,17 @@ public class RoleServiceImpl implements RoleService {
     public RoleVO create(RoleCreateRequest request) {
         checkCodeUnique(request.getCode(), null);
 
+        String operator = currentOperatorService.resolveCode();
         RoleEntity entity = RoleConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(RoleStatus.ENABLED);
-        entity.setCreateBy(DEFAULT_OPERATOR);
+        entity.setCreateBy(operator);
         entity.setCreateTime(now);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(operator);
         entity.setUpdateTime(now);
         roleMapper.insert(entity);
 
-        syncPermissions(entity.getId(), request.getPermissionIds());
+        syncPermissions(entity.getId(), request.getPermissionIds(), operator);
 
         operationLogRecorder.recordCreate(OperationLogResourceType.ROLE, entity.getId(), entity.getName(),
                 toLogSnapshot(entity));
@@ -107,12 +109,13 @@ public class RoleServiceImpl implements RoleService {
         checkCodeUnique(request.getCode(), id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
+        String operator = currentOperatorService.resolveCode();
         RoleConvert.INSTANCE.updateEntity(request, entity);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(operator);
         entity.setUpdateTime(LocalDateTime.now());
         roleMapper.updateById(entity);
 
-        syncPermissions(id, request.getPermissionIds());
+        syncPermissions(id, request.getPermissionIds(), operator);
 
         operationLogRecorder.recordUpdate(OperationLogResourceType.ROLE, id, entity.getName(),
                 beforeSnapshot, toLogSnapshot(entity));
@@ -145,7 +148,7 @@ public class RoleServiceImpl implements RoleService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(RoleStatus.DELETED);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         roleMapper.updateById(entity);
 
@@ -176,7 +179,7 @@ public class RoleServiceImpl implements RoleService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(status);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         roleMapper.updateById(entity);
 
@@ -225,8 +228,9 @@ public class RoleServiceImpl implements RoleService {
      *
      * @param roleId        角色 id
      * @param permissionIds 请求中的权限点 id 列表，可为空（视为清空全部既有权限点关联）
+     * @param operator      操作人账号编码，由调用方在方法内只解析一次后传入，避免重复解析
      */
-    private void syncPermissions(Long roleId, List<Long> permissionIds) {
+    private void syncPermissions(Long roleId, List<Long> permissionIds, String operator) {
         rolePermissionMapper.delete(
                 new LambdaQueryWrapper<RolePermissionEntity>().eq(RolePermissionEntity::getRoleId, roleId));
 
@@ -239,9 +243,9 @@ public class RoleServiceImpl implements RoleService {
             RolePermissionEntity entity = RolePermissionEntity.builder()
                     .roleId(roleId)
                     .permissionId(permissionId)
-                    .createBy(DEFAULT_OPERATOR)
+                    .createBy(operator)
                     .createTime(now)
-                    .updateBy(DEFAULT_OPERATOR)
+                    .updateBy(operator)
                     .updateTime(now)
                     .build();
             rolePermissionMapper.insert(entity);

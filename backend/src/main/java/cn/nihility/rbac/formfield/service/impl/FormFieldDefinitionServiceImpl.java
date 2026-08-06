@@ -1,5 +1,6 @@
 package cn.nihility.rbac.formfield.service.impl;
 
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.dict.constant.DictStatus;
@@ -48,9 +49,6 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionService {
 
-    /** 当前项目尚未接入登录鉴权，创建人/更新人暂时固定为该值。 */
-    private static final String DEFAULT_OPERATOR = "admin";
-
     /** 表单字段定义数据访问接口。 */
     private final FormFieldDefinitionMapper formFieldDefinitionMapper;
 
@@ -65,6 +63,9 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
 
     /** 操作日志记录组件。 */
     private final OperationLogRecorder operationLogRecorder;
+
+    /** 当前登录操作人账号编码解析服务。 */
+    private final CurrentOperatorService currentOperatorService;
 
     /**
      * {@inheritDoc}
@@ -112,11 +113,12 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
         if (!FormFieldControlType.DICT_TYPES.contains(entity.getControlType())) {
             entity.setDictTypeCode(null);
         }
+        String operator = currentOperatorService.resolveCode();
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(FormFieldStatus.ENABLED);
-        entity.setCreateBy(DEFAULT_OPERATOR);
+        entity.setCreateBy(operator);
         entity.setCreateTime(now);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(operator);
         entity.setUpdateTime(now);
         formFieldDefinitionMapper.insert(entity);
 
@@ -167,7 +169,7 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
         if (!FormFieldControlType.DICT_TYPES.contains(entity.getControlType())) {
             entity.setDictTypeCode(null);
         }
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         formFieldDefinitionMapper.updateById(entity);
 
@@ -209,7 +211,7 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(FormFieldStatus.DELETED);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         formFieldDefinitionMapper.updateById(entity);
 
@@ -282,7 +284,7 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(status);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         formFieldDefinitionMapper.updateById(entity);
 

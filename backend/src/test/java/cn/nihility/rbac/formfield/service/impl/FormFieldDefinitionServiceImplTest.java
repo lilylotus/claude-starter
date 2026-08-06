@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.dict.dto.DictItemOptionVO;
 import cn.nihility.rbac.dict.entity.DictTypeEntity;
@@ -68,6 +69,10 @@ class FormFieldDefinitionServiceImplTest {
     @Mock
     private OperationLogRecorder operationLogRecorder;
 
+    /** 被测服务的当前登录操作人账号编码解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private CurrentOperatorService currentOperatorService;
+
     /** 被测服务实例。 */
     private FormFieldDefinitionServiceImpl formFieldDefinitionService;
 
@@ -78,7 +83,8 @@ class FormFieldDefinitionServiceImplTest {
     @BeforeEach
     void setUp() {
         formFieldDefinitionService = new FormFieldDefinitionServiceImpl(formFieldDefinitionMapper,
-                metadataFieldMapper, dictTypeMapper, dictItemService, operationLogRecorder);
+                metadataFieldMapper, dictTypeMapper, dictItemService, operationLogRecorder, currentOperatorService);
+        lenient().when(currentOperatorService.resolveCode()).thenReturn("test-operator");
     }
 
     /**

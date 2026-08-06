@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.constant.OperationType;
 import cn.nihility.rbac.operationlog.entity.OperationLogEntity;
@@ -34,6 +35,10 @@ class OperationLogRecorderImplTest {
     @Mock
     private OperationLogMapper operationLogMapper;
 
+    /** 被测服务的当前登录操作人账号编码解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private CurrentOperatorService currentOperatorService;
+
     /** 被测服务实例，序列化组件使用 {@link cn.nihility.rbac.common.util.JacksonUtils}，不做打桩。 */
     private OperationLogRecorderImpl operationLogRecorder;
 
@@ -42,7 +47,8 @@ class OperationLogRecorderImplTest {
      */
     @BeforeEach
     void setUp() {
-        operationLogRecorder = new OperationLogRecorderImpl(operationLogMapper);
+        operationLogRecorder = new OperationLogRecorderImpl(operationLogMapper, currentOperatorService);
+        when(currentOperatorService.resolveCode()).thenReturn("test-operator");
     }
 
     /**
@@ -72,6 +78,8 @@ class OperationLogRecorderImplTest {
         assertThat(captured.getResourceName())
                 .isEqualTo(OperationLogResourceType.resourceName(OperationLogResourceType.ROLE));
         assertThat(captured.getChangeDetail()).doesNotContain("\"oldValue\"").contains("\"newValue\":\"测试角色\"");
+        assertThat(captured.getCreateBy()).isEqualTo("test-operator");
+        assertThat(captured.getUpdateBy()).isEqualTo("test-operator");
     }
 
     /**

@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.excelimport.constant.ImportFieldConfigStatus;
 import cn.nihility.rbac.excelimport.dto.ImportFieldConfigCreateRequest;
@@ -46,6 +47,10 @@ class ImportFieldConfigServiceImplTest {
     @Mock
     private OperationLogRecorder operationLogRecorder;
 
+    /** 被测服务的当前登录操作人账号编码解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private CurrentOperatorService currentOperatorService;
+
     /** 被测服务实例。 */
     private ImportFieldConfigServiceImpl importFieldConfigService;
 
@@ -56,7 +61,8 @@ class ImportFieldConfigServiceImplTest {
     @BeforeEach
     void setUp() {
         importFieldConfigService = new ImportFieldConfigServiceImpl(importFieldConfigMapper,
-                formFieldDefinitionMapper, operationLogRecorder);
+                formFieldDefinitionMapper, operationLogRecorder, currentOperatorService);
+        lenient().when(currentOperatorService.resolveCode()).thenReturn("test-operator");
     }
 
     /**

@@ -1,6 +1,7 @@
 package cn.nihility.rbac.user.service.impl;
 
 import cn.nihility.rbac.auth.context.CurrentUserContext;
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
@@ -35,9 +36,6 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class PositionServiceImpl implements PositionService {
 
-    /** 当前项目尚未接入登录鉴权，创建人/更新人暂时固定为该值。 */
-    private static final String DEFAULT_OPERATOR = "admin";
-
     /** 用户任职记录数据访问接口。 */
     private final UserPositionMapper userPositionMapper;
 
@@ -61,6 +59,9 @@ public class PositionServiceImpl implements PositionService {
      * （org-scope-data-permission change design.md Decision 5）。
      */
     private final OrgScopeService orgScopeService;
+
+    /** 当前登录操作人账号编码解析服务。 */
+    private final CurrentOperatorService currentOperatorService;
 
     /**
      * {@inheritDoc}
@@ -105,12 +106,13 @@ public class PositionServiceImpl implements PositionService {
     public PositionVO create(PositionCreateRequest request) {
         positionDynamicFieldSupport.validate(request, true, null);
 
+        String operator = currentOperatorService.resolveCode();
         UserPositionEntity entity = PositionConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(PositionStatus.ENABLED);
-        entity.setCreateBy(DEFAULT_OPERATOR);
+        entity.setCreateBy(operator);
         entity.setCreateTime(now);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(operator);
         entity.setUpdateTime(now);
         userPositionMapper.insert(entity);
 
@@ -130,7 +132,7 @@ public class PositionServiceImpl implements PositionService {
         Map<String, Object> beforeSnapshot = positionLogSnapshotSupport.snapshot(entity);
 
         PositionConvert.INSTANCE.updateEntity(request, entity);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         userPositionMapper.updateById(entity);
 
@@ -166,7 +168,7 @@ public class PositionServiceImpl implements PositionService {
         Map<String, Object> beforeSnapshot = positionLogSnapshotSupport.snapshot(entity);
 
         entity.setStatus(PositionStatus.DELETED);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         userPositionMapper.updateById(entity);
 
@@ -186,7 +188,7 @@ public class PositionServiceImpl implements PositionService {
         Map<String, Object> beforeSnapshot = positionLogSnapshotSupport.snapshot(entity);
 
         entity.setStatus(status);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         userPositionMapper.updateById(entity);
 

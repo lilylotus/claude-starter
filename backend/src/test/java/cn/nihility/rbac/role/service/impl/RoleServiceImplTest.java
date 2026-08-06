@@ -4,10 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
@@ -51,6 +53,10 @@ class RoleServiceImplTest {
     @Mock
     private OperationLogRecorder operationLogRecorder;
 
+    /** 被测服务的当前登录操作人账号编码解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private CurrentOperatorService currentOperatorService;
+
     /** 被测服务实例。 */
     private RoleServiceImpl roleService;
 
@@ -60,7 +66,9 @@ class RoleServiceImplTest {
      */
     @BeforeEach
     void setUp() {
-        roleService = new RoleServiceImpl(roleMapper, rolePermissionMapper, operationLogRecorder);
+        roleService = new RoleServiceImpl(roleMapper, rolePermissionMapper, operationLogRecorder,
+                currentOperatorService);
+        lenient().when(currentOperatorService.resolveCode()).thenReturn("test-operator");
     }
 
     /**

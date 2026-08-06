@@ -3,9 +3,11 @@ package cn.nihility.rbac.dict.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.dict.constant.DictStatus;
 import cn.nihility.rbac.dict.dto.DictTypeCreateRequest;
@@ -41,6 +43,10 @@ class DictTypeServiceImplTest {
     @Mock
     private OperationLogRecorder operationLogRecorder;
 
+    /** 被测服务的当前登录操作人账号编码解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private CurrentOperatorService currentOperatorService;
+
     /** 被测服务实例。 */
     private DictTypeServiceImpl dictTypeService;
 
@@ -50,7 +56,9 @@ class DictTypeServiceImplTest {
      */
     @BeforeEach
     void setUp() {
-        dictTypeService = new DictTypeServiceImpl(dictTypeMapper, dictItemMapper, operationLogRecorder);
+        dictTypeService = new DictTypeServiceImpl(dictTypeMapper, dictItemMapper, operationLogRecorder,
+                currentOperatorService);
+        lenient().when(currentOperatorService.resolveCode()).thenReturn("test-operator");
     }
 
     /**

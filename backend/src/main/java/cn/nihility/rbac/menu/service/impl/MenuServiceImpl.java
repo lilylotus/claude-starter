@@ -1,5 +1,6 @@
 package cn.nihility.rbac.menu.service.impl;
 
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.menu.constant.MenuResourceType;
@@ -37,14 +38,14 @@ public class MenuServiceImpl implements MenuService {
     /** 顶级资源的上级 id。 */
     private static final long ROOT_PARENT_ID = 0L;
 
-    /** 当前项目尚未接入登录鉴权，创建人/更新人暂时固定为该值。 */
-    private static final String DEFAULT_OPERATOR = "admin";
-
     /** 资源数据访问接口。 */
     private final MenuMapper menuMapper;
 
     /** 操作日志记录组件。 */
     private final OperationLogRecorder operationLogRecorder;
+
+    /** 当前登录操作人账号编码解析服务。 */
+    private final CurrentOperatorService currentOperatorService;
 
     /**
      * {@inheritDoc}
@@ -117,12 +118,13 @@ public class MenuServiceImpl implements MenuService {
         checkResourceTypeValid(request.getResourceType());
         checkCodeUnique(request.getCode(), null);
 
+        String operator = currentOperatorService.resolveCode();
         MenuEntity entity = MenuConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(MenuStatus.ENABLED);
-        entity.setCreateBy(DEFAULT_OPERATOR);
+        entity.setCreateBy(operator);
         entity.setCreateTime(now);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(operator);
         entity.setUpdateTime(now);
         menuMapper.insert(entity);
 
@@ -143,7 +145,7 @@ public class MenuServiceImpl implements MenuService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         MenuConvert.INSTANCE.updateEntity(request, entity);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         menuMapper.updateById(entity);
 
@@ -185,7 +187,7 @@ public class MenuServiceImpl implements MenuService {
 
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
         entity.setStatus(MenuStatus.DELETED);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         menuMapper.updateById(entity);
 
@@ -204,7 +206,7 @@ public class MenuServiceImpl implements MenuService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(status);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         menuMapper.updateById(entity);
 

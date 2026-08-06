@@ -1,5 +1,6 @@
 package cn.nihility.rbac.metadata.service.impl;
 
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.formfield.constant.FormFieldStatus;
@@ -35,9 +36,6 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class MetadataFieldServiceImpl implements MetadataFieldService {
 
-    /** 当前项目尚未接入登录鉴权，创建人/更新人暂时固定为该值。 */
-    private static final String DEFAULT_OPERATOR = "admin";
-
     /** 元数据字段数据访问接口。 */
     private final MetadataFieldMapper metadataFieldMapper;
 
@@ -46,6 +44,9 @@ public class MetadataFieldServiceImpl implements MetadataFieldService {
 
     /** 操作日志记录组件。 */
     private final OperationLogRecorder operationLogRecorder;
+
+    /** 当前登录操作人账号编码解析服务。 */
+    private final CurrentOperatorService currentOperatorService;
 
     /**
      * {@inheritDoc}
@@ -82,7 +83,7 @@ public class MetadataFieldServiceImpl implements MetadataFieldService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         MetadataFieldConvert.INSTANCE.updateEntity(request, entity);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         metadataFieldMapper.updateById(entity);
 
@@ -178,7 +179,7 @@ public class MetadataFieldServiceImpl implements MetadataFieldService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(status);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         metadataFieldMapper.updateById(entity);
 

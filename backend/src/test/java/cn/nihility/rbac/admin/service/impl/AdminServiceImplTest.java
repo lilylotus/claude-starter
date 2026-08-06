@@ -22,6 +22,7 @@ import cn.nihility.rbac.admin.entity.AdminRoleEntity;
 import cn.nihility.rbac.admin.mapper.AdminMapper;
 import cn.nihility.rbac.admin.mapper.AdminOrgScopeMapper;
 import cn.nihility.rbac.admin.mapper.AdminRoleMapper;
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.user.mapper.UserMapper;
@@ -65,6 +66,10 @@ class AdminServiceImplTest {
     @Mock
     private OperationLogRecorder operationLogRecorder;
 
+    /** 被测服务的当前登录操作人账号编码解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private CurrentOperatorService currentOperatorService;
+
     /** 被测服务实例。 */
     private AdminServiceImpl adminService;
 
@@ -75,9 +80,10 @@ class AdminServiceImplTest {
     @BeforeEach
     void setUp() {
         adminService = new AdminServiceImpl(adminMapper, adminRoleMapper, adminOrgScopeMapper, userMapper,
-                operationLogRecorder);
+                operationLogRecorder, currentOperatorService);
         lenient().when(adminRoleMapper.selectRolesByAdminId(anyLong())).thenReturn(List.of());
         lenient().when(adminOrgScopeMapper.selectOrgScopesByAdminId(anyLong())).thenReturn(List.of());
+        lenient().when(currentOperatorService.resolveCode()).thenReturn("test-operator");
     }
 
     /**

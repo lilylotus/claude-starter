@@ -9,6 +9,7 @@ import cn.nihility.rbac.app.mapper.AppMapper;
 import cn.nihility.rbac.app.mapstruct.AppConvert;
 import cn.nihility.rbac.app.service.AppService;
 import cn.nihility.rbac.auth.context.CurrentUserContext;
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
@@ -42,9 +43,6 @@ import org.springframework.stereotype.Service;
 @Service
 @RequiredArgsConstructor
 public class AppServiceImpl implements AppService {
-
-    /** 当前项目尚未接入登录鉴权，创建人/更新人暂时固定为该值。 */
-    private static final String DEFAULT_OPERATOR = "admin";
 
     /**
      * {@code bizType=APP} 下允许被动态字段唯一性校验拼进 {@code ${column}} 的列名
@@ -80,6 +78,9 @@ public class AppServiceImpl implements AppService {
      * （org-scope-data-permission change design.md Decision 6）。
      */
     private final OrgScopeService orgScopeService;
+
+    /** 当前登录操作人账号编码解析服务。 */
+    private final CurrentOperatorService currentOperatorService;
 
     /**
      * {@inheritDoc}
@@ -131,12 +132,13 @@ public class AppServiceImpl implements AppService {
         checkCodeUnique(request.getCode(), null);
         validateDynamicFields(request, true, null);
 
+        String operator = currentOperatorService.resolveCode();
         AppEntity entity = AppConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(AppStatus.ENABLED);
-        entity.setCreateBy(DEFAULT_OPERATOR);
+        entity.setCreateBy(operator);
         entity.setCreateTime(now);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(operator);
         entity.setUpdateTime(now);
         appMapper.insert(entity);
 
@@ -157,7 +159,7 @@ public class AppServiceImpl implements AppService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         AppConvert.INSTANCE.updateEntity(request, entity);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         appMapper.updateById(entity);
 
@@ -192,7 +194,7 @@ public class AppServiceImpl implements AppService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(AppStatus.DELETED);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         appMapper.updateById(entity);
 
@@ -211,7 +213,7 @@ public class AppServiceImpl implements AppService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(status);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         appMapper.updateById(entity);
 

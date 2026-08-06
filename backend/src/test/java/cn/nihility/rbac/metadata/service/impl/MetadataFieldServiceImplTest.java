@@ -4,8 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.formfield.constant.FormFieldStatus;
 import cn.nihility.rbac.formfield.entity.FormFieldDefinitionEntity;
@@ -46,6 +48,10 @@ class MetadataFieldServiceImplTest {
     @Mock
     private OperationLogRecorder operationLogRecorder;
 
+    /** 被测服务的当前登录操作人账号编码解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private CurrentOperatorService currentOperatorService;
+
     /** 被测服务实例。 */
     private MetadataFieldServiceImpl metadataFieldService;
 
@@ -56,7 +62,8 @@ class MetadataFieldServiceImplTest {
     @BeforeEach
     void setUp() {
         metadataFieldService = new MetadataFieldServiceImpl(metadataFieldMapper, formFieldDefinitionMapper,
-                operationLogRecorder);
+                operationLogRecorder, currentOperatorService);
+        lenient().when(currentOperatorService.resolveCode()).thenReturn("test-operator");
     }
 
     /**

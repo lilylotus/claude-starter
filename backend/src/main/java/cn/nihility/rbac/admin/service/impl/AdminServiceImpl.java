@@ -15,6 +15,7 @@ import cn.nihility.rbac.admin.mapper.AdminOrgScopeMapper;
 import cn.nihility.rbac.admin.mapper.AdminRoleMapper;
 import cn.nihility.rbac.admin.mapstruct.AdminConvert;
 import cn.nihility.rbac.admin.service.AdminService;
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
@@ -42,9 +43,6 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class AdminServiceImpl implements AdminService {
 
-    /** 当前项目尚未接入登录鉴权，创建人/更新人暂时固定为该值。 */
-    private static final String DEFAULT_OPERATOR = "admin";
-
     /** 管理员数据访问接口。 */
     private final AdminMapper adminMapper;
 
@@ -59,6 +57,9 @@ public class AdminServiceImpl implements AdminService {
 
     /** 操作日志记录组件。 */
     private final OperationLogRecorder operationLogRecorder;
+
+    /** 当前登录操作人账号编码解析服务。 */
+    private final CurrentOperatorService currentOperatorService;
 
     /**
      * {@inheritDoc}
@@ -85,17 +86,18 @@ public class AdminServiceImpl implements AdminService {
         checkCodeUnique(request.getCode(), null);
         checkUserIdUnique(request.getUserId(), null);
 
+        String operator = currentOperatorService.resolveCode();
         AdminEntity entity = AdminConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(AdminStatus.ENABLED);
-        entity.setCreateBy(DEFAULT_OPERATOR);
+        entity.setCreateBy(operator);
         entity.setCreateTime(now);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(operator);
         entity.setUpdateTime(now);
         adminMapper.insert(entity);
 
-        syncRoles(entity.getId(), request.getRoleIds());
-        syncOrgScopes(entity.getId(), request.getOrgScopes());
+        syncRoles(entity.getId(), request.getRoleIds(), operator);
+        syncOrgScopes(entity.getId(), request.getOrgScopes(), operator);
 
         operationLogRecorder.recordCreate(OperationLogResourceType.ADMIN, entity.getId(), entity.getName(),
                 toLogSnapshot(entity));
@@ -113,13 +115,14 @@ public class AdminServiceImpl implements AdminService {
         checkUserIdUnique(request.getUserId(), id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
+        String operator = currentOperatorService.resolveCode();
         AdminConvert.INSTANCE.updateEntity(request, entity);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(operator);
         entity.setUpdateTime(LocalDateTime.now());
         adminMapper.updateById(entity);
 
-        syncRoles(id, request.getRoleIds());
-        syncOrgScopes(id, request.getOrgScopes());
+        syncRoles(id, request.getRoleIds(), operator);
+        syncOrgScopes(id, request.getOrgScopes(), operator);
 
         operationLogRecorder.recordUpdate(OperationLogResourceType.ADMIN, id, entity.getName(),
                 beforeSnapshot, toLogSnapshot(entity));
@@ -152,7 +155,7 @@ public class AdminServiceImpl implements AdminService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(AdminStatus.DELETED);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         adminMapper.updateById(entity);
 
@@ -171,7 +174,7 @@ public class AdminServiceImpl implements AdminService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(status);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         adminMapper.updateById(entity);
 
@@ -253,10 +256,11 @@ public class AdminServiceImpl implements AdminService {
      * 把请求中的角色 id 列表与管理员当前的角色关联做整体同步：先物理删除该管理员名下
      * 全部既有角色关联行，再按请求列表整批插入，不做按行 diff。
      *
-     * @param adminId 管理员 id
-     * @param roleIds 请求中的角色 id 列表，可为空（视为清空全部既有角色关联）
+     * @param adminId  管理员 id
+     * @param roleIds  请求中的角色 id 列表，可为空（视为清空全部既有角色关联）
+     * @param operator 操作人账号编码，由调用方在方法内只解析一次后传入，避免重复解析
      */
-    private void syncRoles(Long adminId, List<Long> roleIds) {
+    private void syncRoles(Long adminId, List<Long> roleIds, String operator) {
         adminRoleMapper.delete(new LambdaQueryWrapper<AdminRoleEntity>().eq(AdminRoleEntity::getAdminId, adminId));
 
         if (roleIds == null || roleIds.isEmpty()) {
@@ -268,9 +272,9 @@ public class AdminServiceImpl implements AdminService {
             AdminRoleEntity entity = AdminRoleEntity.builder()
                     .adminId(adminId)
                     .roleId(roleId)
-                    .createBy(DEFAULT_OPERATOR)
+                    .createBy(operator)
                     .createTime(now)
-                    .updateBy(DEFAULT_OPERATOR)
+                    .updateBy(operator)
                     .updateTime(now)
                     .build();
             adminRoleMapper.insert(entity);
@@ -283,8 +287,9 @@ public class AdminServiceImpl implements AdminService {
      *
      * @param adminId   管理员 id
      * @param orgScopes 请求中的管辖组织范围列表，可为空（视为清空全部既有管辖组织范围）
+     * @param operator  操作人账号编码，由调用方在方法内只解析一次后传入，避免重复解析
      */
-    private void syncOrgScopes(Long adminId, List<AdminOrgScopeRequest> orgScopes) {
+    private void syncOrgScopes(Long adminId, List<AdminOrgScopeRequest> orgScopes, String operator) {
         adminOrgScopeMapper.delete(new LambdaQueryWrapper<AdminOrgScopeEntity>()
                 .eq(AdminOrgScopeEntity::getAdminId, adminId));
 
@@ -298,9 +303,9 @@ public class AdminServiceImpl implements AdminService {
                     .adminId(adminId)
                     .orgId(request.getOrgId())
                     .includeChildren(request.getIncludeChildren())
-                    .createBy(DEFAULT_OPERATOR)
+                    .createBy(operator)
                     .createTime(now)
-                    .updateBy(DEFAULT_OPERATOR)
+                    .updateBy(operator)
                     .updateTime(now)
                     .build();
             adminOrgScopeMapper.insert(entity);

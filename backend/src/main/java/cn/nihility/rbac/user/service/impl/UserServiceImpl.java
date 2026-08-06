@@ -1,6 +1,7 @@
 package cn.nihility.rbac.user.service.impl;
 
 import cn.nihility.rbac.auth.context.CurrentUserContext;
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.auth.service.PasswordService;
 import cn.nihility.rbac.common.result.PageResult;
@@ -53,9 +54,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class UserServiceImpl implements UserService {
-
-    /** 当前项目尚未接入登录鉴权，创建人/更新人暂时固定为该值。 */
-    private static final String DEFAULT_OPERATOR = "admin";
 
     /**
      * {@code bizType=USER} 下允许被动态字段唯一性校验拼进 {@code ${column}} 的列名
@@ -118,6 +116,9 @@ public class UserServiceImpl implements UserService {
      */
     private final OrgScopeService orgScopeService;
 
+    /** 当前登录操作人账号编码解析服务。 */
+    private final CurrentOperatorService currentOperatorService;
+
     /**
      * {@inheritDoc}
      * <p>
@@ -160,18 +161,19 @@ public class UserServiceImpl implements UserService {
         validateDynamicFields(request, true, null);
         validatePositionsDynamicFields(request.getPositions());
 
+        String operator = currentOperatorService.resolveCode();
         UserEntity entity = UserConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(UserStatus.ENABLED);
-        entity.setCreateBy(DEFAULT_OPERATOR);
+        entity.setCreateBy(operator);
         entity.setCreateTime(now);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(operator);
         entity.setUpdateTime(now);
         userMapper.insert(entity);
 
         passwordService.createDefaultPassword(entity.getId());
 
-        syncPositions(entity.getId(), request.getPositions());
+        syncPositions(entity.getId(), request.getPositions(), operator);
 
         operationLogRecorder.recordCreate(OperationLogResourceType.USER, entity.getId(), entity.getName(),
                 toLogSnapshot(entity));
@@ -190,12 +192,13 @@ public class UserServiceImpl implements UserService {
         validatePositionsDynamicFields(request.getPositions());
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
+        String operator = currentOperatorService.resolveCode();
         UserConvert.INSTANCE.updateEntity(request, entity);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(operator);
         entity.setUpdateTime(LocalDateTime.now());
         userMapper.updateById(entity);
 
-        syncPositions(id, request.getPositions());
+        syncPositions(id, request.getPositions(), operator);
 
         operationLogRecorder.recordUpdate(OperationLogResourceType.USER, id, entity.getName(),
                 beforeSnapshot, toLogSnapshot(entity));
@@ -228,7 +231,7 @@ public class UserServiceImpl implements UserService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(UserStatus.DELETED);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         userMapper.updateById(entity);
 
@@ -256,7 +259,7 @@ public class UserServiceImpl implements UserService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(status);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         userMapper.updateById(entity);
 
@@ -390,8 +393,9 @@ public class UserServiceImpl implements UserService {
      *
      * @param userId    用户 id
      * @param positions 请求中的任职记录列表，可为空（视为清空全部既有任职记录）
+     * @param operator  操作人账号编码，由调用方在方法内只解析一次后传入，避免重复解析
      */
-    private void syncPositions(Long userId, List<UserPositionRequest> positions) {
+    private void syncPositions(Long userId, List<UserPositionRequest> positions, String operator) {
         List<UserPositionRequest> requests = positions != null ? positions : List.of();
 
         List<UserPositionEntity> existingList = userPositionMapper.selectList(
@@ -415,7 +419,7 @@ public class UserServiceImpl implements UserService {
                 Map<String, Object> beforeSnapshot = positionLogSnapshotSupport.snapshot(entity);
 
                 UserConvert.INSTANCE.updatePositionEntity(request, entity);
-                entity.setUpdateBy(DEFAULT_OPERATOR);
+                entity.setUpdateBy(operator);
                 entity.setUpdateTime(now);
                 userPositionMapper.updateById(entity);
                 keptIds.add(entity.getId());
@@ -427,9 +431,9 @@ public class UserServiceImpl implements UserService {
                 UserPositionEntity entity = UserConvert.INSTANCE.toPositionEntity(request);
                 entity.setUserId(userId);
                 entity.setStatus(PositionStatus.ENABLED);
-                entity.setCreateBy(DEFAULT_OPERATOR);
+                entity.setCreateBy(operator);
                 entity.setCreateTime(now);
-                entity.setUpdateBy(DEFAULT_OPERATOR);
+                entity.setUpdateBy(operator);
                 entity.setUpdateTime(now);
                 userPositionMapper.insert(entity);
 

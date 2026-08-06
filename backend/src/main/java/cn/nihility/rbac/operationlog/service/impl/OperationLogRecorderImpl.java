@@ -1,5 +1,6 @@
 package cn.nihility.rbac.operationlog.service.impl;
 
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.common.util.JacksonUtils;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.constant.OperationType;
@@ -26,16 +27,13 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 /**
  * {@link OperationLogRecorder} 的默认实现：对 before/after 快照做逐字段 diff、
  * 通过 {@link RequestContextHolder} 获取当前 HTTP 请求解析操作 IP 与 User-Agent
- * 相关信息，最终写入 {@code tab_operation_log}。当前项目尚未接入登录鉴权，操作人
- * 暂时固定为 {@link #DEFAULT_OPERATOR}。
+ * 相关信息，最终写入 {@code tab_operation_log}。操作人取自
+ * {@link CurrentOperatorService#resolveCode()} 解析出的当前登录账号编码。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class OperationLogRecorderImpl implements OperationLogRecorder {
-
-    /** 当前项目尚未接入登录鉴权，操作人暂时固定为该值。 */
-    private static final String DEFAULT_OPERATOR = "admin";
 
     /** 反向代理场景下客户端真实 IP 所在的请求头。 */
     private static final String FORWARDED_FOR_HEADER = "X-Forwarded-For";
@@ -45,6 +43,9 @@ public class OperationLogRecorderImpl implements OperationLogRecorder {
 
     /** 操作日志数据访问接口。 */
     private final OperationLogMapper operationLogMapper;
+
+    /** 当前登录操作人账号编码解析服务。 */
+    private final CurrentOperatorService currentOperatorService;
 
     /**
      * {@inheritDoc}
@@ -97,6 +98,7 @@ public class OperationLogRecorderImpl implements OperationLogRecorder {
 
         HttpServletRequest request = currentRequest();
         LocalDateTime now = LocalDateTime.now();
+        String operator = currentOperatorService.resolveCode();
         OperationLogEntity entity = OperationLogEntity.builder()
                 .module(OperationLogResourceType.module(resourceType))
                 .resourceType(resourceType)
@@ -107,9 +109,9 @@ public class OperationLogRecorderImpl implements OperationLogRecorder {
                 .targetName(targetName)
                 .changeDetail(toJson(changes))
                 .operateIp(resolveIp(request))
-                .createBy(DEFAULT_OPERATOR)
+                .createBy(operator)
                 .createTime(now)
-                .updateBy(DEFAULT_OPERATOR)
+                .updateBy(operator)
                 .updateTime(now)
                 .build();
         fillUserAgentInfo(entity, request);

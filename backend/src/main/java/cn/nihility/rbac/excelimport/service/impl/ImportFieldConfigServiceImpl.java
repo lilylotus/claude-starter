@@ -1,5 +1,6 @@
 package cn.nihility.rbac.excelimport.service.impl;
 
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.excelimport.constant.ImportBizTypes;
@@ -36,9 +37,6 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class ImportFieldConfigServiceImpl implements ImportFieldConfigService {
 
-    /** 当前项目尚未接入登录鉴权，创建人/更新人暂时固定为该值。 */
-    private static final String DEFAULT_OPERATOR = "admin";
-
     /** 导入字段配置数据访问接口。 */
     private final ImportFieldConfigMapper importFieldConfigMapper;
 
@@ -47,6 +45,9 @@ public class ImportFieldConfigServiceImpl implements ImportFieldConfigService {
 
     /** 操作日志记录组件。 */
     private final OperationLogRecorder operationLogRecorder;
+
+    /** 当前登录操作人账号编码解析服务。 */
+    private final CurrentOperatorService currentOperatorService;
 
     /**
      * {@inheritDoc}
@@ -98,13 +99,14 @@ public class ImportFieldConfigServiceImpl implements ImportFieldConfigService {
             throw new BusinessException("字段标识[" + fieldCode + "]已存在导入配置");
         }
 
+        String operator = currentOperatorService.resolveCode();
         ImportFieldConfigEntity entity = ImportFieldConfigConvert.INSTANCE.toEntity(request);
         entity.setFieldCode(fieldCode);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(ImportFieldConfigStatus.ENABLED);
-        entity.setCreateBy(DEFAULT_OPERATOR);
+        entity.setCreateBy(operator);
         entity.setCreateTime(now);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(operator);
         entity.setUpdateTime(now);
         importFieldConfigMapper.insert(entity);
 
@@ -157,7 +159,7 @@ public class ImportFieldConfigServiceImpl implements ImportFieldConfigService {
             entity.setFormFieldDefinitionId(request.getFormFieldDefinitionId());
             entity.setFieldCode(rebindFieldCode);
         }
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         importFieldConfigMapper.updateById(entity);
 
@@ -179,7 +181,7 @@ public class ImportFieldConfigServiceImpl implements ImportFieldConfigService {
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(ImportFieldConfigStatus.DELETED);
-        entity.setUpdateBy(DEFAULT_OPERATOR);
+        entity.setUpdateBy(currentOperatorService.resolveCode());
         entity.setUpdateTime(LocalDateTime.now());
         importFieldConfigMapper.updateById(entity);
 

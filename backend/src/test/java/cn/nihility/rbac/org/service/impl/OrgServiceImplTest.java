@@ -9,6 +9,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
@@ -61,6 +62,10 @@ class OrgServiceImplTest {
     @Mock
     private OrgScopeService orgScopeService;
 
+    /** 被测服务的当前登录操作人账号编码解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private CurrentOperatorService currentOperatorService;
+
     /** 被测服务实例。 */
     private OrgServiceImpl orgService;
 
@@ -74,9 +79,10 @@ class OrgServiceImplTest {
     @BeforeEach
     void setUp() {
         orgService = new OrgServiceImpl(orgMapper, operationLogRecorder, formFieldDefinitionService,
-                formFieldSnapshotSupport, orgScopeService);
+                formFieldSnapshotSupport, orgScopeService, currentOperatorService);
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
         lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.empty());
+        lenient().when(currentOperatorService.resolveCode()).thenReturn("test-operator");
     }
 
     /**

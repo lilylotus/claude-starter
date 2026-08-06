@@ -14,6 +14,7 @@ import cn.nihility.rbac.app.dto.AppUpdateRequest;
 import cn.nihility.rbac.app.dto.AppVO;
 import cn.nihility.rbac.app.entity.AppEntity;
 import cn.nihility.rbac.app.mapper.AppMapper;
+import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
@@ -75,6 +76,10 @@ class AppServiceImplTest {
     @Mock
     private OrgScopeService orgScopeService;
 
+    /** 被测服务的当前登录操作人账号编码解析依赖，使用 Mockito 打桩。 */
+    @Mock
+    private CurrentOperatorService currentOperatorService;
+
     /** 被测服务实例。 */
     private AppServiceImpl appService;
 
@@ -100,11 +105,12 @@ class AppServiceImplTest {
     @BeforeEach
     void setUp() {
         appService = new AppServiceImpl(appMapper, userMapper, orgMapper, operationLogRecorder,
-                formFieldDefinitionService, formFieldSnapshotSupport, orgScopeService);
+                formFieldDefinitionService, formFieldSnapshotSupport, orgScopeService, currentOperatorService);
         lenient().when(userMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
         lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.empty());
+        lenient().when(currentOperatorService.resolveCode()).thenReturn("test-operator");
     }
 
     /**
@@ -187,7 +193,7 @@ class AppServiceImplTest {
         assertThat(captured.getCode()).isEqualTo("app001");
         assertThat(captured.getOwnerId()).isEqualTo(1L);
         assertThat(captured.getOrgId()).isEqualTo(100L);
-        assertThat(captured.getCreateBy()).isNotNull();
+        assertThat(captured.getCreateBy()).isEqualTo("test-operator");
         assertThat(captured.getCreateTime()).isNotNull();
         verify(operationLogRecorder).recordCreate(org.mockito.ArgumentMatchers.eq("app"), any(),
                 org.mockito.ArgumentMatchers.eq("测试应用"), any(Map.class));
