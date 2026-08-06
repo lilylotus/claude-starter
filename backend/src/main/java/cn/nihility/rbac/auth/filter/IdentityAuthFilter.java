@@ -39,9 +39,14 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * 里任何一个业务模块），如果对它也做权限点匹配判断，会导致包括默认账号在内的一切用户在
  * 首次登录强制改密这一步就被自己引入的鉴权机制卡死、永远无法完成首登流程；
  * permission-driven-ui-visibility change 新增的"查询当前用户权限编码"接口同理不应要求
- * 调用方"必须已拥有某个权限编码才能查询自己有哪些权限编码"，否则出现鸡生蛋悖论。
- * 因此这两个接口（{@link #FIRST_LOGIN_WHITELIST}）同时豁免首登拦截与权限判断，保持
- * 同一批白名单、同一个语义（"自助操作，不受角色权限点约束"）。
+ * 调用方"必须已拥有某个权限编码才能查询自己有哪些权限编码"，否则出现鸡生蛋悖论；
+ * dashboard-real-data change 新增的"首页概览统计"接口同理——统计数字是登录后落地页的
+ * 整体概览信息，不属于任何一个业务模块的管理权限范畴，不应要求账号必须拥有具体业务
+ * 查看权限才能看到对应数字；同一 change 新增的"当前用户最近操作"接口同理——只返回当前
+ * 登录账号自己的操作记录（按账号编码精确过滤），语义收窄为自助信息查询，不应要求账号
+ * 必须拥有"操作日志管理"（{@code OperationLogManagement:log:view}）查看权限才能看到自己
+ * 的操作记录。因此这四个接口（{@link #FIRST_LOGIN_WHITELIST}）同时豁免首登拦截与权限
+ * 判断，保持同一批白名单、同一个语义（"自助操作，不受角色权限点约束"）。
  */
 @RequiredArgsConstructor
 public class IdentityAuthFilter extends OncePerRequestFilter {
@@ -69,10 +74,14 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
 
     /**
      * 仍需 {@code identity-token}/{@code menu} 校验，但豁免"首登强制改密"拦截与
-     * "权限编码校验"的路径：修改密码、查询当前用户权限编码，均为不区分权限点的自助操作。
+     * "权限编码校验"的路径：修改密码、查询当前用户权限编码、首页概览统计、当前用户最近
+     * 操作，均为不区分权限点的自助操作。
      */
-    private static final List<String> FIRST_LOGIN_WHITELIST =
-            List.of("/api/auth/password", "/api/auth/permissions");
+    private static final List<String> FIRST_LOGIN_WHITELIST = List.of(
+            "/api/auth/password",
+            "/api/auth/permissions",
+            "/api/dashboard/stats",
+            "/api/dashboard/recent-operations");
 
     /** Ant 风格路径匹配器，用于维护白名单。 */
     private static final AntPathMatcher PATH_MATCHER = new AntPathMatcher();

@@ -1,28 +1,79 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { UserFilled, Grid, Lock, Setting } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { MENU_GROUPS } from '@/router/menu'
+import { getDashboardStats, getRecentOperations } from '@/api/dashboard'
+import type { DashboardStats } from '@/types/dashboard'
+import type { OperationLogRow } from '@/types/operationLog'
 
 const router = useRouter()
 const authStore = useAuthStore()
 
 const today = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })
 
-const stats = [
-  { label: '身份总数', value: 128, delta: '+6', up: true, icon: UserFilled },
-  { label: '接入应用', value: 14, delta: '+1', up: true, icon: Grid },
-  { label: '角色数量', value: 22, delta: '0', up: null, icon: Lock },
-  { label: '权限点', value: 96, delta: '+9', up: true, icon: Setting },
+// 统计卡片元信息（label/icon 固定不变），value 从统计接口回填；四个数值共用同一次
+// 请求的 loading/error 状态，初始不设 0，避免请求未返回时被误认为真实数据
+const statsMeta = [
+  { key: 'userCount' as const, label: '身份总数', icon: UserFilled },
+  { key: 'appCount' as const, label: '接入应用', icon: Grid },
+  { key: 'roleCount' as const, label: '角色数量', icon: Lock },
+  { key: 'permissionCount' as const, label: '权限点', icon: Setting },
 ]
 
-const activity = [
-  { actor: '系统管理员', action: '为角色「审计员」新增了权限点 system:log:view', time: '10 分钟前' },
-  { actor: '系统管理员', action: '创建了新用户「王芳」并分配到「客服组」', time: '1 小时前' },
-  { actor: '系统管理员', action: '轮换了应用「工单系统」的访问密钥', time: '昨天 16:20' },
-  { actor: '系统管理员', action: '调整了组织架构：新增部门「质量保障部」', time: '昨天 09:05' },
-]
+const statsLoading = ref(true)
+const statsError = ref(false)
+const statsData = ref<DashboardStats | null>(null)
+
+const statCards = computed(() =>
+  statsMeta.map((meta) => ({
+    label: meta.label,
+    icon: meta.icon,
+    value: statsData.value ? statsData.value[meta.key] : undefined,
+  })),
+)
+
+const activityLoading = ref(true)
+const activityError = ref(false)
+const activityRecords = ref<OperationLogRow[]>([])
+
+// 用操作日志的模块/被操作对象/操作类型拼出一句通顺的中文描述，time 单独展示
+const activityItems = computed(() =>
+  activityRecords.value.map((record) => ({
+    actor: record.createBy,
+    action: `对${record.module}下的「${record.targetName}」执行了${record.operationTypeLabel}`,
+    time: record.createTime,
+  })),
+)
+
+async function loadStats() {
+  statsLoading.value = true
+  statsError.value = false
+  try {
+    statsData.value = await getDashboardStats()
+  } catch {
+    statsError.value = true
+  } finally {
+    statsLoading.value = false
+  }
+}
+
+async function loadActivity() {
+  activityLoading.value = true
+  activityError.value = false
+  try {
+    activityRecords.value = await getRecentOperations()
+  } catch {
+    activityError.value = true
+  } finally {
+    activityLoading.value = false
+  }
+}
+
+onMounted(() => {
+  Promise.allSettled([loadStats(), loadActivity()])
+})
 
 const quickLinks = computed(() => MENU_GROUPS)
 </script>
@@ -34,29 +85,26 @@ const quickLinks = computed(() => MENU_GROUPS)
       <p>{{ today }} · 这是身份与权限体系的整体概览</p>
     </header>
 
-    <section class="dashboard__stats">
-      <article v-for="stat in stats" :key="stat.label" class="stat-card">
+    <section v-if="statsError" class="dashboard__stats-error">统计数据加载失败，请稍后重试</section>
+    <section v-else class="dashboard__stats" v-loading="statsLoading">
+      <article v-for="stat in statCards" :key="stat.label" class="stat-card">
         <div class="stat-card__icon">
           <el-icon size="20"><component :is="stat.icon" /></el-icon>
         </div>
         <div class="stat-card__body">
           <span class="stat-card__label">{{ stat.label }}</span>
-          <span class="stat-card__value mono">{{ stat.value }}</span>
+          <span class="stat-card__value mono">{{ stat.value ?? '--' }}</span>
         </div>
-        <span
-          class="stat-card__delta mono"
-          :class="{ 'is-up': stat.up === true, 'is-flat': stat.up === null }"
-        >
-          {{ stat.delta }}
-        </span>
       </article>
     </section>
 
     <section class="dashboard__columns">
       <div class="panel">
         <h2 class="panel__title">最近操作</h2>
-        <ol class="timeline">
-          <li v-for="(item, index) in activity" :key="index" class="timeline__item">
+        <p v-if="activityError" class="panel__hint">操作记录加载失败，请稍后重试</p>
+        <p v-else-if="!activityLoading && activityItems.length === 0" class="panel__hint">暂无操作记录</p>
+        <ol v-else class="timeline" v-loading="activityLoading">
+          <li v-for="(item, index) in activityItems" :key="index" class="timeline__item">
             <span class="timeline__dot" />
             <div class="timeline__content">
               <p class="timeline__text"><strong>{{ item.actor }}</strong> {{ item.action }}</p>
@@ -147,17 +195,21 @@ const quickLinks = computed(() => MENU_GROUPS)
   color: var(--color-ink);
 }
 
-.stat-card__delta {
-  font-size: 12px;
-  padding: 3px 8px;
-  border-radius: var(--radius-pill);
-  background: var(--color-canvas);
-  color: var(--color-text-tertiary);
+.dashboard__stats-error {
+  margin-bottom: 24px;
+  padding: 18px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: 13.5px;
+  text-align: center;
+}
 
-  &.is-up {
-    background: rgba(33, 167, 107, 0.1);
-    color: var(--color-success);
-  }
+.panel__hint {
+  color: var(--color-text-secondary);
+  font-size: 13.5px;
+  margin: 0;
 }
 
 .dashboard__columns {
