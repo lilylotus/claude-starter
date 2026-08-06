@@ -27,12 +27,12 @@ public class DashboardController {
     private final DashboardRecentOperationService dashboardRecentOperationService;
 
     /**
-     * 查询用户/应用/角色/权限点四个维度的系统全局总数。
+     * 查询组织/用户/应用/管理员四个维度的系统全局总数。
      *
      * @return 首页概览统计结果
      */
     @Operation(summary = "查询首页概览统计",
-            description = "返回用户/应用/角色/权限点四个维度排除已逻辑删除记录后的系统全局总数，"
+            description = "返回组织/用户/应用/管理员四个维度排除已逻辑删除记录后的系统全局总数，"
                     + "不做数据权限范围过滤，统计口径与各业务模块分页列表接口独立维护")
     @GetMapping("/api/dashboard/stats")
     public DashboardStatsVO stats() {

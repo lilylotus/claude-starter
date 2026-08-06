@@ -19,6 +19,10 @@ import lombok.Setter;
 @Schema(description = "首页概览统计")
 public class DashboardStatsVO {
 
+    /** 组织总数（排除已逻辑删除）。 */
+    @Schema(description = "组织总数")
+    private Long orgCount;
+
     /** 用户总数（排除已逻辑删除）。 */
     @Schema(description = "用户总数")
     private Long userCount;
@@ -27,11 +31,7 @@ public class DashboardStatsVO {
     @Schema(description = "应用总数")
     private Long appCount;
 
-    /** 角色总数（排除已逻辑删除）。 */
-    @Schema(description = "角色总数")
-    private Long roleCount;
-
-    /** 权限点总数（排除已逻辑删除）。 */
-    @Schema(description = "权限点总数")
-    private Long permissionCount;
+    /** 管理员总数（排除已逻辑删除）。 */
+    @Schema(description = "管理员总数")
+    private Long adminCount;
 }

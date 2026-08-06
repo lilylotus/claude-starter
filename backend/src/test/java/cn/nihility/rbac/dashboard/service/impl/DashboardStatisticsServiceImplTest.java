@@ -5,10 +5,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import cn.nihility.rbac.admin.mapper.AdminMapper;
 import cn.nihility.rbac.app.mapper.AppMapper;
 import cn.nihility.rbac.dashboard.dto.DashboardStatsVO;
-import cn.nihility.rbac.permission.mapper.PermissionMapper;
-import cn.nihility.rbac.role.mapper.RoleMapper;
+import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -30,6 +30,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class DashboardStatisticsServiceImplTest {
 
+    /** 被测服务的组织数据访问依赖，使用 Mockito 打桩。 */
+    @Mock
+    private OrgMapper orgMapper;
+
     /** 被测服务的用户数据访问依赖，使用 Mockito 打桩。 */
     @Mock
     private UserMapper userMapper;
@@ -38,13 +42,9 @@ class DashboardStatisticsServiceImplTest {
     @Mock
     private AppMapper appMapper;
 
-    /** 被测服务的角色数据访问依赖，使用 Mockito 打桩。 */
+    /** 被测服务的管理员数据访问依赖，使用 Mockito 打桩。 */
     @Mock
-    private RoleMapper roleMapper;
-
-    /** 被测服务的权限点数据访问依赖，使用 Mockito 打桩。 */
-    @Mock
-    private PermissionMapper permissionMapper;
+    private AdminMapper adminMapper;
 
     /** 被测服务实例。 */
     private DashboardStatisticsServiceImpl dashboardStatisticsService;
@@ -69,7 +69,7 @@ class DashboardStatisticsServiceImplTest {
     @BeforeEach
     void setUp() {
         dashboardStatisticsService =
-                new DashboardStatisticsServiceImpl(userMapper, appMapper, roleMapper, permissionMapper);
+                new DashboardStatisticsServiceImpl(orgMapper, userMapper, appMapper, adminMapper);
     }
 
     /**
@@ -78,21 +78,21 @@ class DashboardStatisticsServiceImplTest {
      */
     @Test
     void getStats_shouldAggregateFourIndependentCounts() {
-        when(userMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(11L);
-        when(appMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(22L);
-        when(roleMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(33L);
-        when(permissionMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(44L);
+        when(orgMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(11L);
+        when(userMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(22L);
+        when(appMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(33L);
+        when(adminMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(44L);
 
         DashboardStatsVO result = dashboardStatisticsService.getStats();
 
-        assertThat(result.getUserCount()).isEqualTo(11L);
-        assertThat(result.getAppCount()).isEqualTo(22L);
-        assertThat(result.getRoleCount()).isEqualTo(33L);
-        assertThat(result.getPermissionCount()).isEqualTo(44L);
+        assertThat(result.getOrgCount()).isEqualTo(11L);
+        assertThat(result.getUserCount()).isEqualTo(22L);
+        assertThat(result.getAppCount()).isEqualTo(33L);
+        assertThat(result.getAdminCount()).isEqualTo(44L);
+        verify(orgMapper).selectCount(any(LambdaQueryWrapper.class));
         verify(userMapper).selectCount(any(LambdaQueryWrapper.class));
         verify(appMapper).selectCount(any(LambdaQueryWrapper.class));
-        verify(roleMapper).selectCount(any(LambdaQueryWrapper.class));
-        verify(permissionMapper).selectCount(any(LambdaQueryWrapper.class));
+        verify(adminMapper).selectCount(any(LambdaQueryWrapper.class));
     }
 
     /**
@@ -101,10 +101,10 @@ class DashboardStatisticsServiceImplTest {
      */
     @Test
     void getStats_userQueryConditionShouldOnlyExcludeDeletedStatus() {
+        when(orgMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
         when(userMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(1L);
         when(appMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
-        when(roleMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
-        when(permissionMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+        when(adminMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
 
         dashboardStatisticsService.getStats();
 

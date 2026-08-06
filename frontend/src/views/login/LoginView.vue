@@ -2,7 +2,7 @@
 import { reactive, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { User, Lock } from '@element-plus/icons-vue'
-import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import type { FormInstance, FormRules } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
@@ -35,8 +35,8 @@ async function handleSubmit() {
     }
     const redirect = (route.query.redirect as string) || '/dashboard'
     router.push(redirect)
-  } catch (error) {
-    ElMessage.error((error as Error).message)
+  } catch {
+    // 错误提示已由 request.ts 响应拦截器统一展示，这里不重复弹提示
   } finally {
     submitting.value = false
   }

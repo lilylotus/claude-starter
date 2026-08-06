@@ -1,25 +1,27 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { UserFilled, Grid, Lock, Setting } from '@element-plus/icons-vue'
+import { UserFilled, Grid, OfficeBuilding, Avatar } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
-import { MENU_GROUPS } from '@/router/menu'
+import { MENU_GROUPS, filterMenuGroups } from '@/router/menu'
+import { usePermission } from '@/composables/usePermission'
 import { getDashboardStats, getRecentOperations } from '@/api/dashboard'
 import type { DashboardStats } from '@/types/dashboard'
 import type { OperationLogRow } from '@/types/operationLog'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const { hasPermission } = usePermission()
 
 const today = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })
 
 // 统计卡片元信息（label/icon 固定不变），value 从统计接口回填；四个数值共用同一次
 // 请求的 loading/error 状态，初始不设 0，避免请求未返回时被误认为真实数据
 const statsMeta = [
+  { key: 'orgCount' as const, label: '组织总数', icon: OfficeBuilding },
   { key: 'userCount' as const, label: '身份总数', icon: UserFilled },
   { key: 'appCount' as const, label: '接入应用', icon: Grid },
-  { key: 'roleCount' as const, label: '角色数量', icon: Lock },
-  { key: 'permissionCount' as const, label: '权限点', icon: Setting },
+  { key: 'adminCount' as const, label: '管理员总数', icon: Avatar },
 ]
 
 const statsLoading = ref(true)
@@ -75,7 +77,7 @@ onMounted(() => {
   Promise.allSettled([loadStats(), loadActivity()])
 })
 
-const quickLinks = computed(() => MENU_GROUPS)
+const quickLinks = computed(() => filterMenuGroups(MENU_GROUPS, hasPermission))
 </script>
 
 <template>

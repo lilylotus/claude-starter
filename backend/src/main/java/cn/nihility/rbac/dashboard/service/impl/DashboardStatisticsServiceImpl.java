@@ -1,16 +1,16 @@
 package cn.nihility.rbac.dashboard.service.impl;
 
+import cn.nihility.rbac.admin.constant.AdminStatus;
+import cn.nihility.rbac.admin.entity.AdminEntity;
+import cn.nihility.rbac.admin.mapper.AdminMapper;
 import cn.nihility.rbac.app.constant.AppStatus;
 import cn.nihility.rbac.app.entity.AppEntity;
 import cn.nihility.rbac.app.mapper.AppMapper;
 import cn.nihility.rbac.dashboard.dto.DashboardStatsVO;
 import cn.nihility.rbac.dashboard.service.DashboardStatisticsService;
-import cn.nihility.rbac.permission.constant.PermissionStatus;
-import cn.nihility.rbac.permission.entity.PermissionEntity;
-import cn.nihility.rbac.permission.mapper.PermissionMapper;
-import cn.nihility.rbac.role.constant.RoleStatus;
-import cn.nihility.rbac.role.entity.RoleEntity;
-import cn.nihility.rbac.role.mapper.RoleMapper;
+import cn.nihility.rbac.org.constant.OrgStatus;
+import cn.nihility.rbac.org.entity.OrgEntity;
+import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.user.constant.UserStatus;
 import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
@@ -28,37 +28,37 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class DashboardStatisticsServiceImpl implements DashboardStatisticsService {
 
+    /** 组织数据访问接口。 */
+    private final OrgMapper orgMapper;
+
     /** 用户数据访问接口。 */
     private final UserMapper userMapper;
 
     /** 应用数据访问接口。 */
     private final AppMapper appMapper;
 
-    /** 角色数据访问接口。 */
-    private final RoleMapper roleMapper;
-
-    /** 权限点数据访问接口。 */
-    private final PermissionMapper permissionMapper;
+    /** 管理员数据访问接口。 */
+    private final AdminMapper adminMapper;
 
     /**
      * {@inheritDoc}
      */
     @Override
     public DashboardStatsVO getStats() {
+        Long orgCount = orgMapper.selectCount(
+                new LambdaQueryWrapper<OrgEntity>().ne(OrgEntity::getStatus, OrgStatus.DELETED));
         Long userCount = userMapper.selectCount(
                 new LambdaQueryWrapper<UserEntity>().ne(UserEntity::getStatus, UserStatus.DELETED));
         Long appCount = appMapper.selectCount(
                 new LambdaQueryWrapper<AppEntity>().ne(AppEntity::getStatus, AppStatus.DELETED));
-        Long roleCount = roleMapper.selectCount(
-                new LambdaQueryWrapper<RoleEntity>().ne(RoleEntity::getStatus, RoleStatus.DELETED));
-        Long permissionCount = permissionMapper.selectCount(
-                new LambdaQueryWrapper<PermissionEntity>().ne(PermissionEntity::getStatus, PermissionStatus.DELETED));
+        Long adminCount = adminMapper.selectCount(
+                new LambdaQueryWrapper<AdminEntity>().ne(AdminEntity::getStatus, AdminStatus.DELETED));
 
         return DashboardStatsVO.builder()
+                .orgCount(orgCount)
                 .userCount(userCount)
                 .appCount(appCount)
-                .roleCount(roleCount)
-                .permissionCount(permissionCount)
+                .adminCount(adminCount)
                 .build();
     }
 }
