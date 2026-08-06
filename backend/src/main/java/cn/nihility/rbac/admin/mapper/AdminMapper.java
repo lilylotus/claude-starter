@@ -4,6 +4,7 @@ import cn.nihility.rbac.admin.dto.AdminVO;
 import cn.nihility.rbac.admin.entity.AdminEntity;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import java.util.Set;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -33,4 +34,20 @@ public interface AdminMapper extends BaseMapper<AdminEntity> {
      * @return 管理员详情，不存在或已被逻辑删除时返回 {@code null}
      */
     AdminVO selectAdminDetail(@Param("id") Long id, @Param("deletedStatus") int deletedStatus);
+
+    /**
+     * 按管辖组织范围统计未被逻辑删除的管理员总数。管理员本身没有直接的组织外键，组织
+     * 归属看的是其关联用户（{@code tab_admin.user_id}）自己的任职记录，因此复用与
+     * {@code UserMapper#countUsersInScope} 相同的 {@code EXISTS tab_user_position}
+     * 判断逻辑，只是主表换成 {@code tab_admin}（scope-dashboard-stats-by-admin-org
+     * change design.md Decision 2）。
+     *
+     * @param allowedOrgIds         管辖组织 id 全集，{@code null} 表示不受限制；非
+     *                              {@code null}（哪怕是空集合）表示受限
+     * @param deletedStatus         {@code tab_admin} 的逻辑删除状态字面量（{@code AdminStatus.DELETED}）
+     * @param positionDeletedStatus {@code tab_user_position} 的逻辑删除状态字面量（{@code PositionStatus.DELETED}）
+     * @return 命中的管理员总数
+     */
+    int countAdminsInScope(@Param("allowedOrgIds") Set<Long> allowedOrgIds, @Param("deletedStatus") int deletedStatus,
+            @Param("positionDeletedStatus") int positionDeletedStatus);
 }

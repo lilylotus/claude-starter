@@ -48,4 +48,20 @@ public interface UserMapper extends BaseMapper<UserEntity> {
     IPage<UserVO> selectUserPage(IPage<?> page, @Param("name") String name, @Param("mobile") String mobile,
             @Param("idCard") String idCard, @Param("allowedOrgIds") Set<Long> allowedOrgIds,
             @Param("deletedStatus") int deletedStatus, @Param("positionDeletedStatus") int positionDeletedStatus);
+
+    /**
+     * 按管辖组织范围统计未被逻辑删除的用户总数，追加"存在至少一条未删除、所属组织落在
+     * 管辖范围内的任职记录"过滤条件，与 {@link #selectUserPage} 共享同一条
+     * {@code EXISTS tab_user_position} 判断逻辑，但各自独立维护 SQL（一个是分页查询，
+     * 一个是纯计数，不共用同一条语句）（scope-dashboard-stats-by-admin-org change
+     * design.md Decision 2）。
+     *
+     * @param allowedOrgIds         管辖组织 id 全集，{@code null} 表示不受限制；非
+     *                              {@code null}（哪怕是空集合）表示受限
+     * @param deletedStatus         {@code tab_user} 的逻辑删除状态字面量（{@code UserStatus.DELETED}）
+     * @param positionDeletedStatus {@code tab_user_position} 的逻辑删除状态字面量（{@code PositionStatus.DELETED}）
+     * @return 命中的用户总数
+     */
+    int countUsersInScope(@Param("allowedOrgIds") Set<Long> allowedOrgIds, @Param("deletedStatus") int deletedStatus,
+            @Param("positionDeletedStatus") int positionDeletedStatus);
 }

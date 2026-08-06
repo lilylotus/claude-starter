@@ -44,4 +44,22 @@
         AND a.status != #{deletedStatus}
     </select>
 
+    <!-- 按管辖组织范围统计管理员总数：管理员没有直接的组织外键，通过 tab_admin.user_id
+         关联 tab_user_position 判断其组织归属，EXISTS 写法与 UserMapper#countUsersInScope
+         保持一致（scope-dashboard-stats-by-admin-org change design.md Decision 2）。 -->
+    <select id="countAdminsInScope" resultType="int">
+        SELECT COUNT(*) FROM tab_admin a
+        WHERE a.status != #{deletedStatus}
+        AND EXISTS (
+            SELECT 1 FROM tab_user_position up
+            WHERE up.user_id = a.user_id
+            AND up.status != #{positionDeletedStatus}
+            <if test="allowedOrgIds.isEmpty()">AND up.org_id = -1</if>
+            <if test="!allowedOrgIds.isEmpty()">
+                AND up.org_id IN
+                <foreach collection="allowedOrgIds" item="orgId" open="(" separator="," close=")">#{orgId}</foreach>
+            </if>
+        )
+    </select>
+
 </mapper>

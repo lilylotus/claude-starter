@@ -43,4 +43,22 @@
         ORDER BY u.show_order DESC, u.id ASC
     </select>
 
+    <!-- 按管辖组织范围统计用户总数，EXISTS 子查询写法与 selectUserPage 保持一致，供
+         首页概览统计接口使用（scope-dashboard-stats-by-admin-org change design.md
+         Decision 2）。 -->
+    <select id="countUsersInScope" resultType="int">
+        SELECT COUNT(*) FROM tab_user u
+        WHERE u.status != #{deletedStatus}
+        AND EXISTS (
+            SELECT 1 FROM tab_user_position up
+            WHERE up.user_id = u.id
+            AND up.status != #{positionDeletedStatus}
+            <if test="allowedOrgIds.isEmpty()">AND up.org_id = -1</if>
+            <if test="!allowedOrgIds.isEmpty()">
+                AND up.org_id IN
+                <foreach collection="allowedOrgIds" item="orgId" open="(" separator="," close=")">#{orgId}</foreach>
+            </if>
+        )
+    </select>
+
 </mapper>

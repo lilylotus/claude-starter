@@ -27,13 +27,15 @@ public class DashboardController {
     private final DashboardRecentOperationService dashboardRecentOperationService;
 
     /**
-     * 查询组织/用户/应用/管理员四个维度的系统全局总数。
+     * 查询组织/用户/应用/管理员四个维度的真实总数：当前登录账号未配置管辖组织范围时为
+     * 系统全局总数，配置了管辖组织范围时收紧为范围内的总数。
      *
      * @return 首页概览统计结果
      */
     @Operation(summary = "查询首页概览统计",
-            description = "返回组织/用户/应用/管理员四个维度排除已逻辑删除记录后的系统全局总数，"
-                    + "不做数据权限范围过滤，统计口径与各业务模块分页列表接口独立维护")
+            description = "返回组织/用户/应用/管理员四个维度排除已逻辑删除记录后的真实总数，"
+                    + "按当前登录账号的管辖组织范围收紧（未配置管辖范围时为系统全局总数），"
+                    + "口径与组织树/应用列表/用户列表等业务列表页保持一致")
     @GetMapping("/api/dashboard/stats")
     public DashboardStatsVO stats() {
         return dashboardStatisticsService.getStats();
