@@ -80,6 +80,12 @@ const detailRoutes = [
     meta: { title: '应用详情', requiresAuth: true, permissionKey: 'AppManagement:app:detail' },
   },
   {
+    path: 'application/list/:id/config',
+    name: 'application-list-config',
+    component: () => import('@/views/application/app/AppConfigView.vue'),
+    meta: { title: '应用配置', requiresAuth: true, permissionKey: 'AppManagement:app:config' },
+  },
+  {
     path: 'permission/roles/:id',
     name: 'permission-roles-detail',
     component: () => import('@/views/permission/role/RoleDetailView.vue'),

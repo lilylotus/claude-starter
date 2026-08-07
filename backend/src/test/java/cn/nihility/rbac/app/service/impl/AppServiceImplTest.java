@@ -14,6 +14,7 @@ import cn.nihility.rbac.app.dto.AppUpdateRequest;
 import cn.nihility.rbac.app.dto.AppVO;
 import cn.nihility.rbac.app.entity.AppEntity;
 import cn.nihility.rbac.app.mapper.AppMapper;
+import cn.nihility.rbac.app.service.AppConfigService;
 import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.common.result.PageResult;
@@ -85,6 +86,10 @@ class AppServiceImplTest {
     @Mock
     private UserDisplayService userDisplayService;
 
+    /** 被测服务的应用配置业务逻辑依赖，使用 Mockito 打桩。 */
+    @Mock
+    private AppConfigService appConfigService;
+
     /** 被测服务实例。 */
     private AppServiceImpl appService;
 
@@ -111,7 +116,7 @@ class AppServiceImplTest {
     void setUp() {
         appService = new AppServiceImpl(appMapper, userMapper, orgMapper, operationLogRecorder,
                 formFieldDefinitionService, formFieldSnapshotSupport, orgScopeService, currentOperatorService,
-                userDisplayService);
+                userDisplayService, appConfigService);
         lenient().when(userMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
@@ -211,6 +216,31 @@ class AppServiceImplTest {
         assertThat(captured.getCreateTime()).isNotNull();
         verify(operationLogRecorder).recordCreate(org.mockito.ArgumentMatchers.eq("app"), any(),
                 org.mockito.ArgumentMatchers.eq("测试应用"), any(Map.class));
+    }
+
+    /**
+     * 创建应用时，应在应用插入成功后调用 {@code AppConfigService#createDefaultConfig} 生成默认
+     * 接口配置（app-api-credentials-config change design.md Decision 1）。
+     */
+    @Test
+    void create_shouldCallCreateDefaultConfig() {
+        AppEntity inserted = buildEntity(10L, 1L, 100L, AppStatus.ENABLED);
+        when(appMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+        when(appMapper.selectById(any())).thenReturn(inserted);
+
+        AppCreateRequest request = new AppCreateRequest();
+        request.setName("测试应用");
+        request.setCode("app001");
+        request.setOwnerId(1L);
+        request.setOrgId(100L);
+        request.setShowOrder(0);
+
+        appService.create(request);
+
+        // appMapper.insert 被 Mockito 打桩，不会像真实 MyBatis-Plus 那样把自增主键回填到
+        // entity 上，因此这里沿用既有用例（如 create_shouldSetEnabledStatus_andAuditFields）
+        // 对 targetId 用 any() 断言的做法，只校验调用发生、操作人参数正确。
+        verify(appConfigService).createDefaultConfig(any(), org.mockito.ArgumentMatchers.eq("1"));
     }
 
     /**

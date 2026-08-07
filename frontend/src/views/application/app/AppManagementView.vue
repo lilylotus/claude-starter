@@ -197,6 +197,12 @@ function goToDetail(row: AppRow) {
   router.push({ name: 'application-list-detail', params: { id: row.id } })
 }
 
+// ---- 接口配置：跳转独立配置页 ----
+
+function goToConfig(row: AppRow) {
+  router.push({ name: 'application-list-config', params: { id: row.id } })
+}
+
 // ---- 行操作：启用/停用、删除 ----
 
 async function toggleStatus(row: AppRow) {
@@ -259,9 +265,10 @@ async function handleDelete(row: AppRow) {
             <el-tag v-else type="warning">停用</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="240" fixed="right">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <el-button v-if="hasPermission('AppManagement:app:detail')" link type="primary" @click="goToDetail(row as AppRow)">详情</el-button>
+            <el-button v-if="hasPermission('AppManagement:app:config')" link type="primary" @click="goToConfig(row as AppRow)">配置</el-button>
             <el-button v-if="hasPermission('AppManagement:app:edit')" link type="primary" @click="openEditDialog(row as AppRow)">编辑</el-button>
             <el-button
               link

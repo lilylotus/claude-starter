@@ -7,6 +7,7 @@ import cn.nihility.rbac.app.dto.AppVO;
 import cn.nihility.rbac.app.entity.AppEntity;
 import cn.nihility.rbac.app.mapper.AppMapper;
 import cn.nihility.rbac.app.mapstruct.AppConvert;
+import cn.nihility.rbac.app.service.AppConfigService;
 import cn.nihility.rbac.app.service.AppService;
 import cn.nihility.rbac.auth.context.CurrentUserContext;
 import cn.nihility.rbac.auth.service.CurrentOperatorService;
@@ -38,6 +39,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 /**
@@ -89,6 +91,12 @@ public class AppServiceImpl implements AppService {
     private final UserDisplayService userDisplayService;
 
     /**
+     * 应用对外接口配置业务逻辑接口，新建应用时在同一事务内生成默认凭证配置
+     * （app-api-credentials-config change design.md Decision 1）。
+     */
+    private final AppConfigService appConfigService;
+
+    /**
      * {@inheritDoc}
      */
     @Override
@@ -132,8 +140,12 @@ public class AppServiceImpl implements AppService {
 
     /**
      * {@inheritDoc}
+     * <p>
+     * 创建应用与创建默认应用配置（{@link AppConfigService#createDefaultConfig}）需在同一
+     * 事务内完成，因此整个方法标注 {@link Transactional}。
      */
     @Override
+    @Transactional
     public AppVO create(AppCreateRequest request) {
         assertOrgInScope(request.getOrgId());
         checkCodeUnique(request.getCode(), null);
@@ -148,6 +160,7 @@ public class AppServiceImpl implements AppService {
         entity.setUpdateBy(operator);
         entity.setUpdateTime(now);
         appMapper.insert(entity);
+        appConfigService.createDefaultConfig(entity.getId(), operator);
 
         operationLogRecorder.recordCreate(OperationLogResourceType.APP, entity.getId(), entity.getName(),
                 toLogSnapshot(entity));

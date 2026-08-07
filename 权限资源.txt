@@ -70,6 +70,11 @@ AppManagement（应用管理，/application/list）
 - AppManagement:app:delete     删除应用
 - AppManagement:app:importTemplate   下载应用导入模板
 - AppManagement:app:import           批量导入应用
+- AppManagement:app:config                   应用配置页面访问（AppId/AccessKey/SecretKey、
+  签名算法、同步配置，/application/list/:id/config）
+- AppManagement:app:config:resetSecret       重置 SecretKey
+- AppManagement:app:config:editSignAlgorithm 修改签名算法
+- AppManagement:app:config:editSync          修改同步配置（组织/用户/应用/字典四个开关）
 
 
 权限管理

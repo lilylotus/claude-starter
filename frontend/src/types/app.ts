@@ -62,3 +62,52 @@ export interface PageResult<T> {
   page: number
   pageSize: number
 }
+
+// 签名算法可选值，与后端 app/constant/SignAlgorithm 对齐
+export type SignAlgorithm = 'SHA256' | 'SM3'
+
+// 同步方式可选值，与后端 app/constant/SyncMode 对齐；整个应用一份，不区分组织/用户/应用/字典
+export type SyncMode = 'NOTIFY' | 'PULL'
+
+// 应用对外接口配置，来自 GET /api/apps/{id}/config、PUT .../sign-algorithm、PUT .../sync
+// 的返回值；出于安全策略，永远不包含 secretKey 字段（明文只在重置接口的响应里出现一次）
+export interface AppConfigVO {
+  appId: string
+  accessKey: string
+  signAlgorithm: SignAlgorithm
+  syncOrgEnabled: boolean
+  syncUserEnabled: boolean
+  syncAppEnabled: boolean
+  syncDictEnabled: boolean
+  syncMode: SyncMode
+  // 同步方式为 NOTIFY 时才有意义；PULL 模式下也可能保留上一次填写的值（后端不强制清空）
+  notifyUrl: string
+  notifyParams: Record<string, string>
+  createBy: string
+  createTime: string
+  updateBy: string
+  updateTime: string
+}
+
+// 修改签名算法请求体，对应 PUT /api/apps/{id}/config/sign-algorithm
+export interface SignAlgorithmUpdateRequest {
+  signAlgorithm: SignAlgorithm
+}
+
+// 修改同步配置请求体，对应 PUT /api/apps/{id}/config/sync；notifyUrl 是否必填取决于 syncMode
+// （NOTIFY 时必填、格式须为 http/https），前端表单需要按 syncMode 联动做提交前校验
+export interface SyncConfigUpdateRequest {
+  syncOrgEnabled: boolean
+  syncUserEnabled: boolean
+  syncAppEnabled: boolean
+  syncDictEnabled: boolean
+  syncMode: SyncMode
+  notifyUrl: string
+  notifyParams: Record<string, string>
+}
+
+// 重置 SecretKey 响应，对应 POST /api/apps/{id}/config/secret-key/reset；
+// 仅此一个接口会返回明文，调用方不应把它存进 Pinia store 或 localStorage
+export interface SecretKeyResult {
+  secretKey: string
+}

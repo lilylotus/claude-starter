@@ -60,3 +60,9 @@ rbac:
       access-token-expire-seconds: 7200
       # refresh-key 有效期（秒），默认 14400 秒（4 小时）
       refresh-token-expire-seconds: 14400
+
+  app-secret:
+    # SM4 密钥（Base64，16 字节，用 Sm4JdkUtils.generateKey() 生成），用于应用对外接口
+    # SecretKey 落库前的对称加密；仅用于本地开发/演示，生产环境务必替换为独立生成的密钥，
+    # 不要沿用仓库中的默认值。
+    sm4-key: R8r2MjLGO0oLMkIVVXcPrQ==
