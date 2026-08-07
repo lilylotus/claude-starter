@@ -116,4 +116,37 @@ class OrgScopeServiceImplTest {
         assertThat(result).isPresent();
         assertThat(result.get()).containsExactlyInAnyOrder(10L, 11L, 30L);
     }
+
+    /**
+     * 不受限制（未配置管辖范围）时，{@code isOrgIdAllowed} 对任意组织 id 恒返回
+     * {@code true}（org-scope-write-guard change design.md Decision 1）。
+     */
+    @Test
+    void isOrgIdAllowed_shouldReturnTrue_whenNotRestricted() {
+        when(adminOrgScopeMapper.selectOrgScopesByUserId(1L)).thenReturn(List.of());
+
+        assertThat(orgScopeService.isOrgIdAllowed(1L, 999L)).isTrue();
+    }
+
+    /**
+     * 受限时，落在允许集合内的组织 id 应通过校验。
+     */
+    @Test
+    void isOrgIdAllowed_shouldReturnTrue_whenOrgIdInAllowedSet() {
+        AdminOrgScopeEntity scope = AdminOrgScopeEntity.builder().orgId(10L).includeChildren(false).build();
+        when(adminOrgScopeMapper.selectOrgScopesByUserId(1L)).thenReturn(List.of(scope));
+
+        assertThat(orgScopeService.isOrgIdAllowed(1L, 10L)).isTrue();
+    }
+
+    /**
+     * 受限时，不在允许集合内的组织 id 应未通过校验。
+     */
+    @Test
+    void isOrgIdAllowed_shouldReturnFalse_whenOrgIdOutOfAllowedSet() {
+        AdminOrgScopeEntity scope = AdminOrgScopeEntity.builder().orgId(10L).includeChildren(false).build();
+        when(adminOrgScopeMapper.selectOrgScopesByUserId(1L)).thenReturn(List.of(scope));
+
+        assertThat(orgScopeService.isOrgIdAllowed(1L, 20L)).isFalse();
+    }
 }

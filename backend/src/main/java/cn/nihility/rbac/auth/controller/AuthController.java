@@ -10,6 +10,7 @@ import cn.nihility.rbac.auth.dto.RefreshRequest;
 import cn.nihility.rbac.auth.dto.RefreshResponse;
 import cn.nihility.rbac.auth.service.AuthService;
 import cn.nihility.rbac.auth.service.AuthorizationService;
+import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.common.result.Result;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -36,6 +37,9 @@ public class AuthController {
 
     /** 运行时鉴权业务逻辑接口，用于查询当前登录用户拥有的权限编码集合。 */
     private final AuthorizationService authorizationService;
+
+    /** 管辖组织范围解析业务逻辑接口，用于查询当前登录用户的管辖组织范围是否受限。 */
+    private final OrgScopeService orgScopeService;
 
     /**
      * 获取当前生效的 RSA 公钥。
@@ -87,16 +91,19 @@ public class AuthController {
     }
 
     /**
-     * 查询当前登录用户当前拥有的全部权限编码集合。
+     * 查询当前登录用户当前拥有的全部权限编码集合，以及管辖组织范围是否受限。
      *
      * @return 权限编码集合响应
      */
     @Operation(summary = "查询当前用户权限编码",
-            description = "返回当前登录用户当前拥有的全部权限编码集合，供前端过滤菜单/按钮展示；"
-                    + "自助查询，不受目标权限编码本身是否已授权约束")
+            description = "返回当前登录用户当前拥有的全部权限编码集合与管辖组织范围是否受限，"
+                    + "供前端过滤菜单/按钮展示、收紧组织相关选择器；自助查询，不受目标权限编码本身是否已授权约束")
     @GetMapping("/api/auth/permissions")
     public PermissionCodesVO myPermissions() {
         Long userId = CurrentUserContext.getUserId();
-        return PermissionCodesVO.builder().codes(authorizationService.getGrantedPermissionCodes(userId)).build();
+        return PermissionCodesVO.builder()
+                .codes(authorizationService.getGrantedPermissionCodes(userId))
+                .orgScopeRestricted(orgScopeService.resolveAllowedOrgIds(userId).isPresent())
+                .build();
     }
 }

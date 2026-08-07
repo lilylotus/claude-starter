@@ -116,6 +116,13 @@ class AppServiceImplTest {
         lenient().when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
         lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.empty());
+        // 委托调用 resolveAllowedOrgIds 的当前打桩结果计算，与真实实现（OrgScopeServiceImpl）
+        // 语义保持一致，用例改写 resolveAllowedOrgIds 打桩时无需再额外单独打桩
+        // isOrgIdAllowed（org-scope-write-guard change design.md Decision 1）。
+        lenient().when(orgScopeService.isOrgIdAllowed(any(), any())).thenAnswer(invocation -> orgScopeService
+                .resolveAllowedOrgIds(invocation.getArgument(0))
+                .map(allowed -> allowed.contains(invocation.getArgument(1)))
+                .orElse(true));
         lenient().when(currentOperatorService.resolveUserId()).thenReturn(1L);
         lenient().when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
     }
@@ -316,6 +323,103 @@ class AppServiceImplTest {
         verify(appMapper, never()).deleteById(any(Long.class));
         verify(operationLogRecorder).recordDelete(org.mockito.ArgumentMatchers.eq("app"),
                 org.mockito.ArgumentMatchers.eq(10L), any(), any(Map.class));
+    }
+
+    /**
+     * 管辖范围受限时，新增应用若所属组织不在管辖范围内，应拒绝创建（org-scope-write-guard
+     * change design.md Decision 2：新建/移动场景直接报"无权限"，不伪装成"不存在"）。
+     */
+    @Test
+    void create_shouldThrowBusinessException_whenOrgIdOutOfScope() {
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(999L)));
+
+        AppCreateRequest request = new AppCreateRequest();
+        request.setName("测试应用");
+        request.setCode("app001");
+        request.setOwnerId(1L);
+        request.setOrgId(100L);
+        request.setShowOrder(0);
+
+        assertThatThrownBy(() -> appService.create(request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权限");
+        verify(appMapper, never()).insert(any(AppEntity.class));
+    }
+
+    /**
+     * 管辖范围受限时，更新一个当前所属组织不在管辖范围内的应用，应复用"应用不存在"错误文案，
+     * 不额外暴露越权探测信号（org-scope-write-guard change design.md Decision 2）。
+     */
+    @Test
+    void update_shouldThrowBusinessException_whenCurrentOrgOutOfScope() {
+        AppEntity entity = buildEntity(10L, 1L, 100L, AppStatus.ENABLED);
+        when(appMapper.selectById(10L)).thenReturn(entity);
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(999L)));
+
+        AppUpdateRequest request = new AppUpdateRequest();
+        request.setName("新名称");
+        request.setCode("app002");
+        request.setOwnerId(2L);
+        request.setOrgId(999L);
+        request.setShowOrder(1);
+
+        assertThatThrownBy(() -> appService.update(10L, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("应用不存在");
+        verify(appMapper, never()).updateById(any(AppEntity.class));
+    }
+
+    /**
+     * 管辖范围受限时，被编辑应用当前所属组织在管辖范围内，但请求的新所属组织不在，
+     * 应拒绝更新（org-scope-write-guard change design.md Decision 2）。
+     */
+    @Test
+    void update_shouldThrowBusinessException_whenNewOrgOutOfScope() {
+        AppEntity entity = buildEntity(10L, 1L, 100L, AppStatus.ENABLED);
+        when(appMapper.selectById(10L)).thenReturn(entity);
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(100L)));
+
+        AppUpdateRequest request = new AppUpdateRequest();
+        request.setName("新名称");
+        request.setCode("app002");
+        request.setOwnerId(2L);
+        request.setOrgId(200L);
+        request.setShowOrder(1);
+
+        assertThatThrownBy(() -> appService.update(10L, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权限");
+        verify(appMapper, never()).updateById(any(AppEntity.class));
+    }
+
+    /**
+     * 管辖范围受限时，启用一个当前所属组织不在管辖范围内的应用，应复用"应用不存在"错误文案。
+     */
+    @Test
+    void enable_shouldThrowBusinessException_whenCurrentOrgOutOfScope() {
+        AppEntity entity = buildEntity(10L, 1L, 100L, AppStatus.DISABLED);
+        when(appMapper.selectById(10L)).thenReturn(entity);
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(999L)));
+
+        assertThatThrownBy(() -> appService.enable(10L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("应用不存在");
+        verify(appMapper, never()).updateById(any(AppEntity.class));
+    }
+
+    /**
+     * 管辖范围受限时，删除一个当前所属组织不在管辖范围内的应用，应复用"应用不存在"错误文案。
+     */
+    @Test
+    void delete_shouldThrowBusinessException_whenCurrentOrgOutOfScope() {
+        AppEntity entity = buildEntity(10L, 1L, 100L, AppStatus.ENABLED);
+        when(appMapper.selectById(10L)).thenReturn(entity);
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(999L)));
+
+        assertThatThrownBy(() -> appService.delete(10L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("应用不存在");
+        verify(appMapper, never()).updateById(any(AppEntity.class));
     }
 
     /**

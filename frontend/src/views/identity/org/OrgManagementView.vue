@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules, TreeInstance } from 'element-plus'
 import type Node from 'element-plus/es/components/tree/src/model/node'
 import { useOrgStore } from '@/stores/org'
+import { useCurrentUserPermissionStore } from '@/stores/currentUserPermission'
 import { PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import * as orgApi from '@/api/org'
 import * as excelImportApi from '@/api/excelImport'
@@ -23,6 +24,7 @@ import { usePermission } from '@/composables/usePermission'
 const orgStore = useOrgStore()
 const router = useRouter()
 const { hasPermission } = usePermission()
+const currentUserPermissionStore = useCurrentUserPermissionStore()
 
 // 除上级组织（parentId）、启停用状态（status）外的全部字段（含原有表字段与 ext1~ext10）
 // 统一按"表单字段定义"（bizType=ORG）动态渲染，见 design.md 决策 12
@@ -102,10 +104,15 @@ async function handleImported() {
 
 // ---- 上级组织选择（新增/编辑弹窗内的 el-tree-select 数据源）----
 // 在原始组织树前面拼一个虚拟的“顶级组织”根节点，代表 parentId = 0；
-// 该虚拟节点可以被选中——选中它即代表新增/编辑为第一层级组织
-const treeSelectData = computed(() => [
-  { id: 0, name: '顶级组织', children: orgStore.tree } as OrgTreeNode & { children: OrgTreeNode[] },
-])
+// 该虚拟节点可以被选中——选中它即代表新增/编辑为第一层级组织。
+// 但这个虚拟节点不是真实组织，不受 GET /api/orgs/tree 既有的管辖范围过滤覆盖：当前
+// 登录用户的管辖组织范围受限时，parentId = 0 永远不在其允许集合内（见 org-scope-write-guard
+// change design.md Decision 6），选中它保存必然被后端拒绝，因此受限时不再拼接这个选项，
+// 选择器数据直接使用已经过后端管辖范围过滤的 orgStore.tree
+const treeSelectData = computed(() => {
+  if (currentUserPermissionStore.orgScopeRestricted) return orgStore.tree
+  return [{ id: 0, name: '顶级组织', children: orgStore.tree } as OrgTreeNode & { children: OrgTreeNode[] }]
+})
 
 // 编辑时，上级组织不能选择自己或自己的子孙节点，避免出现环
 function pruneSubtree(nodes: OrgTreeNode[], excludeId: number): OrgTreeNode[] {
@@ -136,11 +143,14 @@ function findAncestorPath(
 
 // 上级组织选择器默认展开的节点 key：
 // 新增时只展开虚拟根，仅显示顶级组织；编辑时展开到当前上级组织所在路径（不含其自身），
-// 使其在列表中可见但不展开更深层级；每次打开弹窗都靠 treeSelectRenderKey 重新挂载生效
+// 使其在列表中可见但不展开更深层级；每次打开弹窗都靠 treeSelectRenderKey 重新挂载生效。
+// 管辖范围受限时不存在虚拟根节点（id = 0），兜底展开空数组即可——树的顶层节点
+// （管辖范围内的真实组织/虚拟根节点）本身默认就是可见的，不需要额外展开
+const fallbackExpandedKeys = computed(() => (currentUserPermissionStore.orgScopeRestricted ? [] : [0]))
 const treeSelectExpandedKeys = computed(() => {
-  if (dialogMode.value === 'create' || form.parentId === null) return [0]
+  if (dialogMode.value === 'create' || form.parentId === null) return fallbackExpandedKeys.value
   const path = findAncestorPath(editableTreeSelectData.value, form.parentId)
-  return path ? path.slice(0, -1) : [0]
+  return path ? path.slice(0, -1) : fallbackExpandedKeys.value
 })
 
 // ---- 新增/编辑弹窗 ----

@@ -20,4 +20,16 @@ public interface OrgScopeService {
      *         {@link Set} 为已展开 {@code include_children} 子孙的允许组织 id 全集
      */
     Optional<Set<Long>> resolveAllowedOrgIds(Long userId);
+
+    /**
+     * 校验某个组织 id 是否在当前用户的管辖组织范围内，供组织/任职/应用等模块的写操作接口
+     * （新增、编辑、启用、停用、删除）复用，收紧这些接口此前完全不受管辖范围约束的缺口
+     * （org-scope-write-guard change proposal.md）。
+     *
+     * @param userId 用户 id（{@code tab_user.id}）
+     * @param orgId  待校验的组织 id
+     * @return {@link #resolveAllowedOrgIds} 解析结果为不受限制时恒为 {@code true}；
+     *         受限时，{@code orgId} 落在允许集合内返回 {@code true}，否则返回 {@code false}
+     */
+    boolean isOrgIdAllowed(Long userId, Long orgId);
 }

@@ -35,7 +35,9 @@ export interface ChangePasswordForm {
   newPassword: string
 }
 
-// GET /api/auth/permissions 响应：当前登录用户拥有的全量三段式权限编码集合
+// GET /api/auth/permissions 响应：当前登录用户拥有的全量三段式权限编码集合，
+// 以及管辖组织范围是否受限（供组织管理"上级组织"等选择器收紧可选范围）
 export interface PermissionCodesResult {
   codes: string[]
+  orgScopeRestricted: boolean
 }

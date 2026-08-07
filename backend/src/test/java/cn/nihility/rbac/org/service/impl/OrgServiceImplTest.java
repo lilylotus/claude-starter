@@ -79,7 +79,11 @@ class OrgServiceImplTest {
      * 静态调用完成，无需在此注入或 mock。动态字段定义默认桩为空列表，
      * 各分支逻辑测试不受"表单字段定义"驱动的校验管线影响。管辖组织范围默认桩为
      * {@code Optional.empty()}（不受限制），使既有分支逻辑测试不受本次新增的
-     * 管辖范围过滤影响，虚拟根节点等受限场景在下方单独的用例中覆盖。
+     * 管辖范围过滤影响，虚拟根节点等受限场景在下方单独的用例中覆盖。{@code isOrgIdAllowed}
+     * 桩为委托调用 {@code resolveAllowedOrgIds} 的当前打桩结果计算，与真实实现
+     * （{@code OrgScopeServiceImpl}）语义保持一致，使用例改写 {@code resolveAllowedOrgIds}
+     * 打桩时无需再额外单独打桩 {@code isOrgIdAllowed}（org-scope-write-guard change
+     * design.md Decision 1）。
      */
     @BeforeEach
     void setUp() {
@@ -87,6 +91,10 @@ class OrgServiceImplTest {
                 formFieldSnapshotSupport, orgScopeService, currentOperatorService, userDisplayService);
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
         lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.empty());
+        lenient().when(orgScopeService.isOrgIdAllowed(any(), any())).thenAnswer(invocation -> orgScopeService
+                .resolveAllowedOrgIds(invocation.getArgument(0))
+                .map(allowed -> allowed.contains(invocation.getArgument(1)))
+                .orElse(true));
         lenient().when(currentOperatorService.resolveUserId()).thenReturn(1L);
         lenient().when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
     }
@@ -286,6 +294,124 @@ class OrgServiceImplTest {
         assertThatThrownBy(() -> orgService.update(1L, request))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("上级组织不能是自身");
+    }
+
+    /**
+     * 管辖范围受限时，新增组织若上级组织不在管辖范围内，应拒绝创建（org-scope-write-guard
+     * change design.md Decision 2：新建/移动场景直接报"无权限"，不伪装成"不存在"）。
+     */
+    @Test
+    void create_shouldThrowBusinessException_whenParentIdOutOfScope() {
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(5L)));
+
+        OrgCreateRequest request = new OrgCreateRequest();
+        request.setName("财务部");
+        request.setCode("FIN");
+        request.setParentId(0L);
+        request.setShowOrder(0);
+
+        assertThatThrownBy(() -> orgService.create(request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权限");
+        verify(orgMapper, never()).insert(any(OrgEntity.class));
+    }
+
+    /**
+     * 管辖范围受限时，更新一个不在管辖范围内的组织，应复用"组织不存在"错误文案，
+     * 不额外暴露越权探测信号（org-scope-write-guard change design.md Decision 2）。
+     */
+    @Test
+    void update_shouldThrowBusinessException_whenSelfOutOfScope() {
+        OrgEntity entity = buildEntity(1L, "研发部", "DEV", 0L, OrgStatus.ENABLED, 0);
+        when(orgMapper.selectById(1L)).thenReturn(entity);
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(5L)));
+
+        OrgUpdateRequest request = new OrgUpdateRequest();
+        request.setName("研发部");
+        request.setCode("DEV");
+        request.setParentId(0L);
+        request.setShowOrder(0);
+
+        assertThatThrownBy(() -> orgService.update(1L, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("组织不存在");
+        verify(orgMapper, never()).updateById(any(OrgEntity.class));
+    }
+
+    /**
+     * 管辖范围受限时，被编辑组织自身在管辖范围内，但请求的新上级组织不在管辖范围内，
+     * 应拒绝更新（org-scope-write-guard change design.md Decision 2）。
+     */
+    @Test
+    void update_shouldThrowBusinessException_whenNewParentIdOutOfScope() {
+        OrgEntity entity = buildEntity(1L, "研发部", "DEV", 5L, OrgStatus.ENABLED, 0);
+        when(orgMapper.selectById(1L)).thenReturn(entity);
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(1L, 5L)));
+
+        OrgUpdateRequest request = new OrgUpdateRequest();
+        request.setName("研发部");
+        request.setCode("DEV");
+        request.setParentId(9L);
+        request.setShowOrder(0);
+
+        assertThatThrownBy(() -> orgService.update(1L, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权限");
+        verify(orgMapper, never()).updateById(any(OrgEntity.class));
+    }
+
+    /**
+     * 管辖范围受限时，编辑一个自身在管辖范围内、但真实上级组织不在管辖范围内的组织
+     * （虚拟根节点场景），只要请求携带的 parentId 与当前值相同（未修改上级组织），
+     * 更新应正常成功，不因为真实上级组织在管辖范围外而拒绝（org-scope-write-guard change
+     * design.md Decision 5）。
+     */
+    @Test
+    void update_shouldSucceed_whenParentIdUnchanged_evenIfParentOutOfScope() {
+        OrgEntity entity = buildEntity(1L, "研发部", "DEV", 99L, OrgStatus.ENABLED, 0);
+        when(orgMapper.selectById(1L)).thenReturn(entity);
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(1L)));
+
+        OrgUpdateRequest request = new OrgUpdateRequest();
+        request.setName("研发部");
+        request.setCode("DEV");
+        request.setParentId(99L);
+        request.setShowOrder(0);
+
+        orgService.update(1L, request);
+
+        assertThat(entity.getParentId()).isEqualTo(99L);
+        verify(orgMapper).updateById(entity);
+    }
+
+    /**
+     * 管辖范围受限时，启用/停用一个不在管辖范围内的组织，应复用"组织不存在"错误文案。
+     */
+    @Test
+    void enable_shouldThrowBusinessException_whenSelfOutOfScope() {
+        OrgEntity entity = buildEntity(1L, "研发部", "DEV", 0L, OrgStatus.DISABLED, 0);
+        when(orgMapper.selectById(1L)).thenReturn(entity);
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(5L)));
+
+        assertThatThrownBy(() -> orgService.enable(1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("组织不存在");
+        verify(orgMapper, never()).updateById(any(OrgEntity.class));
+    }
+
+    /**
+     * 管辖范围受限时，删除一个不在管辖范围内的组织，应复用"组织不存在"错误文案。
+     */
+    @Test
+    void delete_shouldThrowBusinessException_whenSelfOutOfScope() {
+        OrgEntity entity = buildEntity(1L, "研发部", "DEV", 0L, OrgStatus.ENABLED, 0);
+        when(orgMapper.selectById(1L)).thenReturn(entity);
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(5L)));
+
+        assertThatThrownBy(() -> orgService.delete(1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("组织不存在");
+        verify(orgMapper, never()).updateById(any(OrgEntity.class));
     }
 
     /**

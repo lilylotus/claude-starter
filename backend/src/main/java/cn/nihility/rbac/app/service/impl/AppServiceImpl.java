@@ -135,6 +135,7 @@ public class AppServiceImpl implements AppService {
      */
     @Override
     public AppVO create(AppCreateRequest request) {
+        assertOrgInScope(request.getOrgId());
         checkCodeUnique(request.getCode(), null);
         validateDynamicFields(request, true, null);
 
@@ -159,7 +160,8 @@ public class AppServiceImpl implements AppService {
      */
     @Override
     public AppVO update(Long id, AppUpdateRequest request) {
-        AppEntity entity = getExistingEntity(id);
+        AppEntity entity = getExistingEntityInScope(id);
+        assertOrgInScope(request.getOrgId());
         checkCodeUnique(request.getCode(), id);
         validateDynamicFields(request, false, id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
@@ -196,7 +198,7 @@ public class AppServiceImpl implements AppService {
      */
     @Override
     public void delete(Long id) {
-        AppEntity entity = getExistingEntity(id);
+        AppEntity entity = getExistingEntityInScope(id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(AppStatus.DELETED);
@@ -215,7 +217,7 @@ public class AppServiceImpl implements AppService {
      * @return 更新后的应用详情
      */
     private AppVO changeStatus(Long id, int status) {
-        AppEntity entity = getExistingEntity(id);
+        AppEntity entity = getExistingEntityInScope(id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(status);
@@ -280,6 +282,38 @@ public class AppServiceImpl implements AppService {
             throw new BusinessException("应用不存在");
         }
         return entity;
+    }
+
+    /**
+     * 查询一个未被逻辑删除、且当前所属组织落在当前登录用户管辖组织范围内的应用，供
+     * {@code update}/{@code changeStatus}/{@code delete} 等写操作复用（org-scope-write-guard
+     * change design.md Decision 3）。管辖范围不受限时行为等同于 {@link #getExistingEntity}；
+     * 受限且该应用所属组织不在允许集合内时，复用"应用不存在"错误文案而不是单独的"无权限"
+     * 提示，避免暴露"该 id 存在但你无权限"这一越权探测信号（design.md Decision 2）。
+     *
+     * @param id 应用 id
+     * @return 应用实体
+     */
+    private AppEntity getExistingEntityInScope(Long id) {
+        AppEntity entity = getExistingEntity(id);
+        if (!orgScopeService.isOrgIdAllowed(CurrentUserContext.getUserId(), entity.getOrgId())) {
+            throw new BusinessException("应用不存在");
+        }
+        return entity;
+    }
+
+    /**
+     * 校验新增/移动应用时指定的所属组织 id 是否落在当前登录用户的管辖组织范围内，
+     * 不受限时恒放行；受限且不在允许集合内时直接拒绝，因为校验对象是"要挂到哪个组织下"
+     * 而非某条具体记录，不需要伪装成"不存在"（org-scope-write-guard change design.md
+     * Decision 2）。
+     *
+     * @param orgId 所属组织 id
+     */
+    private void assertOrgInScope(Long orgId) {
+        if (!orgScopeService.isOrgIdAllowed(CurrentUserContext.getUserId(), orgId)) {
+            throw new BusinessException("无权限在管辖范围之外的组织下操作");
+        }
     }
 
     /**

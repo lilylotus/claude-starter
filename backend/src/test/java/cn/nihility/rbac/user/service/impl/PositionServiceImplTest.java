@@ -115,6 +115,13 @@ class PositionServiceImplTest {
                 userDisplayService);
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
         lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.empty());
+        // 委托调用 resolveAllowedOrgIds 的当前打桩结果计算，与真实实现（OrgScopeServiceImpl）
+        // 语义保持一致，用例改写 resolveAllowedOrgIds 打桩时无需再额外单独打桩
+        // isOrgIdAllowed（org-scope-write-guard change design.md Decision 1）。
+        lenient().when(orgScopeService.isOrgIdAllowed(any(), any())).thenAnswer(invocation -> orgScopeService
+                .resolveAllowedOrgIds(invocation.getArgument(0))
+                .map(allowed -> allowed.contains(invocation.getArgument(1)))
+                .orElse(true));
         lenient().when(currentOperatorService.resolveUserId()).thenReturn(1L);
         lenient().when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
     }
@@ -285,6 +292,100 @@ class PositionServiceImplTest {
         verify(userPositionMapper).updateById(entity);
         verify(userPositionMapper, never()).deleteById(any(Long.class));
         verify(operationLogRecorder).recordDelete(eq("position"), eq(10L), any(), any(Map.class));
+    }
+
+    /**
+     * 管辖范围受限时，新增任职记录若所属组织不在管辖范围内，应拒绝创建（org-scope-write-guard
+     * change design.md Decision 2：新建/移动场景直接报"无权限"，不伪装成"不存在"）。
+     */
+    @Test
+    void create_shouldThrowBusinessException_whenOrgIdOutOfScope() {
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(999L)));
+
+        PositionCreateRequest request = new PositionCreateRequest();
+        request.setUserId(1L);
+        request.setOrgId(100L);
+        request.setPositionType("primary");
+        request.setShowOrder(0);
+
+        assertThatThrownBy(() -> positionService.create(request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权限");
+        verify(userPositionMapper, never()).insert(any(UserPositionEntity.class));
+    }
+
+    /**
+     * 管辖范围受限时，更新一条当前所属组织不在管辖范围内的任职记录，应复用"任职记录不存在"
+     * 错误文案，不额外暴露越权探测信号（org-scope-write-guard change design.md Decision 2）。
+     */
+    @Test
+    void update_shouldThrowBusinessException_whenCurrentOrgOutOfScope() {
+        UserPositionEntity entity = buildEntity(10L, 1L, 100L, PositionStatus.ENABLED);
+        when(userPositionMapper.selectById(10L)).thenReturn(entity);
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(999L)));
+
+        PositionUpdateRequest request = new PositionUpdateRequest();
+        request.setOrgId(999L);
+        request.setPositionType("part_time");
+        request.setShowOrder(0);
+
+        assertThatThrownBy(() -> positionService.update(10L, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("任职记录不存在");
+        verify(userPositionMapper, never()).updateById(any(UserPositionEntity.class));
+    }
+
+    /**
+     * 管辖范围受限时，被编辑记录当前所属组织在管辖范围内，但请求的新所属组织不在，
+     * 应拒绝更新（org-scope-write-guard change design.md Decision 2）。
+     */
+    @Test
+    void update_shouldThrowBusinessException_whenNewOrgOutOfScope() {
+        UserPositionEntity entity = buildEntity(10L, 1L, 100L, PositionStatus.ENABLED);
+        when(userPositionMapper.selectById(10L)).thenReturn(entity);
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(100L)));
+
+        PositionUpdateRequest request = new PositionUpdateRequest();
+        request.setOrgId(200L);
+        request.setPositionType("part_time");
+        request.setShowOrder(0);
+
+        assertThatThrownBy(() -> positionService.update(10L, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权限");
+        verify(userPositionMapper, never()).updateById(any(UserPositionEntity.class));
+    }
+
+    /**
+     * 管辖范围受限时，启用一条当前所属组织不在管辖范围内的任职记录，应复用"任职记录不存在"
+     * 错误文案。
+     */
+    @Test
+    void enable_shouldThrowBusinessException_whenCurrentOrgOutOfScope() {
+        UserPositionEntity entity = buildEntity(10L, 1L, 100L, PositionStatus.DISABLED);
+        when(userPositionMapper.selectById(10L)).thenReturn(entity);
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(999L)));
+
+        assertThatThrownBy(() -> positionService.enable(10L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("任职记录不存在");
+        verify(userPositionMapper, never()).updateById(any(UserPositionEntity.class));
+    }
+
+    /**
+     * 管辖范围受限时，删除一条当前所属组织不在管辖范围内的任职记录，应复用"任职记录不存在"
+     * 错误文案。
+     */
+    @Test
+    void delete_shouldThrowBusinessException_whenCurrentOrgOutOfScope() {
+        UserPositionEntity entity = buildEntity(10L, 1L, 100L, PositionStatus.ENABLED);
+        when(userPositionMapper.selectById(10L)).thenReturn(entity);
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(999L)));
+
+        assertThatThrownBy(() -> positionService.delete(10L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("任职记录不存在");
+        verify(userPositionMapper, never()).updateById(any(UserPositionEntity.class));
     }
 
     /**

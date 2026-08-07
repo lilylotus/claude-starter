@@ -60,4 +60,13 @@ public class OrgScopeServiceImpl implements OrgScopeService {
         }
         return Optional.of(allowedOrgIds);
     }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public boolean isOrgIdAllowed(Long userId, Long orgId) {
+        Optional<Set<Long>> allowedOrgIds = resolveAllowedOrgIds(userId);
+        return allowedOrgIds.isEmpty() || allowedOrgIds.get().contains(orgId);
+    }
 }

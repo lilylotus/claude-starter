@@ -172,6 +172,7 @@ public class OrgServiceImpl implements OrgService {
      */
     @Override
     public OrgVO create(OrgCreateRequest request) {
+        assertParentOrgInScope(request.getParentId());
         checkCodeUnique(request.getCode(), null);
         validateDynamicFields(request, true, null);
 
@@ -196,10 +197,17 @@ public class OrgServiceImpl implements OrgService {
      */
     @Override
     public OrgVO update(Long id, OrgUpdateRequest request) {
-        OrgEntity entity = getExistingEntity(id);
+        OrgEntity entity = getExistingEntityInScope(id);
         checkCodeUnique(request.getCode(), id);
         if (Objects.equals(request.getParentId(), id)) {
             throw new BusinessException("上级组织不能是自身");
+        }
+        // 只在上级组织真的发生变化时才校验新 parentId 是否在管辖范围内：被编辑组织自身的
+        // id 已经在 getExistingEntityInScope 校验过，但它的真实上级组织完全可能不在管辖
+        // 范围内（管辖范围的"虚拟根节点"场景），不修改上级组织的编辑不应因此被拒绝
+        // （org-scope-write-guard change design.md Decision 5）
+        if (!Objects.equals(request.getParentId(), entity.getParentId())) {
+            assertParentOrgInScope(request.getParentId());
         }
         validateDynamicFields(request, false, id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
@@ -236,7 +244,7 @@ public class OrgServiceImpl implements OrgService {
      */
     @Override
     public void delete(Long id) {
-        OrgEntity entity = getExistingEntity(id);
+        OrgEntity entity = getExistingEntityInScope(id);
 
         Long childCount = orgMapper.selectCount(new LambdaQueryWrapper<OrgEntity>()
                 .eq(OrgEntity::getParentId, id)
@@ -262,7 +270,7 @@ public class OrgServiceImpl implements OrgService {
      * @return 更新后的组织详情
      */
     private OrgVO changeStatus(Long id, int status) {
-        OrgEntity entity = getExistingEntity(id);
+        OrgEntity entity = getExistingEntityInScope(id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
         entity.setStatus(status);
@@ -379,6 +387,38 @@ public class OrgServiceImpl implements OrgService {
             throw new BusinessException("组织不存在");
         }
         return entity;
+    }
+
+    /**
+     * 查询一个未被逻辑删除、且自身 id 落在当前登录用户管辖组织范围内的组织，供
+     * {@code update}/{@code changeStatus}/{@code delete} 等写操作复用（org-scope-write-guard
+     * change design.md Decision 3）。管辖范围不受限时行为等同于 {@link #getExistingEntity}；
+     * 受限且该组织不在允许集合内时，复用"组织不存在"错误文案而不是单独的"无权限"提示，
+     * 避免向调用者暴露"该 id 存在但你无权限"这一越权探测信号（design.md Decision 2）。
+     *
+     * @param id 组织 id
+     * @return 组织实体
+     */
+    private OrgEntity getExistingEntityInScope(Long id) {
+        OrgEntity entity = getExistingEntity(id);
+        if (!orgScopeService.isOrgIdAllowed(CurrentUserContext.getUserId(), entity.getId())) {
+            throw new BusinessException("组织不存在");
+        }
+        return entity;
+    }
+
+    /**
+     * 校验新增/移动组织时指定的上级组织 id 是否落在当前登录用户的管辖组织范围内，
+     * 不受限时恒放行；受限且不在允许集合内时直接拒绝，因为校验对象是"要挂到哪个组织下"
+     * 而非某条具体记录，不需要伪装成"不存在"（org-scope-write-guard change design.md
+     * Decision 2）。
+     *
+     * @param parentId 上级组织 id
+     */
+    private void assertParentOrgInScope(Long parentId) {
+        if (!orgScopeService.isOrgIdAllowed(CurrentUserContext.getUserId(), parentId)) {
+            throw new BusinessException("无权限在管辖范围之外的组织下操作");
+        }
     }
 
     /**
