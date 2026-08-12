@@ -1,5 +1,6 @@
 package cn.nihility.rbac.metadata.service.impl;
 
+import cn.nihility.rbac.app.sync.mapper.AppSyncFieldMappingMapper;
 import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
@@ -45,6 +46,12 @@ public class MetadataFieldServiceImpl implements MetadataFieldService {
 
     /** 表单字段定义数据访问接口，仅用于判断元数据字段是否被有效定义占用。 */
     private final FormFieldDefinitionMapper formFieldDefinitionMapper;
+
+    /**
+     * 应用同步字段映射数据访问接口，仅用于判断元数据字段是否被应用同步字段映射引用
+     * （app-sync-field-mapping change design.md Decision 9）。
+     */
+    private final AppSyncFieldMappingMapper appSyncFieldMappingMapper;
 
     /** 操作日志记录组件。 */
     private final OperationLogRecorder operationLogRecorder;
@@ -117,6 +124,10 @@ public class MetadataFieldServiceImpl implements MetadataFieldService {
         if (formFieldDefinitionMapper.existsActiveByMetadataFieldId(id)) {
             throw new MetadataFieldInUseException(
                     "元数据字段[" + entity.getFieldName() + "]已被表单字段定义绑定，无法停用");
+        }
+        if (appSyncFieldMappingMapper.existsByMetadataFieldId(id)) {
+            throw new MetadataFieldInUseException(
+                    "元数据字段[" + entity.getFieldName() + "]已被应用同步字段映射引用，无法停用");
         }
         return changeStatus(id, MetadataFieldStatus.DISABLED);
     }

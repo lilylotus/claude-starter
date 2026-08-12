@@ -3,12 +3,25 @@
 // 数据同步范围开关。风格参照 AppDetailView.vue（独立路由、独立拉取数据、左上角"返回"按钮），
 // 区别在于这里是可编辑的配置页而不是只读详情页；三个分区用 el-tabs 切换展示，
 // 参照 FormFieldListView.vue 的外层 tabs 用法。
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, CopyDocument, Delete, Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as appApi from '@/api/app'
-import type { AppConfigVO, SignAlgorithm, SyncMode } from '@/types/app'
+import * as metadataFieldApi from '@/api/metadataField'
+import {
+  SYNC_DOMAIN_FIELD_MAPPING_DOMAINS,
+  SYNC_DOMAIN_OPTIONS,
+  TRANSFORM_TYPE_OPTIONS,
+  type AppConfigVO,
+  type AppSyncDomainConfigVO,
+  type AppSyncFieldMappingVO,
+  type SignAlgorithm,
+  type SyncDomain,
+  type SyncMode,
+  type TransformType,
+} from '@/types/app'
+import { METADATA_FIELD_STATUS_ENABLED, type MetadataField, type MetadataFieldBizType } from '@/types/metadataField'
 import { usePermission } from '@/composables/usePermission'
 
 const route = useRoute()
@@ -29,14 +42,12 @@ const activeTab = ref<'basic' | 'signature' | 'sync'>('basic')
 const signAlgorithmForm = ref<SignAlgorithm>('SHA256')
 const savingSignAlgorithm = ref(false)
 
-// 同步配置卡片：四个数据域开关 + 基础同步配置项（同步方式、通知回调地址）的本地可编辑副本；
+// 同步配置卡片：基础同步配置项（同步方式、通知回调地址）的本地可编辑副本；数据范围（组织/
+// 用户/应用/角色/字典五个数据域各自的启用开关+分页大小+字段映射）改由下方独立的"数据范围"
+// 区块管理，不再是这个表单的一部分（见 openspec/changes/app-sync-field-mapping）。
 // notifyParams 不直接用 Record 编辑（模板里动态 key 不便双向绑定），拆成一个 { key, value }
 // 行数组，保存前再收敛回 Record<string, string>
 const syncForm = ref({
-  syncOrgEnabled: false,
-  syncUserEnabled: false,
-  syncAppEnabled: false,
-  syncDictEnabled: false,
   syncMode: 'PULL' as SyncMode,
   notifyUrl: '',
 })
@@ -69,10 +80,6 @@ function applyConfig(data: AppConfigVO) {
   config.value = data
   signAlgorithmForm.value = data.signAlgorithm
   syncForm.value = {
-    syncOrgEnabled: data.syncOrgEnabled,
-    syncUserEnabled: data.syncUserEnabled,
-    syncAppEnabled: data.syncAppEnabled,
-    syncDictEnabled: data.syncDictEnabled,
     syncMode: data.syncMode,
     notifyUrl: data.notifyUrl,
   }
@@ -94,6 +101,8 @@ async function fetchConfig() {
 
 onMounted(() => {
   fetchConfig()
+  fetchDomainConfigs()
+  ensureFieldMappingLoaded(syncDomainTab.value)
 })
 
 function goBack() {
@@ -195,6 +204,189 @@ async function saveSyncConfig() {
     savingSync.value = false
   }
 }
+
+// ---- 同步配置：数据范围（左侧纵向 tabs，组织/用户/应用/角色/字典 5 个数据域） ----
+
+// 支持字段级同步映射的数据域（组织/用户/应用/角色），字典不展示字段映射表格
+const fieldMappingSupportedDomains = SYNC_DOMAIN_FIELD_MAPPING_DOMAINS
+
+// 当前激活的数据域子 tab
+const syncDomainTab = ref<SyncDomain>('ORG')
+
+// 5 个数据域的启用开关+拉取分页大小，一次性拉取缓存在本地，切换子 tab 不重新请求；
+// 编辑态直接绑定这份缓存本身（这个区块和同步配置其余区块一样是"编辑完点保存"节奏，
+// 没有单独的取消态需要区分本地副本与已加载展示态）
+const domainConfigs = reactive<Record<SyncDomain, { syncEnabled: boolean; pageSize: number }>>({
+  ORG: { syncEnabled: false, pageSize: 20 },
+  USER: { syncEnabled: false, pageSize: 20 },
+  APP: { syncEnabled: false, pageSize: 20 },
+  ROLE: { syncEnabled: false, pageSize: 20 },
+  DICT: { syncEnabled: false, pageSize: 20 },
+})
+const domainConfigLoading = ref(false)
+const savingDomainConfig = ref(false)
+
+// 字段映射表格行的本地可编辑结构：新增未保存的行没有 id（整体替换语义下不需要，
+// 保存时按当前顺序全量提交）
+interface FieldMappingRow {
+  id?: number
+  metadataFieldId: number
+  fieldName: string
+  fieldCode: string
+  appFieldName: string
+  appFieldCode: string
+  transformType: TransformType
+  transformValue: string
+}
+
+// 按数据域缓存字段映射行、可选源字段目录，切换子 tab 时按需请求一次；保存成功后用响应
+// 刷新对应数据域的缓存
+const fieldMappingRowsCache = reactive<Partial<Record<SyncDomain, FieldMappingRow[]>>>({})
+const metadataFieldOptionsCache = reactive<Partial<Record<SyncDomain, MetadataField[]>>>({})
+const fieldMappingLoading = ref(false)
+const savingFieldMapping = ref(false)
+// “新增字段”下拉框当前选中值，选中后立即插入一行并重置为空
+const pendingFieldId = ref<number | null>(null)
+
+const currentFieldMappingRows = computed<FieldMappingRow[]>(() => fieldMappingRowsCache[syncDomainTab.value] ?? [])
+const currentMetadataFieldOptions = computed<MetadataField[]>(
+  () => metadataFieldOptionsCache[syncDomainTab.value] ?? [],
+)
+
+// “新增字段”下拉框可选项：当前数据域下状态为启用、且尚未出现在表格里的元数据字段
+const addableMetadataFieldOptions = computed(() => {
+  const usedIds = new Set(currentFieldMappingRows.value.map((row) => row.metadataFieldId))
+  return currentMetadataFieldOptions.value.filter(
+    (field) => field.status === METADATA_FIELD_STATUS_ENABLED && !usedIds.has(field.id),
+  )
+})
+
+function applyDomainConfigs(rows: AppSyncDomainConfigVO[]) {
+  for (const row of rows) {
+    domainConfigs[row.syncDomain] = { syncEnabled: row.syncEnabled, pageSize: row.pageSize }
+  }
+}
+
+async function fetchDomainConfigs() {
+  domainConfigLoading.value = true
+  try {
+    const rows = await appApi.listAppSyncDomainConfigs(appId.value)
+    applyDomainConfigs(rows)
+  } finally {
+    domainConfigLoading.value = false
+  }
+}
+
+async function saveDomainConfig(domain: SyncDomain) {
+  savingDomainConfig.value = true
+  try {
+    const form = domainConfigs[domain]
+    const data = await appApi.updateAppSyncDomainConfig(appId.value, domain, {
+      syncEnabled: form.syncEnabled,
+      pageSize: form.pageSize,
+    })
+    domainConfigs[domain] = { syncEnabled: data.syncEnabled, pageSize: data.pageSize }
+    ElMessage.success('保存成功')
+  } finally {
+    savingDomainConfig.value = false
+  }
+}
+
+function toFieldMappingRow(vo: AppSyncFieldMappingVO): FieldMappingRow {
+  return {
+    id: vo.id,
+    metadataFieldId: vo.metadataFieldId,
+    fieldName: vo.fieldName,
+    fieldCode: vo.fieldCode,
+    appFieldName: vo.appFieldName,
+    appFieldCode: vo.appFieldCode,
+    transformType: vo.transformType,
+    transformValue: vo.transformValue ?? '',
+  }
+}
+
+// 切到某个数据域子 tab 时，按需加载该数据域的字段映射列表 + 可选源字段目录（各自仅加载一次，
+// 不含字典——字典不支持字段级配置，见 fieldMappingSupportedDomains）
+async function ensureFieldMappingLoaded(domain: SyncDomain) {
+  if (!fieldMappingSupportedDomains.includes(domain)) return
+  if (fieldMappingRowsCache[domain] && metadataFieldOptionsCache[domain]) return
+  fieldMappingLoading.value = true
+  try {
+    const [mappings, fieldPage] = await Promise.all([
+      appApi.listAppSyncFieldMappings(appId.value, domain),
+      metadataFieldApi.getMetadataFieldPageForSyncDomain(domain as MetadataFieldBizType),
+    ])
+    fieldMappingRowsCache[domain] = mappings.map(toFieldMappingRow)
+    metadataFieldOptionsCache[domain] = fieldPage.records
+  } finally {
+    fieldMappingLoading.value = false
+  }
+}
+
+function handleDomainTabChange() {
+  ensureFieldMappingLoaded(syncDomainTab.value)
+}
+
+function handleAddField(metadataFieldId: number | null) {
+  if (!metadataFieldId) return
+  const domain = syncDomainTab.value
+  const field = currentMetadataFieldOptions.value.find((item) => item.id === metadataFieldId)
+  if (!field) return
+  const rows = fieldMappingRowsCache[domain] ?? (fieldMappingRowsCache[domain] = [])
+  rows.push({
+    metadataFieldId: field.id,
+    fieldName: field.fieldName,
+    fieldCode: field.fieldCode,
+    appFieldName: '',
+    appFieldCode: '',
+    transformType: 'NO_TRANSFORM',
+    transformValue: '',
+  })
+  pendingFieldId.value = null
+}
+
+function removeFieldMappingRow(index: number) {
+  fieldMappingRowsCache[syncDomainTab.value]?.splice(index, 1)
+}
+
+function validateFieldMappingRows(rows: FieldMappingRow[]): string {
+  for (const row of rows) {
+    if (!row.appFieldName.trim()) return '应用字段名称不能为空'
+    if (!row.appFieldCode.trim()) return '应用字段编码不能为空'
+    if (row.transformType === 'FIXED_VALUE' && !row.transformValue.trim()) {
+      return '转换方式为固定值时，取值不能为空'
+    }
+    if (row.transformType === 'SCRIPT' && !row.transformValue.trim()) {
+      return '转换方式为转换脚本时，脚本内容不能为空'
+    }
+  }
+  return ''
+}
+
+async function saveFieldMappings() {
+  const domain = syncDomainTab.value
+  const rows = fieldMappingRowsCache[domain] ?? []
+  const validationError = validateFieldMappingRows(rows)
+  if (validationError) {
+    ElMessage.error(validationError)
+    return
+  }
+  savingFieldMapping.value = true
+  try {
+    const payload = rows.map((row) => ({
+      metadataFieldId: row.metadataFieldId,
+      appFieldName: row.appFieldName.trim(),
+      appFieldCode: row.appFieldCode.trim(),
+      transformType: row.transformType,
+      transformValue: row.transformType === 'NO_TRANSFORM' ? null : row.transformValue,
+    }))
+    const data = await appApi.replaceAppSyncFieldMappings(appId.value, domain, payload)
+    fieldMappingRowsCache[domain] = data.map(toFieldMappingRow)
+    ElMessage.success('保存成功')
+  } finally {
+    savingFieldMapping.value = false
+  }
+}
 </script>
 
 <template>
@@ -282,24 +474,127 @@ async function saveSyncConfig() {
             </el-form-item>
           </template>
 
-          <h4 class="app-config__sync-group-title">数据范围</h4>
-          <el-form-item label="组织数据">
-            <el-switch v-model="syncForm.syncOrgEnabled" />
-          </el-form-item>
-          <el-form-item label="用户数据">
-            <el-switch v-model="syncForm.syncUserEnabled" />
-          </el-form-item>
-          <el-form-item label="应用数据">
-            <el-switch v-model="syncForm.syncAppEnabled" />
-          </el-form-item>
-          <el-form-item label="字典数据">
-            <el-switch v-model="syncForm.syncDictEnabled" />
-          </el-form-item>
-
           <el-form-item v-if="hasPermission('AppManagement:app:config:editSync')">
             <el-button type="primary" :loading="savingSync" @click="saveSyncConfig">保存</el-button>
           </el-form-item>
         </el-form>
+
+        <h4 class="app-config__sync-group-title">数据范围</h4>
+        <el-tabs
+          v-model="syncDomainTab"
+          tab-position="left"
+          class="app-config__domain-tabs"
+          @tab-change="handleDomainTabChange"
+        >
+          <el-tab-pane
+            v-for="option in SYNC_DOMAIN_OPTIONS"
+            :key="option.value"
+            :label="option.label"
+            :name="option.value"
+          >
+            <div v-loading="domainConfigLoading" class="app-config__domain-panel">
+              <el-form label-width="110px">
+                <el-form-item label="是否启用">
+                  <el-switch v-model="domainConfigs[option.value].syncEnabled" />
+                </el-form-item>
+                <el-form-item label="拉取分页大小">
+                  <el-input-number v-model="domainConfigs[option.value].pageSize" :min="1" />
+                </el-form-item>
+                <el-form-item v-if="hasPermission('AppManagement:app:config:editSync')">
+                  <el-button
+                    type="primary"
+                    :loading="savingDomainConfig"
+                    @click="saveDomainConfig(option.value)"
+                  >
+                    保存
+                  </el-button>
+                </el-form-item>
+              </el-form>
+
+              <template v-if="fieldMappingSupportedDomains.includes(option.value)">
+                <div class="app-config__field-mapping-toolbar">
+                  <span class="app-config__field-mapping-title">字段映射</span>
+                  <el-select
+                    v-model="pendingFieldId"
+                    placeholder="选择字段新增映射"
+                    filterable
+                    clearable
+                    class="app-config__field-mapping-select"
+                    @change="handleAddField"
+                  >
+                    <el-option
+                      v-for="field in addableMetadataFieldOptions"
+                      :key="field.id"
+                      :label="`${field.fieldName}（${field.fieldCode}）`"
+                      :value="field.id"
+                    />
+                  </el-select>
+                </div>
+
+                <el-table
+                  v-loading="fieldMappingLoading"
+                  :data="currentFieldMappingRows"
+                  border
+                  size="small"
+                  class="app-config__field-mapping-table"
+                >
+                  <el-table-column label="字段名称" prop="fieldName" width="130" />
+                  <el-table-column label="字段编码" prop="fieldCode" width="130" />
+                  <el-table-column label="应用字段名称" min-width="140">
+                    <template #default="{ row }">
+                      <el-input v-model="row.appFieldName" placeholder="请输入应用侧字段名称" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="应用字段编码" min-width="140">
+                    <template #default="{ row }">
+                      <el-input v-model="row.appFieldCode" placeholder="请输入应用侧字段编码" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="转换方式" width="130">
+                    <template #default="{ row }">
+                      <el-select v-model="row.transformType">
+                        <el-option
+                          v-for="item in TRANSFORM_TYPE_OPTIONS"
+                          :key="item.value"
+                          :label="item.label"
+                          :value="item.value"
+                        />
+                      </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="转换取值" min-width="220">
+                    <template #default="{ row }">
+                      <el-input
+                        v-if="row.transformType === 'FIXED_VALUE'"
+                        v-model="row.transformValue"
+                        placeholder="请输入固定值"
+                      />
+                      <el-input
+                        v-else-if="row.transformType === 'SCRIPT'"
+                        v-model="row.transformValue"
+                        type="textarea"
+                        :rows="3"
+                        placeholder="请输入 JavaScript 转换脚本"
+                      />
+                      <span v-else class="app-config__field-mapping-disabled">-</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="70" fixed="right">
+                    <template #default="{ $index }">
+                      <el-button link :icon="Delete" type="danger" @click="removeFieldMappingRow($index)" />
+                    </template>
+                  </el-table-column>
+                </el-table>
+
+                <div v-if="hasPermission('AppManagement:app:config:editSync')" class="app-config__field-mapping-save">
+                  <el-button type="primary" :loading="savingFieldMapping" @click="saveFieldMappings">
+                    保存字段映射
+                  </el-button>
+                </div>
+              </template>
+            </div>
+          </el-tab-pane>
+        </el-tabs>
       </el-tab-pane>
     </el-tabs>
 
@@ -438,5 +733,49 @@ async function saveSyncConfig() {
   .el-input {
     max-width: 220px;
   }
+}
+
+// 数据范围：左侧纵向 tabs（组织/用户/应用/角色/字典），呼应仓库整体的“链式连接”视觉语言，
+// 用一条虚线把每个子 tab 的内容和外层"数据范围"标题隔开
+.app-config__domain-tabs {
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 4px 16px 16px;
+
+  :deep(.el-tabs__nav-wrap)::after {
+    display: none;
+  }
+}
+
+.app-config__domain-panel {
+  min-height: 120px;
+}
+
+.app-config__field-mapping-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0 12px;
+}
+
+.app-config__field-mapping-title {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.app-config__field-mapping-select {
+  width: 260px;
+}
+
+.app-config__field-mapping-table {
+  width: 100%;
+}
+
+.app-config__field-mapping-disabled {
+  color: var(--color-text-tertiary);
+}
+
+.app-config__field-mapping-save {
+  margin-top: 12px;
 }
 </style>

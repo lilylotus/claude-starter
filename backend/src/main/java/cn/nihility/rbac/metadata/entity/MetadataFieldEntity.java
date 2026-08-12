@@ -29,7 +29,7 @@ public class MetadataFieldEntity {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    /** 业务对象类型：ORG/USER/POSITION/APP，创建后不可修改。 */
+    /** 业务对象类型：ORG/USER/POSITION/APP/ROLE，创建后不可修改。 */
     private String bizType;
 
     /** 字段所属表名称，如 tab_org，创建后不可修改。 */

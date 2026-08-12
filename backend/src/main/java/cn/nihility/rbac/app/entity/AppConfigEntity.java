@@ -50,18 +50,6 @@ public class AppConfigEntity {
     /** 接口签名算法：{@code SHA256} 或 {@code SM3}。 */
     private String signAlgorithm;
 
-    /** 是否允许同步组织数据。 */
-    private Boolean syncOrgEnabled;
-
-    /** 是否允许同步用户数据。 */
-    private Boolean syncUserEnabled;
-
-    /** 是否允许同步应用数据。 */
-    private Boolean syncAppEnabled;
-
-    /** 是否允许同步字典数据。 */
-    private Boolean syncDictEnabled;
-
     /**
      * 同步方式：{@code NOTIFY}（通知，本系统主动回调 {@link #notifyUrl}）或 {@code PULL}
      * （拉取，外部系统主动调用本系统接口）。整个应用只有一份，不区分组织/用户/应用/字典

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 应用同步字段映射关联查询：tab_app_sync_field_mapping 关联 tab_metadata_field 回填源
+     字段名称、字段编码（design.md Decision 4：只存 metadata_field_id 外键，不落快照，
+     查询时实时 JOIN 读取）。用 LEFT JOIN（而非 INNER JOIN）是有意为之：若关联的元数据
+     字段被删除（当前接口不提供删除能力，但保留防御性），映射行本身仍应正常返回，只是
+     字段名称/编码为空，不能因为 JOIN 不到就整行消失。 -->
+<mapper namespace="cn.nihility.rbac.app.sync.mapper.AppSyncFieldMappingMapper">
+
+    <select id="selectByAppRefIdAndDomain" resultType="cn.nihility.rbac.app.sync.dto.AppSyncFieldMappingRow">
+        SELECT
+        m.id AS id,
+        m.metadata_field_id AS metadataFieldId,
+        mf.field_name AS fieldName,
+        mf.field_code AS fieldCode,
+        m.app_field_name AS appFieldName,
+        m.app_field_code AS appFieldCode,
+        m.transform_type AS transformType,
+        m.transform_value AS transformValue
+        FROM tab_app_sync_field_mapping m
+        LEFT JOIN tab_metadata_field mf ON mf.id = m.metadata_field_id
+        WHERE m.app_ref_id = #{appRefId}
+        AND m.sync_domain = #{syncDomain}
+        ORDER BY m.id ASC
+    </select>
+
+</mapper>

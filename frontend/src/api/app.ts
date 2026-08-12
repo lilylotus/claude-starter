@@ -3,10 +3,15 @@ import type {
   AppConfigVO,
   AppFormRequest,
   AppRow,
+  AppSyncDomainConfigUpdateRequest,
+  AppSyncDomainConfigVO,
+  AppSyncFieldMappingSaveRequest,
+  AppSyncFieldMappingVO,
   PageResult,
   SecretKeyResult,
   SignAlgorithmUpdateRequest,
   SyncConfigUpdateRequest,
+  SyncDomain,
 } from '@/types/app'
 
 // 应用管理接口封装，组件/store 不直接调用 axios。
@@ -56,7 +61,8 @@ export function updateAppSignAlgorithm(id: number, data: SignAlgorithmUpdateRequ
   return request.put(`/apps/${id}/config/sign-algorithm`, data)
 }
 
-// 修改同步配置（组织/用户/应用/字典四个开关）
+// 修改同步配置（同步方式、通知回调地址/参数；组织/用户/应用/角色/字典的数据范围配置
+// 已迁移到下方 sync/domains、sync/field-mappings 系列接口，不再随这个接口一起提交）
 export function updateAppSyncConfig(id: number, data: SyncConfigUpdateRequest): Promise<AppConfigVO> {
   return request.put(`/apps/${id}/config/sync`, data)
 }
@@ -64,4 +70,37 @@ export function updateAppSyncConfig(id: number, data: SyncConfigUpdateRequest): 
 // 重置 SecretKey，响应体是本次改动里唯一会返回明文密钥的接口，调用方不应长期持有该值
 export function resetAppSecretKey(id: number): Promise<SecretKeyResult> {
   return request.post(`/apps/${id}/config/secret-key/reset`)
+}
+
+// ---- 同步配置·数据范围：数据域（组织/用户/应用/角色/字典）启用开关+分页大小 ----
+
+// 一次性查询该应用的 5 个数据域配置行
+export function listAppSyncDomainConfigs(id: number): Promise<AppSyncDomainConfigVO[]> {
+  return request.get(`/apps/${id}/config/sync/domains`)
+}
+
+// 修改单个数据域的启用开关/拉取分页大小
+export function updateAppSyncDomainConfig(
+  id: number,
+  syncDomain: SyncDomain,
+  data: AppSyncDomainConfigUpdateRequest,
+): Promise<AppSyncDomainConfigVO> {
+  return request.put(`/apps/${id}/config/sync/domains/${syncDomain}`, data)
+}
+
+// ---- 同步配置·字段映射：组织/用户/应用/角色四个数据域的字段级同步映射 ----
+
+// 查询某个数据域当前的字段映射列表（不含字典，字典不支持字段级配置）
+export function listAppSyncFieldMappings(id: number, domain: SyncDomain): Promise<AppSyncFieldMappingVO[]> {
+  return request.get(`/apps/${id}/config/sync/field-mappings`, { params: { domain } })
+}
+
+// 整体替换某个数据域的字段映射列表（先删后插语义，见 design.md Decision 5），
+// 提交完整的当前列表，而不是增量的新增/删除
+export function replaceAppSyncFieldMappings(
+  id: number,
+  domain: SyncDomain,
+  data: AppSyncFieldMappingSaveRequest[],
+): Promise<AppSyncFieldMappingVO[]> {
+  return request.put(`/apps/${id}/config/sync/field-mappings`, data, { params: { domain } })
 }

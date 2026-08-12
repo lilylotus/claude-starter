@@ -34,22 +34,6 @@ public class AppConfigVO {
     @Schema(description = "接口签名算法：SHA256 或 SM3")
     private String signAlgorithm;
 
-    /** 是否允许同步组织数据。 */
-    @Schema(description = "是否允许同步组织数据")
-    private Boolean syncOrgEnabled;
-
-    /** 是否允许同步用户数据。 */
-    @Schema(description = "是否允许同步用户数据")
-    private Boolean syncUserEnabled;
-
-    /** 是否允许同步应用数据。 */
-    @Schema(description = "是否允许同步应用数据")
-    private Boolean syncAppEnabled;
-
-    /** 是否允许同步字典数据。 */
-    @Schema(description = "是否允许同步字典数据")
-    private Boolean syncDictEnabled;
-
     /** 同步方式：NOTIFY（通知）或 PULL（拉取），整个应用一份。 */
     @Schema(description = "同步方式：NOTIFY（通知）或 PULL（拉取）")
     private String syncMode;

@@ -1,7 +1,6 @@
 package cn.nihility.rbac.app.service.impl;
 
 import cn.nihility.rbac.app.config.AppSecretProperties;
-import cn.nihility.rbac.app.constant.AppStatus;
 import cn.nihility.rbac.app.constant.SignAlgorithm;
 import cn.nihility.rbac.app.constant.SyncMode;
 import cn.nihility.rbac.app.dto.AppConfigVO;
@@ -15,7 +14,8 @@ import cn.nihility.rbac.app.mapper.AppMapper;
 import cn.nihility.rbac.app.mapstruct.AppConfigConvert;
 import cn.nihility.rbac.app.service.AppConfigService;
 import cn.nihility.rbac.app.support.AppCredentialGenerator;
-import cn.nihility.rbac.auth.context.CurrentUserContext;
+import cn.nihility.rbac.app.support.AppScopeGuard;
+import cn.nihility.rbac.app.sync.service.AppSyncConfigService;
 import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.common.exception.BusinessException;
@@ -63,6 +63,12 @@ public class AppConfigServiceImpl implements AppConfigService {
     private final AppSecretProperties appSecretProperties;
 
     /**
+     * 应用同步配置业务逻辑接口，新建应用时在同一事务内生成 5 行默认数据域配置
+     * （app-sync-field-mapping change tasks.md 5.3）。
+     */
+    private final AppSyncConfigService appSyncConfigService;
+
+    /**
      * {@inheritDoc}
      */
     @Override
@@ -75,10 +81,6 @@ public class AppConfigServiceImpl implements AppConfigService {
                 .accessKey(AppCredentialGenerator.generateAccessKey())
                 .secretKey(Sm4JdkUtils.encrypt(plainSecretKey, appSecretProperties.getSm4Key()))
                 .signAlgorithm(SignAlgorithm.SHA256)
-                .syncOrgEnabled(false)
-                .syncUserEnabled(false)
-                .syncAppEnabled(false)
-                .syncDictEnabled(false)
                 .syncMode(SyncMode.PULL)
                 .createBy(operator)
                 .createTime(now)
@@ -86,6 +88,7 @@ public class AppConfigServiceImpl implements AppConfigService {
                 .updateTime(now)
                 .build();
         appConfigMapper.insert(entity);
+        appSyncConfigService.createDefaultDomainConfigs(appRefId, operator);
     }
 
     /**
@@ -132,10 +135,6 @@ public class AppConfigServiceImpl implements AppConfigService {
         AppConfigEntity entity = findByAppRefId(appRefId);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
-        entity.setSyncOrgEnabled(request.getSyncOrgEnabled());
-        entity.setSyncUserEnabled(request.getSyncUserEnabled());
-        entity.setSyncAppEnabled(request.getSyncAppEnabled());
-        entity.setSyncDictEnabled(request.getSyncDictEnabled());
         entity.setSyncMode(request.getSyncMode());
         entity.setNotifyUrl(request.getNotifyUrl());
         entity.setNotifyParams(JacksonUtils.toJson(
@@ -174,22 +173,15 @@ public class AppConfigServiceImpl implements AppConfigService {
 
     /**
      * 查询一个未被逻辑删除、且所属组织落在当前登录用户管辖组织范围内的应用实体，供三个写操作
-     * 复用（org-scope-write-guard change design.md Decision 3 的既有模式，参照
-     * {@code AppServiceImpl#getExistingEntityInScope}）。越权与不存在复用同一条"应用不存在"
-     * 错误文案，不额外暴露越权探测信号。
+     * 复用。校验逻辑本身上提为共享工具类 {@link AppScopeGuard}（app-sync-field-mapping change
+     * tasks.md 5.2），本方法只是薄薄的转发，避免每处调用点都要重复传入
+     * {@code appMapper}/{@code orgScopeService} 两个依赖。
      *
      * @param appRefId 应用 id
      * @return 应用实体
      */
     private AppEntity getExistingAppInScope(Long appRefId) {
-        AppEntity appEntity = appMapper.selectById(appRefId);
-        if (appEntity == null || Objects.equals(appEntity.getStatus(), AppStatus.DELETED)) {
-            throw new BusinessException("应用不存在");
-        }
-        if (!orgScopeService.isOrgIdAllowed(CurrentUserContext.getUserId(), appEntity.getOrgId())) {
-            throw new BusinessException("应用不存在");
-        }
-        return appEntity;
+        return AppScopeGuard.getExistingAppInScope(appMapper, orgScopeService, appRefId);
     }
 
     /**
@@ -247,7 +239,9 @@ public class AppConfigServiceImpl implements AppConfigService {
 
     /**
      * 构造对外接口配置的操作日志字段快照，key 为中文字段名。刻意不包含 {@code secretKey}
-     * （无论明文还是密文），签名算法/同步开关的修改复用本快照即可完整覆盖两个写接口涉及的字段。
+     * （无论明文还是密文），签名算法/同步方式的修改复用本快照即可完整覆盖两个写接口涉及的字段。
+     * 数据域启用开关/分页大小/字段映射改由 {@code AppSyncConfigServiceImpl} 单独记录操作日志
+     * （app-sync-field-mapping change tasks.md 5.3），不再出现在本快照中。
      *
      * @param entity 应用对外接口配置实体
      * @return 操作日志字段快照
@@ -257,10 +251,6 @@ public class AppConfigServiceImpl implements AppConfigService {
         snapshot.put("AppId", entity.getAppId());
         snapshot.put("AccessKey", entity.getAccessKey());
         snapshot.put("签名算法", entity.getSignAlgorithm());
-        snapshot.put("同步组织数据", Boolean.TRUE.equals(entity.getSyncOrgEnabled()) ? "开启" : "关闭");
-        snapshot.put("同步用户数据", Boolean.TRUE.equals(entity.getSyncUserEnabled()) ? "开启" : "关闭");
-        snapshot.put("同步应用数据", Boolean.TRUE.equals(entity.getSyncAppEnabled()) ? "开启" : "关闭");
-        snapshot.put("同步字典数据", Boolean.TRUE.equals(entity.getSyncDictEnabled()) ? "开启" : "关闭");
         snapshot.put("同步方式", entity.getSyncMode());
         snapshot.put("通知回调接口地址", entity.getNotifyUrl());
         snapshot.put("通知自定义参数", entity.getNotifyParams());

@@ -1,5 +1,11 @@
 import request from './request'
-import type { FormFieldBizType, MetadataField, MetadataFieldUpdateRequest, PageResult } from '@/types/metadataField'
+import type {
+  FormFieldBizType,
+  MetadataField,
+  MetadataFieldBizType,
+  MetadataFieldUpdateRequest,
+  PageResult,
+} from '@/types/metadataField'
 
 // 元数据字段配置接口封装，组件/store 不直接调用 axios。目录只能通过数据库迁移预置，
 // 本模块不提供新增/删除接口。
@@ -44,4 +50,16 @@ export function fetchAvailableMetadataFields(
   excludeDefinitionId?: number,
 ): Promise<MetadataField[]> {
   return request.get('/metadata-fields/available', { params: { bizType, excludeDefinitionId } })
+}
+
+// 应用同步字段映射选择源字段专用：复用现有分页查询接口（不是上面的 available 接口，见
+// openspec/changes/app-sync-field-mapping/design.md Decision 8——available 接口语义是
+// "未被表单字段定义绑定"，会漏掉已被绑定的核心字段，与字段映射选择源字段的语义不匹配）。
+// bizType 取值范围比 FormFieldBizType 多一个 'ROLE'，一次性拉一页（pageSize 默认 200，
+// 单个数据域的字段数量级在几十条以内，不需要真正的分页交互），调用方按 status 过滤展示。
+export function getMetadataFieldPageForSyncDomain(
+  bizType: MetadataFieldBizType,
+  pageSize = 200,
+): Promise<PageResult<MetadataField>> {
+  return request.get('/metadata-fields', { params: { bizType, pageSize } })
 }

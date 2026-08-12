@@ -23,8 +23,8 @@ public class MetadataFieldVO {
     @Schema(description = "主键 id")
     private Long id;
 
-    /** 业务对象类型：ORG/USER/POSITION/APP。 */
-    @Schema(description = "业务对象类型：ORG/USER/POSITION/APP")
+    /** 业务对象类型：ORG/USER/POSITION/APP/ROLE。 */
+    @Schema(description = "业务对象类型：ORG/USER/POSITION/APP/ROLE")
     private String bizType;
 
     /** 字段所属表名称，如 tab_org。 */

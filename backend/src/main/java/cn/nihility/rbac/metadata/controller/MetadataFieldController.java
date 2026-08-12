@@ -18,13 +18,13 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 元数据字段配置接口，记录组织/用户/任职/应用四类业务对象"可开放配置"的表字段
+ * 元数据字段配置接口，记录组织/用户/任职/应用/角色五类业务对象"可开放配置"的表字段
  * 目录。目录只能通过数据库迁移预置，本接口不提供新增/删除能力，仅支持查询、
  * 编辑（字段名称、字段标识）、启用/停用。
  */
 @RestController
 @RequiredArgsConstructor
-@Tag(name = "元数据字段配置", description = "组织/用户/任职/应用四类业务对象可开放配置的表字段目录维护接口")
+@Tag(name = "元数据字段配置", description = "组织/用户/任职/应用/角色五类业务对象可开放配置的表字段目录维护接口")
 public class MetadataFieldController {
 
     /** 元数据字段配置业务逻辑接口。 */
@@ -38,10 +38,10 @@ public class MetadataFieldController {
      * @param pageSize 每页条数，默认 10 条
      * @return 元数据字段的分页结果
      */
-    @Operation(summary = "分页查询元数据字段", description = "支持按业务对象类型（ORG/USER/POSITION/APP）过滤，不传则查询全部")
+    @Operation(summary = "分页查询元数据字段", description = "支持按业务对象类型（ORG/USER/POSITION/APP/ROLE）过滤，不传则查询全部")
     @GetMapping("/api/metadata-fields")
     public PageResult<MetadataFieldVO> page(
-            @Parameter(description = "业务对象类型：ORG/USER/POSITION/APP")
+            @Parameter(description = "业务对象类型：ORG/USER/POSITION/APP/ROLE")
             @RequestParam(required = false) String bizType,
             @Parameter(description = "页码，默认第 1 页")
             @RequestParam(required = false, defaultValue = "1") Integer page,
@@ -65,7 +65,7 @@ public class MetadataFieldController {
             + "供编辑场景下的改绑下拉框使用，excludeDefinitionId 不存在或对应定义已删除时按普通可用查询处理")
     @GetMapping("/api/metadata-fields/available")
     public List<MetadataFieldVO> available(
-            @Parameter(description = "业务对象类型：ORG/USER/POSITION/APP", required = true)
+            @Parameter(description = "业务对象类型：ORG/USER/POSITION/APP/ROLE", required = true)
             @RequestParam String bizType,
             @Parameter(description = "编辑场景下当前表单字段定义 id，传入时把其当前绑定的元数据字段一并纳入结果")
             @RequestParam(required = false) Long excludeDefinitionId) {

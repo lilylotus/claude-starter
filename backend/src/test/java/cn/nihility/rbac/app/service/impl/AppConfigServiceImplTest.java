@@ -20,6 +20,7 @@ import cn.nihility.rbac.app.entity.AppConfigEntity;
 import cn.nihility.rbac.app.entity.AppEntity;
 import cn.nihility.rbac.app.mapper.AppConfigMapper;
 import cn.nihility.rbac.app.mapper.AppMapper;
+import cn.nihility.rbac.app.sync.service.AppSyncConfigService;
 import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.common.exception.BusinessException;
@@ -42,8 +43,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
  * {@link AppConfigServiceImpl} 的单元测试，重点覆盖默认配置生成、SecretKey 重置、签名算法/
- * 同步配置修改、管辖组织范围校验等分支逻辑（app-api-credentials-config change tasks.md
- * 11.1）。
+ * 同步方式修改、管辖组织范围校验等分支逻辑（app-api-credentials-config change tasks.md
+ * 11.1；组织/用户/应用/角色/字典五个数据域启用开关+分页大小的默认生成改由
+ * {@code AppSyncConfigServiceImpl#createDefaultDomainConfigs} 负责，本测试只验证
+ * {@code AppConfigServiceImpl#createDefaultConfig} 有正确调用该协作方，
+ * app-sync-field-mapping change tasks.md 10.1）。
  */
 @ExtendWith(MockitoExtension.class)
 class AppConfigServiceImplTest {
@@ -75,6 +79,10 @@ class AppConfigServiceImplTest {
     @Mock
     private AppSecretProperties appSecretProperties;
 
+    /** 被测服务的应用同步配置业务逻辑依赖，使用 Mockito 打桩。 */
+    @Mock
+    private AppSyncConfigService appSyncConfigService;
+
     /** 被测服务实例。 */
     private AppConfigServiceImpl appConfigService;
 
@@ -86,7 +94,7 @@ class AppConfigServiceImplTest {
     @BeforeEach
     void setUp() {
         appConfigService = new AppConfigServiceImpl(appConfigMapper, appMapper, orgScopeService,
-                currentOperatorService, operationLogRecorder, appSecretProperties);
+                currentOperatorService, operationLogRecorder, appSecretProperties, appSyncConfigService);
         lenient().when(appSecretProperties.getSm4Key()).thenReturn(SM4_KEY);
         lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.empty());
         lenient().when(orgScopeService.isOrgIdAllowed(any(), any())).thenAnswer(invocation -> orgScopeService
@@ -98,7 +106,8 @@ class AppConfigServiceImplTest {
 
     /**
      * 创建默认配置时，应生成 AppId/AccessKey/SecretKey 凭证三元组，SecretKey 落库前需经
-     * SM4 加密（不落明文），签名算法默认 SHA256，四个同步开关默认全部关闭。
+     * SM4 加密（不落明文），签名算法默认 SHA256，并在同一次调用中委托
+     * {@link AppSyncConfigService#createDefaultDomainConfigs} 生成 5 行默认数据域配置。
      */
     @Test
     void createDefaultConfig_shouldGenerateCredentials_andEncryptSecretKey() {
@@ -118,14 +127,12 @@ class AppConfigServiceImplTest {
         assertThat(captured.getSecretKey()).isNotEqualTo(decrypted);
         assertThat(captured.getSignAlgorithm()).isEqualTo(SignAlgorithm.SHA256);
         assertThat(captured.getSyncMode()).isEqualTo(SyncMode.PULL);
-        assertThat(captured.getSyncOrgEnabled()).isFalse();
-        assertThat(captured.getSyncUserEnabled()).isFalse();
-        assertThat(captured.getSyncAppEnabled()).isFalse();
-        assertThat(captured.getSyncDictEnabled()).isFalse();
         assertThat(captured.getCreateBy()).isEqualTo("1");
         assertThat(captured.getUpdateBy()).isEqualTo("1");
         assertThat(captured.getCreateTime()).isNotNull();
         assertThat(captured.getUpdateTime()).isNotNull();
+
+        verify(appSyncConfigService).createDefaultDomainConfigs(10L, "1");
     }
 
     /**
@@ -327,37 +334,27 @@ class AppConfigServiceImplTest {
      */
     private SyncConfigUpdateRequest validSyncConfigUpdateRequest() {
         SyncConfigUpdateRequest request = new SyncConfigUpdateRequest();
-        request.setSyncOrgEnabled(true);
-        request.setSyncUserEnabled(true);
-        request.setSyncAppEnabled(true);
-        request.setSyncDictEnabled(true);
         request.setSyncMode(SyncMode.PULL);
         return request;
     }
 
     /**
-     * 修改同步配置时，应更新四个开关字段并记录操作日志。
+     * 修改同步方式时，应更新字段并记录操作日志。数据域启用开关/分页大小的修改改由
+     * {@code AppSyncConfigServiceImpl#updateDomainConfig} 单独负责，不在本接口范围内
+     * （app-sync-field-mapping change tasks.md 5.3）。
      */
     @Test
-    void updateSyncConfig_shouldUpdateAllFlags() {
+    void updateSyncConfig_shouldUpdateSyncMode() {
         AppEntity appEntity = buildAppEntity(10L, 100L, AppStatus.ENABLED);
         AppConfigEntity configEntity = buildConfigEntity(10L);
         when(appMapper.selectById(10L)).thenReturn(appEntity);
         when(appConfigMapper.selectOne(any())).thenReturn(configEntity);
 
         SyncConfigUpdateRequest request = new SyncConfigUpdateRequest();
-        request.setSyncOrgEnabled(true);
-        request.setSyncUserEnabled(true);
-        request.setSyncAppEnabled(false);
-        request.setSyncDictEnabled(true);
         request.setSyncMode(SyncMode.PULL);
 
         AppConfigVO vo = appConfigService.updateSyncConfig(10L, request);
 
-        assertThat(vo.getSyncOrgEnabled()).isTrue();
-        assertThat(vo.getSyncUserEnabled()).isTrue();
-        assertThat(vo.getSyncAppEnabled()).isFalse();
-        assertThat(vo.getSyncDictEnabled()).isTrue();
         assertThat(vo.getSyncMode()).isEqualTo(SyncMode.PULL);
         verify(appConfigMapper).updateById(configEntity);
     }
@@ -374,15 +371,11 @@ class AppConfigServiceImplTest {
         when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(100L)));
 
         SyncConfigUpdateRequest request = new SyncConfigUpdateRequest();
-        request.setSyncOrgEnabled(true);
-        request.setSyncUserEnabled(false);
-        request.setSyncAppEnabled(false);
-        request.setSyncDictEnabled(false);
         request.setSyncMode(SyncMode.PULL);
 
         AppConfigVO vo = appConfigService.updateSyncConfig(10L, request);
 
-        assertThat(vo.getSyncOrgEnabled()).isTrue();
+        assertThat(vo.getSyncMode()).isEqualTo(SyncMode.PULL);
         verify(appConfigMapper).updateById(any(AppConfigEntity.class));
     }
 
@@ -396,10 +389,6 @@ class AppConfigServiceImplTest {
         when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(999L)));
 
         SyncConfigUpdateRequest request = new SyncConfigUpdateRequest();
-        request.setSyncOrgEnabled(true);
-        request.setSyncUserEnabled(true);
-        request.setSyncAppEnabled(true);
-        request.setSyncDictEnabled(true);
         request.setSyncMode(SyncMode.PULL);
 
         assertThatThrownBy(() -> appConfigService.updateSyncConfig(10L, request))
@@ -419,10 +408,6 @@ class AppConfigServiceImplTest {
         when(appConfigMapper.selectOne(any())).thenReturn(configEntity);
 
         SyncConfigUpdateRequest request = new SyncConfigUpdateRequest();
-        request.setSyncOrgEnabled(false);
-        request.setSyncUserEnabled(false);
-        request.setSyncAppEnabled(false);
-        request.setSyncDictEnabled(false);
         request.setSyncMode(SyncMode.PULL);
 
         AppConfigVO vo = appConfigService.updateSyncConfig(10L, request);
@@ -440,10 +425,6 @@ class AppConfigServiceImplTest {
         when(appMapper.selectById(10L)).thenReturn(appEntity);
 
         SyncConfigUpdateRequest request = new SyncConfigUpdateRequest();
-        request.setSyncOrgEnabled(false);
-        request.setSyncUserEnabled(false);
-        request.setSyncAppEnabled(false);
-        request.setSyncDictEnabled(false);
         request.setSyncMode(SyncMode.NOTIFY);
 
         assertThatThrownBy(() -> appConfigService.updateSyncConfig(10L, request))
@@ -461,10 +442,6 @@ class AppConfigServiceImplTest {
         when(appMapper.selectById(10L)).thenReturn(appEntity);
 
         SyncConfigUpdateRequest request = new SyncConfigUpdateRequest();
-        request.setSyncOrgEnabled(false);
-        request.setSyncUserEnabled(false);
-        request.setSyncAppEnabled(false);
-        request.setSyncDictEnabled(false);
         request.setSyncMode(SyncMode.NOTIFY);
         request.setNotifyUrl("ftp://not-http-or-https.example.com/callback");
 
@@ -486,10 +463,6 @@ class AppConfigServiceImplTest {
         when(appConfigMapper.selectOne(any())).thenReturn(configEntity);
 
         SyncConfigUpdateRequest request = new SyncConfigUpdateRequest();
-        request.setSyncOrgEnabled(true);
-        request.setSyncUserEnabled(false);
-        request.setSyncAppEnabled(false);
-        request.setSyncDictEnabled(false);
         request.setSyncMode(SyncMode.NOTIFY);
         request.setNotifyUrl("https://partner.example.com/callback");
         request.setNotifyParams(Map.of("token", "abc123", "source", "rbac"));
@@ -570,10 +543,6 @@ class AppConfigServiceImplTest {
                 .accessKey("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
                 .secretKey(Sm4JdkUtils.encrypt("c".repeat(48), SM4_KEY))
                 .signAlgorithm(SignAlgorithm.SHA256)
-                .syncOrgEnabled(false)
-                .syncUserEnabled(false)
-                .syncAppEnabled(false)
-                .syncDictEnabled(false)
                 .syncMode(SyncMode.PULL)
                 .createBy("1")
                 .createTime(now)

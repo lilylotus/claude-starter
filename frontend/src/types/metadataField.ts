@@ -11,6 +11,12 @@ export const FORM_FIELD_BIZ_TYPE_OPTIONS: Array<{ value: FormFieldBizType; label
   { value: 'APP', label: '应用' },
 ]
 
+// 元数据字段目录实际覆盖的业务对象类型比 FormFieldBizType 多一个 'ROLE'：角色数据域仅供
+// app-sync-field-mapping change 新增的"应用同步字段映射"选择源字段使用，不接入表单字段
+// 定义/动态表单渲染管线，因此不并入 FormFieldBizType（那是表单字段定义体系专属的枚举，
+// 见 openspec/changes/app-sync-field-mapping/design.md Decision 7）。
+export type MetadataFieldBizType = FormFieldBizType | 'ROLE'
+
 // 状态常量：2000 = 启用，3000 = 停用（-1000 为逻辑删除，后端接口已过滤，前端不会拿到）。
 export const METADATA_FIELD_STATUS_ENABLED = 2000
 export const METADATA_FIELD_STATUS_DISABLED = 3000
@@ -19,7 +25,7 @@ export const METADATA_FIELD_STATUS_DISABLED = 3000
 // GET /api/metadata-fields/available
 export interface MetadataField {
   id: number
-  bizType: FormFieldBizType
+  bizType: MetadataFieldBizType
   tableName: string
   columnName: string
   columnType: string

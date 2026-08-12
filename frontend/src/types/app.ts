@@ -70,15 +70,14 @@ export type SignAlgorithm = 'SHA256' | 'SM3'
 export type SyncMode = 'NOTIFY' | 'PULL'
 
 // 应用对外接口配置，来自 GET /api/apps/{id}/config、PUT .../sign-algorithm、PUT .../sync
-// 的返回值；出于安全策略，永远不包含 secretKey 字段（明文只在重置接口的响应里出现一次）
+// 的返回值；出于安全策略，永远不包含 secretKey 字段（明文只在重置接口的响应里出现一次）。
+// 数据范围（组织/用户/应用/角色/字典各自的启用开关+分页大小）从 v2 起改由独立的
+// AppSyncDomainConfigVO 五行承载（见下方 GET /api/apps/{id}/config/sync/domains），
+// 不再随这个接口一起返回。
 export interface AppConfigVO {
   appId: string
   accessKey: string
   signAlgorithm: SignAlgorithm
-  syncOrgEnabled: boolean
-  syncUserEnabled: boolean
-  syncAppEnabled: boolean
-  syncDictEnabled: boolean
   syncMode: SyncMode
   // 同步方式为 NOTIFY 时才有意义；PULL 模式下也可能保留上一次填写的值（后端不强制清空）
   notifyUrl: string
@@ -97,10 +96,6 @@ export interface SignAlgorithmUpdateRequest {
 // 修改同步配置请求体，对应 PUT /api/apps/{id}/config/sync；notifyUrl 是否必填取决于 syncMode
 // （NOTIFY 时必填、格式须为 http/https），前端表单需要按 syncMode 联动做提交前校验
 export interface SyncConfigUpdateRequest {
-  syncOrgEnabled: boolean
-  syncUserEnabled: boolean
-  syncAppEnabled: boolean
-  syncDictEnabled: boolean
   syncMode: SyncMode
   notifyUrl: string
   notifyParams: Record<string, string>
@@ -110,4 +105,66 @@ export interface SyncConfigUpdateRequest {
 // 仅此一个接口会返回明文，调用方不应把它存进 Pinia store 或 localStorage
 export interface SecretKeyResult {
   secretKey: string
+}
+
+// ---- 同步配置·数据范围：数据域（组织/用户/应用/角色/字典），与后端
+// app/sync/constant/SyncDomain 对齐 ----
+export type SyncDomain = 'ORG' | 'USER' | 'APP' | 'ROLE' | 'DICT'
+
+export const SYNC_DOMAIN_OPTIONS: Array<{ value: SyncDomain; label: string }> = [
+  { value: 'ORG', label: '组织' },
+  { value: 'USER', label: '用户' },
+  { value: 'APP', label: '应用' },
+  { value: 'ROLE', label: '角色' },
+  { value: 'DICT', label: '字典' },
+]
+
+// 支持字段级同步映射配置的数据域：组织/用户/应用/角色四个，不含字典
+// （字典仍只是布尔开关+分页大小，见 design.md Decision 10）
+export const SYNC_DOMAIN_FIELD_MAPPING_DOMAINS: SyncDomain[] = ['ORG', 'USER', 'APP', 'ROLE']
+
+// 转换方式：不转换 / 固定值 / 转换脚本，与后端 app/sync/constant/TransformType 对齐
+export type TransformType = 'NO_TRANSFORM' | 'FIXED_VALUE' | 'SCRIPT'
+
+export const TRANSFORM_TYPE_OPTIONS: Array<{ value: TransformType; label: string }> = [
+  { value: 'NO_TRANSFORM', label: '不转换' },
+  { value: 'FIXED_VALUE', label: '固定值' },
+  { value: 'SCRIPT', label: '转换脚本' },
+]
+
+// 单个数据域的同步配置行，来自 GET /api/apps/{id}/config/sync/domains、
+// PUT /api/apps/{id}/config/sync/domains/{syncDomain} 的返回值
+export interface AppSyncDomainConfigVO {
+  syncDomain: SyncDomain
+  syncEnabled: boolean
+  pageSize: number
+}
+
+// 修改单个数据域同步配置的请求体，对应 PUT /api/apps/{id}/config/sync/domains/{syncDomain}
+export interface AppSyncDomainConfigUpdateRequest {
+  syncEnabled: boolean
+  pageSize: number
+}
+
+// 字段级同步映射配置行，来自 GET/PUT /api/apps/{id}/config/sync/field-mappings；
+// fieldName/fieldCode 是源字段（元数据字段目录）的实时信息，只读展示，不随请求提交
+export interface AppSyncFieldMappingVO {
+  id: number
+  metadataFieldId: number
+  fieldName: string
+  fieldCode: string
+  appFieldName: string
+  appFieldCode: string
+  transformType: TransformType
+  transformValue: string | null
+}
+
+// 整体替换字段映射列表时单行的请求体，对应 PUT /api/apps/{id}/config/sync/field-mappings
+// 的请求体元素；transformValue 是否必填取决于 transformType（FIXED_VALUE/SCRIPT 必填）
+export interface AppSyncFieldMappingSaveRequest {
+  metadataFieldId: number
+  appFieldName: string
+  appFieldCode: string
+  transformType: TransformType
+  transformValue: string | null
 }

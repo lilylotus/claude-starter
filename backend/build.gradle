@@ -45,6 +45,12 @@ dependencies {
 
     implementation 'org.bouncycastle:bcprov-jdk18on:1.84'
 
+    /* 转换脚本语法校验（不执行），23.1.x 版本线对应 "GraalVM for JDK 21" LTS 发行版，
+       与本项目 JDK 21 工具链对齐；js-community 为纯 Java 解释执行实现，不需要
+       GraalVM 原生发行版，可在标准 OpenJDK 21 上运行 */
+    implementation 'org.graalvm.polyglot:polyglot:23.1.12'
+    implementation 'org.graalvm.polyglot:js-community:23.1.12'
+
 	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'
     annotationProcessor "org.mapstruct:mapstruct-processor:1.6.3"

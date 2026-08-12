@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
+import cn.nihility.rbac.app.sync.mapper.AppSyncFieldMappingMapper;
 import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.formfield.constant.FormFieldStatus;
@@ -46,6 +47,10 @@ class MetadataFieldServiceImplTest {
     @Mock
     private FormFieldDefinitionMapper formFieldDefinitionMapper;
 
+    /** 被测服务的应用同步字段映射数据访问依赖，仅用于判断占用情况，使用 Mockito 打桩。 */
+    @Mock
+    private AppSyncFieldMappingMapper appSyncFieldMappingMapper;
+
     /** 被测服务的操作日志记录组件依赖，使用 Mockito 打桩。 */
     @Mock
     private OperationLogRecorder operationLogRecorder;
@@ -68,7 +73,7 @@ class MetadataFieldServiceImplTest {
     @BeforeEach
     void setUp() {
         metadataFieldService = new MetadataFieldServiceImpl(metadataFieldMapper, formFieldDefinitionMapper,
-                operationLogRecorder, currentOperatorService, userDisplayService);
+                appSyncFieldMappingMapper, operationLogRecorder, currentOperatorService, userDisplayService);
         lenient().when(currentOperatorService.resolveUserId()).thenReturn(1L);
         lenient().when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
     }
@@ -88,13 +93,32 @@ class MetadataFieldServiceImplTest {
     }
 
     /**
-     * 停用一个当前未被任何有效表单字段定义绑定的元数据字段时，应正常停用。
+     * 停用一个当前未被有效表单字段定义绑定、但被应用同步字段映射引用的元数据字段时，
+     * 应拒绝停用并保持状态不变（app-sync-field-mapping change design.md Decision 9）。
+     */
+    @Test
+    void disable_shouldThrowException_whenFieldReferencedByAppSyncFieldMapping() {
+        MetadataFieldEntity entity = buildEntity(1L, "code", MetadataFieldStatus.ENABLED);
+        when(metadataFieldMapper.selectById(1L)).thenReturn(entity);
+        when(formFieldDefinitionMapper.existsActiveByMetadataFieldId(1L)).thenReturn(false);
+        when(appSyncFieldMappingMapper.existsByMetadataFieldId(1L)).thenReturn(true);
+
+        assertThatThrownBy(() -> metadataFieldService.disable(1L))
+                .isInstanceOf(MetadataFieldInUseException.class)
+                .hasMessageContaining("已被应用同步字段映射引用");
+        assertThat(entity.getStatus()).isEqualTo(MetadataFieldStatus.ENABLED);
+    }
+
+    /**
+     * 停用一个当前未被任何有效表单字段定义绑定、也未被应用同步字段映射引用的元数据字段时，
+     * 应正常停用。
      */
     @Test
     void disable_shouldSucceed_whenFieldNotInUse() {
         MetadataFieldEntity entity = buildEntity(1L, "remark", MetadataFieldStatus.ENABLED);
         when(metadataFieldMapper.selectById(1L)).thenReturn(entity);
         when(formFieldDefinitionMapper.existsActiveByMetadataFieldId(1L)).thenReturn(false);
+        when(appSyncFieldMappingMapper.existsByMetadataFieldId(1L)).thenReturn(false);
 
         metadataFieldService.disable(1L);
 
