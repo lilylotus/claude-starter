@@ -1,7 +1,10 @@
 package cn.nihility.rbac.org.mapper;
 
+import cn.nihility.rbac.org.constant.OrgStatus;
 import cn.nihility.rbac.org.entity.OrgEntity;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -26,4 +29,22 @@ public interface OrgMapper extends BaseMapper<OrgEntity> {
      */
     int countByColumnValue(@Param("column") String column, @Param("value") String value,
             @Param("excludeId") Long excludeId);
+
+    /**
+     * 当某组织自身的 {@code code} 发生变化时，把其全部未被逻辑删除的直属子组织的
+     * {@code parentCode} 批量更新为新值，只下沉一层，不递归到孙级（孙级的
+     * {@code parentCode} 指向子级的 {@code code}，未发生变化）（org-add-parent-code
+     * change design.md Decision 2）。
+     *
+     * @param parentId    上级组织 id
+     * @param newParentCode 新的上级组织编码（即上级组织变更后的 {@code code}）
+     * @return 受影响的行数
+     */
+    default int updateChildrenParentCode(Long parentId, String newParentCode) {
+        LambdaUpdateWrapper<OrgEntity> wrapper = Wrappers.<OrgEntity>lambdaUpdate()
+                .eq(OrgEntity::getParentId, parentId)
+                .ne(OrgEntity::getStatus, OrgStatus.DELETED)
+                .set(OrgEntity::getParentCode, newParentCode);
+        return update(null, wrapper);
+    }
 }

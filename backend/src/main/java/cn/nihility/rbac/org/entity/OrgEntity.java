@@ -34,6 +34,9 @@ public class OrgEntity {
     /** 上级组织 id，0 表示顶级/根节点。 */
     private Long parentId;
 
+    /** 上级组织编码，恒等于 parentId 对应父组织当前的 code，顶级组织为空。 */
+    private String parentCode;
+
     /** 状态：2000=启用，3000=停用，-1000=已删除。 */
     private Integer status;
 

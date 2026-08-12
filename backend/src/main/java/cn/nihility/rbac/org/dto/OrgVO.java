@@ -39,6 +39,10 @@ public class OrgVO {
     @Schema(description = "上级组织名称，顶级组织为 null")
     private String parentName;
 
+    /** 上级组织编码，顶级组织为 null。 */
+    @Schema(description = "上级组织编码，顶级组织为 null")
+    private String parentCode;
+
     /** 状态：2000=启用，3000=停用，-1000=已删除。 */
     @Schema(description = "状态：2000=启用，3000=停用，-1000=已删除")
     private Integer status;

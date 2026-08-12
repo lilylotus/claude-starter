@@ -36,6 +36,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 /**
@@ -169,8 +170,12 @@ public class OrgServiceImpl implements OrgService {
 
     /**
      * {@inheritDoc}
+     * <p>
+     * 写入组织记录与解析上级组织编码需在同一事务内完成，因此整个方法标注
+     * {@link Transactional}（org-add-parent-code change design.md Decision 4）。
      */
     @Override
+    @Transactional
     public OrgVO create(OrgCreateRequest request) {
         assertParentOrgInScope(request.getParentId());
         checkCodeUnique(request.getCode(), null);
@@ -180,6 +185,7 @@ public class OrgServiceImpl implements OrgService {
         OrgEntity entity = OrgConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(OrgStatus.ENABLED);
+        entity.setParentCode(resolveParentCode(request.getParentId()));
         entity.setCreateBy(operator);
         entity.setCreateTime(now);
         entity.setUpdateBy(operator);
@@ -194,8 +200,13 @@ public class OrgServiceImpl implements OrgService {
 
     /**
      * {@inheritDoc}
+     * <p>
+     * 主记录写入与"变更上级组织时重新解析 parentCode""自身 code 变更时级联更新直属
+     * 子组织 parentCode"需在同一事务内完成，因此整个方法标注 {@link Transactional}
+     * （org-add-parent-code change design.md Decision 2/4，Risks/Trade-offs）。
      */
     @Override
+    @Transactional
     public OrgVO update(Long id, OrgUpdateRequest request) {
         OrgEntity entity = getExistingEntityInScope(id);
         checkCodeUnique(request.getCode(), id);
@@ -212,15 +223,41 @@ public class OrgServiceImpl implements OrgService {
         validateDynamicFields(request, false, id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
+        Long previousParentId = entity.getParentId();
+        String previousCode = entity.getCode();
+        boolean parentChanged = !Objects.equals(request.getParentId(), previousParentId);
+
         OrgConvert.INSTANCE.updateEntity(request, entity);
+        if (parentChanged) {
+            entity.setParentCode(resolveParentCode(request.getParentId()));
+        }
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         orgMapper.updateById(entity);
+
+        if (!Objects.equals(previousCode, entity.getCode())) {
+            orgMapper.updateChildrenParentCode(id, entity.getCode());
+        }
 
         operationLogRecorder.recordUpdate(OperationLogResourceType.ORG, id, entity.getName(),
                 beforeSnapshot, toLogSnapshot(entity));
 
         return getById(id);
+    }
+
+    /**
+     * 按上级组织 id 解析其当前的组织编码，供创建/变更上级组织时回填 {@code parentCode}
+     * 使用；{@code parentId} 为 0（顶级组织）时返回 {@code null}（org-add-parent-code
+     * change design.md Decision 3/4）。
+     *
+     * @param parentId 上级组织 id
+     * @return 上级组织当前的编码，顶级组织或父组织不存在时为 {@code null}
+     */
+    private String resolveParentCode(Long parentId) {
+        if (parentId == null || parentId == ROOT_PARENT_ID) {
+            return null;
+        }
+        return Optional.ofNullable(orgMapper.selectById(parentId)).map(OrgEntity::getCode).orElse(null);
     }
 
     /**
@@ -533,6 +570,7 @@ public class OrgServiceImpl implements OrgService {
         snapshot.put("组织名称", entity.getName());
         snapshot.put("组织编码", entity.getCode());
         snapshot.put("上级组织", parentName);
+        snapshot.put("上级组织编码", entity.getParentCode());
         snapshot.put("显示序号", entity.getShowOrder());
         snapshot.put("备注", entity.getRemark());
         snapshot.put("状态", statusLabel(entity.getStatus()));

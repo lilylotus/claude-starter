@@ -10,6 +10,8 @@ export interface OrgTreeNode {
   name: string
   code: string
   parentId: number
+  // 上级组织编码，纯只读派生字段（由后端根据 parentId 自动回填），顶级组织为空
+  parentCode?: string
   status: number
   showOrder: number
   children: OrgTreeNode[]
@@ -22,6 +24,8 @@ export interface OrgRow {
   code: string
   parentId: number
   parentName: string
+  // 上级组织编码，纯只读派生字段（由后端根据 parentId 自动回填），顶级组织为空
+  parentCode?: string
   status: number
   showOrder: number
   remark: string

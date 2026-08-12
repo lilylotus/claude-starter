@@ -1,17 +1,23 @@
 -- ----------------------------------------------------------------------------
 -- RBAC 权限管理系统 - 数据库基线脚本（Flyway 迁移版本 V1）
--- 本文件由原 V1~V9 共 9 个迁移文件合并而来，代表这些迁移按顺序执行完毕后的最终
--- 数据库状态（建表 + 全部种子数据），不再保留中间过程中的 ALTER/UPDATE 步骤。
+-- 本文件由原 V1~V11 共 11 个迁移文件合并而来（第三次基线合并），代表这些迁移按
+-- 顺序执行完毕后的最终数据库状态（全部 22 张表的建表语句 + 全部种子数据），不再
+-- 保留中间过程中的 ALTER/UPDATE 步骤。整体按"先建表、后插入有依赖关系的种子数据"
+-- 的顺序线性组织。
 -- 数据库需提前手动创建，例如：
 --   CREATE DATABASE rbac_demo DEFAULT CHARACTER SET utf8mb4;
--- 注意：本地开发库如果已经跑过旧的 V1~V9，需要先清空该库（或删除
+-- 注意：本地开发库如果已经跑过旧的 V1~V11，需要先清空该库（或删除
 -- flyway_schema_history 表）后重新执行本文件，否则 Flyway 会因为找不到对应版本号
 -- 的历史文件而报错。
 -- ----------------------------------------------------------------------------
 
 -- ============================================================================
--- 组织管理模块
+-- 第一部分：建表语句（共 22 张表）
 -- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 组织管理模块
+-- ----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS `tab_org`
 (
@@ -19,6 +25,7 @@ CREATE TABLE IF NOT EXISTS `tab_org`
     `name`        VARCHAR(64)  NOT NULL COMMENT '组织名称',
     `code`        VARCHAR(64)  NOT NULL COMMENT '组织编码',
     `parent_id`   BIGINT       NOT NULL DEFAULT 0 COMMENT '上级组织 id，0 表示顶级/根节点',
+    `parent_code` VARCHAR(64)  NULL COMMENT '上级组织编码',
     `status`      INT          NOT NULL DEFAULT 2000 COMMENT '状态：2000=启用，3000=停用，-1000=已删除（逻辑删除）',
     `show_order`  INT          NOT NULL DEFAULT 0 COMMENT '显示序号，值越大越靠前',
     `remark`      VARCHAR(255) NULL COMMENT '备注',
@@ -44,9 +51,9 @@ CREATE TABLE IF NOT EXISTS `tab_org`
   COLLATE = utf8mb4_general_ci
   COMMENT = '组织机构表';
 
--- ============================================================================
+-- ----------------------------------------------------------------------------
 -- 字典管理模块
--- ============================================================================
+-- ----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS `tab_dict_type`
 (
@@ -88,47 +95,9 @@ CREATE TABLE IF NOT EXISTS `tab_dict_item`
   COLLATE = utf8mb4_general_ci
   COMMENT = '字典项表';
 
--- 预置"任职类型"字典数据，供用户管理模块任职记录的 positionType 字段消费
-INSERT INTO `tab_dict_type` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES ('任职类型', 'position_type', 0, '用户管理模块任职类型字段的数据来源', 2000, 'admin', NOW(), 'admin', NOW());
-
-INSERT INTO `tab_dict_item` (`dict_type_id`, `label`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-SELECT `id`, '主职', 'primary', 3, NULL, 2000, 'admin', NOW(), 'admin', NOW()
-FROM `tab_dict_type`
-WHERE `code` = 'position_type';
-
-INSERT INTO `tab_dict_item` (`dict_type_id`, `label`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-SELECT `id`, '兼职', 'part_time', 2, NULL, 2000, 'admin', NOW(), 'admin', NOW()
-FROM `tab_dict_type`
-WHERE `code` = 'position_type';
-
-INSERT INTO `tab_dict_item` (`dict_type_id`, `label`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-SELECT `id`, '挂职', 'temporary', 1, NULL, 2000, 'admin', NOW(), 'admin', NOW()
-FROM `tab_dict_type`
-WHERE `code` = 'position_type';
-
--- 预置"性别"字典数据，供用户管理模块的 gender 字段消费
-INSERT INTO `tab_dict_type` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES ('性别', 'gender', 0, '用户管理模块性别字段的数据来源', 2000, 'admin', NOW(), 'admin', NOW());
-
-INSERT INTO `tab_dict_item` (`dict_type_id`, `label`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-SELECT `id`, '未知', 'unknown', 1, NULL, 2000, 'admin', NOW(), 'admin', NOW()
-FROM `tab_dict_type`
-WHERE `code` = 'gender';
-
-INSERT INTO `tab_dict_item` (`dict_type_id`, `label`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-SELECT `id`, '男', 'male', 2, NULL, 2000, 'admin', NOW(), 'admin', NOW()
-FROM `tab_dict_type`
-WHERE `code` = 'gender';
-
-INSERT INTO `tab_dict_item` (`dict_type_id`, `label`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-SELECT `id`, '女', 'female', 3, NULL, 2000, 'admin', NOW(), 'admin', NOW()
-FROM `tab_dict_type`
-WHERE `code` = 'gender';
-
--- ============================================================================
+-- ----------------------------------------------------------------------------
 -- 用户管理 / 任职管理模块
--- ============================================================================
+-- ----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS `tab_user`
 (
@@ -216,9 +185,9 @@ CREATE TABLE IF NOT EXISTS `tab_user_password` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
   COMMENT = '用户密码表，每个用户仅保留一条当前有效密码记录，改密即整行 UPDATE，不保留历史密码';
 
--- ============================================================================
+-- ----------------------------------------------------------------------------
 -- 应用管理模块
--- ============================================================================
+-- ----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS `tab_app` (
     `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
@@ -249,9 +218,79 @@ CREATE TABLE IF NOT EXISTS `tab_app` (
     KEY `idx_tab_app_code` (`code`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '应用主数据表';
 
--- ============================================================================
+-- 应用对外接口凭证配置表：与 tab_app 一对一，存放 AppId/AccessKey/SecretKey、签名
+-- 算法与基础同步配置（同步方式 + 通知回调地址/参数）。列名已核对
+-- MySQL/PostgreSQL/Oracle/SQL Server 保留字：app_id/open_app_id/access_key/
+-- secret_key/sign_algorithm/sync_mode/notify_url/notify_params 均非保留字。
+CREATE TABLE IF NOT EXISTS `tab_app_config` (
+    `id`             BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `app_id`         BIGINT       NOT NULL COMMENT '所属应用 id，关联 tab_app.id，一对一唯一',
+    `open_app_id`    VARCHAR(64)  NOT NULL COMMENT '对外应用标识（AppId），系统生成，全局唯一，24 位随机十六进制，不带前缀',
+    `access_key`     VARCHAR(64)  NOT NULL COMMENT '对外接口 AccessKey，系统生成，全局唯一，32 位随机十六进制，不带前缀',
+    `secret_key`     VARCHAR(255) NOT NULL COMMENT '对外接口 SecretKey，落库前经 SM4 对称加密（Base64），不存明文，仅重置接口单次返回明文',
+    `sign_algorithm` VARCHAR(16)  NOT NULL DEFAULT 'SHA256' COMMENT '接口签名算法：SHA256 或 SM3',
+    `sync_mode`      VARCHAR(16)  NOT NULL DEFAULT 'PULL' COMMENT '同步方式：NOTIFY=通知（本系统主动回调外部接口），PULL=拉取（外部系统主动调用本系统接口）',
+    `notify_url`     VARCHAR(255)          DEFAULT NULL COMMENT '通知回调接口地址（http/https），sync_mode=NOTIFY 时必填',
+    `notify_params`  TEXT                  DEFAULT NULL COMMENT '通知请求自定义参数，JSON 对象（key-value 均为字符串），sync_mode=PULL 时通常为空',
+    `create_by`      VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
+    `create_time`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`      VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
+    `update_time`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_app_config_app_id` (`app_id`),
+    UNIQUE KEY `uk_tab_app_config_open_app_id` (`open_app_id`),
+    UNIQUE KEY `uk_tab_app_config_access_key` (`access_key`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+  COMMENT = '应用对外接口凭证配置表，与 tab_app 一对一，无独立 status，随所属应用整体维护';
+
+-- 应用同步数据域配置表：每个应用固定 5 行，分别对应组织/用户/应用/角色/字典五个
+-- 数据域，每行携带"是否启用"与"每次拉取分页大小"两个属性。列名已核对
+-- MySQL/PostgreSQL/Oracle/SQL Server 保留字：app_ref_id/sync_domain/sync_enabled/
+-- page_size 均非保留字（不用更容易和 SQL 标准 DOMAIN 关键字混淆的 domain/enabled）。
+-- 全新数据库上无种子数据（应用类数据是运行时业务数据，不通过 Flyway 种子）。
+CREATE TABLE IF NOT EXISTS `tab_app_sync_domain_config` (
+    `id`           BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `app_ref_id`   BIGINT      NOT NULL COMMENT '所属应用 id，关联 tab_app.id',
+    `sync_domain`  VARCHAR(16) NOT NULL COMMENT '数据域：ORG/USER/APP/ROLE/DICT',
+    `sync_enabled` TINYINT(1)  NOT NULL DEFAULT 0 COMMENT '是否允许同步该数据域：0=否，1=是',
+    `page_size`    INT         NOT NULL DEFAULT 20 COMMENT '每次拉取分页大小',
+    `create_by`    VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`    VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_app_sync_domain_config_app_domain` (`app_ref_id`, `sync_domain`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+  COMMENT = '应用同步数据域配置表，每个应用固定 5 行（组织/用户/应用/角色/字典）';
+
+-- 应用同步字段映射表：为组织/用户/应用/角色四个数据域（不含字典）提供字段级同步
+-- 映射配置，每行关联一个 tab_metadata_field 记录（同步的源字段，字段名称/字段编码
+-- 实时 JOIN 读取，不落快照），加上应用侧目标字段名称/编码、转换方式与转换取值。
+-- 列名已核对 MySQL/PostgreSQL/Oracle/SQL Server 保留字：app_ref_id/sync_domain/
+-- metadata_field_id/app_field_name/app_field_code/transform_type/transform_value
+-- 均非保留字。全新数据库上无种子数据。
+CREATE TABLE IF NOT EXISTS `tab_app_sync_field_mapping` (
+    `id`                BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `app_ref_id`        BIGINT       NOT NULL COMMENT '所属应用 id，关联 tab_app.id',
+    `sync_domain`       VARCHAR(16)  NOT NULL COMMENT '数据域：ORG/USER/APP/ROLE',
+    `metadata_field_id` BIGINT       NOT NULL COMMENT '同步的源字段，关联 tab_metadata_field.id',
+    `app_field_name`    VARCHAR(128) NOT NULL COMMENT '应用侧目标字段名称，管理员手工填写',
+    `app_field_code`    VARCHAR(128) NOT NULL COMMENT '应用侧目标字段编码，管理员手工填写',
+    `transform_type`    VARCHAR(16)  NOT NULL DEFAULT 'NO_TRANSFORM'
+        COMMENT '转换方式：NO_TRANSFORM=不转换，FIXED_VALUE=固定值，SCRIPT=转换脚本',
+    `transform_value`   TEXT         NULL COMMENT '转换取值：固定值的具体值，或脚本源码，NO_TRANSFORM 时为空',
+    `create_by`         VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
+    `create_time`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`         VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
+    `update_time`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_app_sync_field_mapping` (`app_ref_id`, `sync_domain`, `metadata_field_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+  COMMENT = '应用同步字段映射表，组织/用户/应用/角色四个数据域各自的字段级同步映射配置';
+
+-- ----------------------------------------------------------------------------
 -- 角色管理模块
--- ============================================================================
+-- ----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS `tab_role` (
     `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
@@ -268,9 +307,9 @@ CREATE TABLE IF NOT EXISTS `tab_role` (
     KEY `idx_tab_role_code` (`code`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '角色主数据表';
 
--- ============================================================================
+-- ----------------------------------------------------------------------------
 -- 权限点管理模块
--- ============================================================================
+-- ----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS `tab_permission` (
     `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
@@ -306,9 +345,9 @@ CREATE TABLE IF NOT EXISTS `tab_role_permission` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
   COMMENT = '角色权限点关联表，无独立 status，随角色整体同步、物理删除';
 
--- ============================================================================
+-- ----------------------------------------------------------------------------
 -- 菜单管理模块（菜单/按钮/API 资源）
--- ============================================================================
+-- ----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS `tab_menu` (
     `id`            BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
@@ -328,248 +367,9 @@ CREATE TABLE IF NOT EXISTS `tab_menu` (
     KEY `idx_tab_menu_code` (`code`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '菜单/按钮/API 资源主数据表';
 
--- ---- 第一层：侧边栏一级导航分组（resourceType = 1 菜单，parentId = 0） ----
-
-INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
-                         `create_time`, `update_by`, `update_time`)
-VALUES ('身份管理', 'identity', 0, 1, 40, '侧边栏一级导航分组', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('应用管理', 'application', 0, 1, 30, '侧边栏一级导航分组', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('权限管理', 'permission', 0, 1, 20, '侧边栏一级导航分组', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('系统管理', 'system', 0, 1, 10, '侧边栏一级导航分组', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('日志管理', 'log', 0, 1, 5, '侧边栏一级导航分组', 2000, 'admin', NOW(), 'admin', NOW());
-
-SET @identity_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'identity');
-SET @application_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'application');
-SET @permission_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'permission');
-SET @system_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'system');
-SET @log_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'log');
-
--- ---- 第二层：8 个已实现管理页面（resourceType = 1 菜单） ----
-
-INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
-                         `create_time`, `update_by`, `update_time`)
-VALUES ('组织管理', 'OrgManagement:org:view', @identity_id, 1, 30, '组织管理页面访问（含左侧组织树浏览）', 2000,
-        'admin', NOW(), 'admin', NOW()),
-       ('用户管理', 'UserManagement:user:view', @identity_id, 1, 20, '用户管理页面访问', 2000, 'admin', NOW(),
-        'admin', NOW()),
-       ('任职管理', 'PositionManagement:position:view', @identity_id, 1, 10, '任职管理页面访问', 2000, 'admin',
-        NOW(), 'admin', NOW()),
-       ('应用管理', 'AppManagement:app:view', @application_id, 1, 10, '应用管理页面访问', 2000, 'admin', NOW(),
-        'admin', NOW()),
-       ('角色管理', 'RoleManagement:role:view', @permission_id, 1, 20, '角色管理页面访问', 2000, 'admin', NOW(),
-        'admin', NOW()),
-       ('权限点管理', 'PermissionManagement:permission:view', @permission_id, 1, 10, '权限点管理页面访问', 2000,
-        'admin', NOW(), 'admin', NOW()),
-       ('菜单管理', 'MenuManagement:menu:view', @system_id, 1, 20, '菜单/资源管理页面访问', 2000, 'admin', NOW(),
-        'admin', NOW()),
-       ('字典管理', 'DictManagement:dictType:view', @system_id, 1, 10, '字典管理页面访问（含字典类型列表）', 2000,
-        'admin', NOW(), 'admin', NOW());
-
-SET @org_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'OrgManagement:org:view');
-SET @user_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'UserManagement:user:view');
-SET @position_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'PositionManagement:position:view');
-SET @app_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'AppManagement:app:view');
-SET @role_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'RoleManagement:role:view');
-SET @permission_point_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'PermissionManagement:permission:view');
-SET @menu_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'MenuManagement:menu:view');
-SET @dict_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'DictManagement:dictType:view');
-
--- ---- 第三层：按钮（resourceType = 2 按钮） ----
-
--- 组织管理（含导入相关按钮：下载模板、批量导入）
-INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
-                         `create_time`, `update_by`, `update_time`)
-VALUES ('新增组织', 'OrgManagement:org:add', @org_id, 2, 60, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('查看组织详情', 'OrgManagement:org:detail', @org_id, 2, 50, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('编辑组织', 'OrgManagement:org:edit', @org_id, 2, 40, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('启用组织', 'OrgManagement:org:enable', @org_id, 2, 30, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('停用组织', 'OrgManagement:org:disable', @org_id, 2, 20, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('删除组织', 'OrgManagement:org:delete', @org_id, 2, 10, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('下载组织导入模板', 'OrgManagement:org:importTemplate', @org_id, 2, 5, NULL, 2000, 'admin', NOW(), 'admin',
-        NOW()),
-       ('批量导入组织', 'OrgManagement:org:import', @org_id, 2, 0, NULL, 2000, 'admin', NOW(), 'admin', NOW());
-
--- 用户管理（含重置密码按钮、导入相关按钮：下载模板、批量导入）
-INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
-                         `create_time`, `update_by`, `update_time`)
-VALUES ('新增用户', 'UserManagement:user:add', @user_id, 2, 60, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('查看用户详情', 'UserManagement:user:detail', @user_id, 2, 50, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('编辑用户', 'UserManagement:user:edit', @user_id, 2, 40, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('启用用户', 'UserManagement:user:enable', @user_id, 2, 30, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('停用用户', 'UserManagement:user:disable', @user_id, 2, 20, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('重置密码', 'UserManagement:user:resetPassword', @user_id, 2, 15, NULL, 2000, 'admin', NOW(), 'admin',
-        NOW()),
-       ('删除用户', 'UserManagement:user:delete', @user_id, 2, 10, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('下载用户导入模板', 'UserManagement:user:importTemplate', @user_id, 2, 5, NULL, 2000, 'admin', NOW(), 'admin',
-        NOW()),
-       ('批量导入用户', 'UserManagement:user:import', @user_id, 2, 0, NULL, 2000, 'admin', NOW(), 'admin', NOW());
-
--- 任职管理（含导入相关按钮：下载模板、批量导入）
-INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
-                         `create_time`, `update_by`, `update_time`)
-VALUES ('新增任职记录', 'PositionManagement:position:add', @position_id, 2, 60, NULL, 2000, 'admin', NOW(), 'admin',
-        NOW()),
-       ('查看任职详情', 'PositionManagement:position:detail', @position_id, 2, 50, NULL, 2000, 'admin', NOW(),
-        'admin', NOW()),
-       ('编辑任职记录', 'PositionManagement:position:edit', @position_id, 2, 40, NULL, 2000, 'admin', NOW(), 'admin',
-        NOW()),
-       ('启用任职记录', 'PositionManagement:position:enable', @position_id, 2, 30, NULL, 2000, 'admin', NOW(),
-        'admin', NOW()),
-       ('停用任职记录', 'PositionManagement:position:disable', @position_id, 2, 20, NULL, 2000, 'admin', NOW(),
-        'admin', NOW()),
-       ('删除任职记录', 'PositionManagement:position:delete', @position_id, 2, 10, NULL, 2000, 'admin', NOW(),
-        'admin', NOW()),
-       ('下载任职导入模板', 'PositionManagement:position:importTemplate', @position_id, 2, 5, NULL, 2000, 'admin',
-        NOW(), 'admin', NOW()),
-       ('批量导入任职记录', 'PositionManagement:position:import', @position_id, 2, 0, NULL, 2000, 'admin', NOW(),
-        'admin', NOW());
-
--- 应用管理（含导入相关按钮：下载模板、批量导入）
-INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
-                         `create_time`, `update_by`, `update_time`)
-VALUES ('新增应用', 'AppManagement:app:add', @app_id, 2, 60, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('查看应用详情', 'AppManagement:app:detail', @app_id, 2, 50, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('编辑应用', 'AppManagement:app:edit', @app_id, 2, 40, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('启用应用', 'AppManagement:app:enable', @app_id, 2, 30, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('停用应用', 'AppManagement:app:disable', @app_id, 2, 20, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('删除应用', 'AppManagement:app:delete', @app_id, 2, 10, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('下载应用导入模板', 'AppManagement:app:importTemplate', @app_id, 2, 5, NULL, 2000, 'admin', NOW(), 'admin',
-        NOW()),
-       ('批量导入应用', 'AppManagement:app:import', @app_id, 2, 0, NULL, 2000, 'admin', NOW(), 'admin', NOW());
-
--- 角色管理
-INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
-                         `create_time`, `update_by`, `update_time`)
-VALUES ('新增角色', 'RoleManagement:role:add', @role_id, 2, 60, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('查看角色详情', 'RoleManagement:role:detail', @role_id, 2, 50, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('编辑角色', 'RoleManagement:role:edit', @role_id, 2, 40, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('启用角色', 'RoleManagement:role:enable', @role_id, 2, 30, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('停用角色', 'RoleManagement:role:disable', @role_id, 2, 20, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('删除角色', 'RoleManagement:role:delete', @role_id, 2, 10, NULL, 2000, 'admin', NOW(), 'admin', NOW());
-
--- 权限点管理
-INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
-                         `create_time`, `update_by`, `update_time`)
-VALUES ('新增权限点', 'PermissionManagement:permission:add', @permission_point_id, 2, 60, NULL, 2000, 'admin', NOW(),
-        'admin', NOW()),
-       ('查看权限点详情', 'PermissionManagement:permission:detail', @permission_point_id, 2, 50, NULL, 2000, 'admin',
-        NOW(), 'admin', NOW()),
-       ('编辑权限点', 'PermissionManagement:permission:edit', @permission_point_id, 2, 40, NULL, 2000, 'admin',
-        NOW(), 'admin', NOW()),
-       ('启用权限点', 'PermissionManagement:permission:enable', @permission_point_id, 2, 30, NULL, 2000, 'admin',
-        NOW(), 'admin', NOW()),
-       ('停用权限点', 'PermissionManagement:permission:disable', @permission_point_id, 2, 20, NULL, 2000, 'admin',
-        NOW(), 'admin', NOW()),
-       ('删除权限点', 'PermissionManagement:permission:delete', @permission_point_id, 2, 10, NULL, 2000, 'admin',
-        NOW(), 'admin', NOW());
-
--- 菜单管理
-INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
-                         `create_time`, `update_by`, `update_time`)
-VALUES ('新增资源', 'MenuManagement:menu:add', @menu_id, 2, 60, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('查看资源详情', 'MenuManagement:menu:detail', @menu_id, 2, 50, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('编辑资源', 'MenuManagement:menu:edit', @menu_id, 2, 40, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('启用资源', 'MenuManagement:menu:enable', @menu_id, 2, 30, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('停用资源', 'MenuManagement:menu:disable', @menu_id, 2, 20, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('删除资源', 'MenuManagement:menu:delete', @menu_id, 2, 10, NULL, 2000, 'admin', NOW(), 'admin', NOW());
-
--- 字典管理（字典类型 + 字典项两组按钮，同挂在字典管理页面节点下）
-INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
-                         `create_time`, `update_by`, `update_time`)
-VALUES ('新增字典类型', 'DictManagement:dictType:add', @dict_id, 2, 100, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('查看字典类型详情', 'DictManagement:dictType:detail', @dict_id, 2, 95, NULL, 2000, 'admin', NOW(), 'admin',
-        NOW()),
-       ('编辑字典类型', 'DictManagement:dictType:edit', @dict_id, 2, 90, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('启用字典类型', 'DictManagement:dictType:enable', @dict_id, 2, 80, NULL, 2000, 'admin', NOW(), 'admin',
-        NOW()),
-       ('停用字典类型', 'DictManagement:dictType:disable', @dict_id, 2, 70, NULL, 2000, 'admin', NOW(), 'admin',
-        NOW()),
-       ('删除字典类型', 'DictManagement:dictType:delete', @dict_id, 2, 60, NULL, 2000, 'admin', NOW(), 'admin',
-        NOW()),
-       ('新增字典项', 'DictManagement:dictItem:add', @dict_id, 2, 50, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('查看字典项详情', 'DictManagement:dictItem:detail', @dict_id, 2, 45, NULL, 2000, 'admin', NOW(), 'admin',
-        NOW()),
-       ('编辑字典项', 'DictManagement:dictItem:edit', @dict_id, 2, 40, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('启用字典项', 'DictManagement:dictItem:enable', @dict_id, 2, 30, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('停用字典项', 'DictManagement:dictItem:disable', @dict_id, 2, 20, NULL, 2000, 'admin', NOW(), 'admin',
-        NOW()),
-       ('删除字典项', 'DictManagement:dictItem:delete', @dict_id, 2, 10, NULL, 2000, 'admin', NOW(), 'admin', NOW());
-
--- 管理员管理（挂在 permission 一级分组下，排在角色管理、权限点管理之后）
-INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
-                         `create_time`, `update_by`, `update_time`)
-VALUES ('管理员管理', 'AdminManagement:admin:view', @permission_id, 1, 5, '管理员管理页面访问', 2000, 'admin',
-        NOW(), 'admin', NOW());
-
-SET @admin_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'AdminManagement:admin:view');
-
-INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
-                         `create_time`, `update_by`, `update_time`)
-VALUES ('新增管理员', 'AdminManagement:admin:add', @admin_id, 2, 60, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('查看管理员详情', 'AdminManagement:admin:detail', @admin_id, 2, 50, NULL, 2000, 'admin', NOW(), 'admin',
-        NOW()),
-       ('编辑管理员', 'AdminManagement:admin:edit', @admin_id, 2, 40, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('启用管理员', 'AdminManagement:admin:enable', @admin_id, 2, 30, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('停用管理员', 'AdminManagement:admin:disable', @admin_id, 2, 20, NULL, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('删除管理员', 'AdminManagement:admin:delete', @admin_id, 2, 10, NULL, 2000, 'admin', NOW(), 'admin', NOW());
-
--- 操作日志、登录日志（挂在"日志管理"一级分组下，只读，没有按钮资源）
-INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
-                         `create_time`, `update_by`, `update_time`)
-VALUES ('操作日志', 'OperationLogManagement:log:view', @log_id, 1, 5, '操作日志管理页面访问', 2000, 'admin',
-        NOW(), 'admin', NOW()),
-       ('登录日志', 'LoginLogManagement:loginLog:view', @log_id, 1, 4, '登录日志管理页面访问', 2000, 'admin',
-        NOW(), 'admin', NOW());
-
--- 字典类型、字典项"详情"按钮已直接并入上面字典管理的批量 INSERT 中，此处不再重复
-
--- 元数据配置（挂在 system 一级分组下，只支持编辑/详情，不提供新增/删除入口）
-INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
-                         `create_time`, `update_by`, `update_time`)
-VALUES ('元数据配置', 'MetadataFieldManagement:metadataField:view', @system_id, 1, 5, '元数据字段配置页面访问', 2000,
-        'admin', NOW(), 'admin', NOW());
-
-SET @metadata_field_id := (SELECT `id`
-                            FROM `tab_menu`
-                            WHERE `code` = 'MetadataFieldManagement:metadataField:view');
-
-INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
-                         `create_time`, `update_by`, `update_time`)
-VALUES ('查看元数据字段详情', 'MetadataFieldManagement:metadataField:detail', @metadata_field_id, 2, 40, NULL, 2000,
-        'admin', NOW(), 'admin', NOW()),
-       ('编辑元数据字段', 'MetadataFieldManagement:metadataField:edit', @metadata_field_id, 2, 30, NULL, 2000,
-        'admin', NOW(), 'admin', NOW()),
-       ('启用元数据字段', 'MetadataFieldManagement:metadataField:enable', @metadata_field_id, 2, 20, NULL, 2000,
-        'admin', NOW(), 'admin', NOW()),
-       ('停用元数据字段', 'MetadataFieldManagement:metadataField:disable', @metadata_field_id, 2, 10, NULL, 2000,
-        'admin', NOW(), 'admin', NOW());
-
--- 表单管理（挂在 system 一级分组下，排在元数据配置之后，完整支持新增/编辑/启停用/删除/详情）
-INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
-                         `create_time`, `update_by`, `update_time`)
-VALUES ('表单管理', 'FormFieldManagement:formField:view', @system_id, 1, 1, '表单字段定义管理页面访问', 2000, 'admin',
-        NOW(), 'admin', NOW());
-
-SET @form_field_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'FormFieldManagement:formField:view');
-
-INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
-                         `create_time`, `update_by`, `update_time`)
-VALUES ('新增表单字段', 'FormFieldManagement:formField:add', @form_field_id, 2, 60, NULL, 2000, 'admin', NOW(),
-        'admin', NOW()),
-       ('查看表单字段详情', 'FormFieldManagement:formField:detail', @form_field_id, 2, 50, NULL, 2000, 'admin',
-        NOW(), 'admin', NOW()),
-       ('编辑表单字段', 'FormFieldManagement:formField:edit', @form_field_id, 2, 40, NULL, 2000, 'admin', NOW(),
-        'admin', NOW()),
-       ('启用表单字段', 'FormFieldManagement:formField:enable', @form_field_id, 2, 30, NULL, 2000, 'admin', NOW(),
-        'admin', NOW()),
-       ('停用表单字段', 'FormFieldManagement:formField:disable', @form_field_id, 2, 20, NULL, 2000, 'admin', NOW(),
-        'admin', NOW()),
-       ('删除表单字段', 'FormFieldManagement:formField:delete', @form_field_id, 2, 10, NULL, 2000, 'admin', NOW(),
-        'admin', NOW());
-
--- ============================================================================
+-- ----------------------------------------------------------------------------
 -- 管理员管理模块
--- ============================================================================
+-- ----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS `tab_admin` (
     `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
@@ -617,9 +417,9 @@ CREATE TABLE IF NOT EXISTS `tab_admin_org_scope` (
     KEY `idx_tab_admin_org_scope_org_id` (`org_id`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '管理员组织管辖范围表，无独立 status，随管理员整体同步、物理删除';
 
--- ============================================================================
+-- ----------------------------------------------------------------------------
 -- 操作日志模块
--- ============================================================================
+-- ----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS `tab_operation_log` (
     `id`                 BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
@@ -677,14 +477,14 @@ CREATE TABLE IF NOT EXISTS `tab_login_log`
   COLLATE = utf8mb4_general_ci
   COMMENT = '登录日志表，记录每一次登录尝试（成功+失败），只追加不更新不删除';
 
--- ============================================================================
+-- ----------------------------------------------------------------------------
 -- 元数据字段配置模块
--- ============================================================================
+-- ----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS `tab_metadata_field`
 (
     `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
-    `biz_type`    VARCHAR(20)  NOT NULL COMMENT '业务对象类型：ORG/USER/POSITION/APP',
+    `biz_type`    VARCHAR(20)  NOT NULL COMMENT '业务对象类型：ORG/USER/POSITION/APP/ROLE',
     `table_name`  VARCHAR(64)  NOT NULL COMMENT '字段所属表名称，如 tab_org，创建后不可修改',
     `column_name` VARCHAR(64)  NOT NULL COMMENT '字段列名（数据库字段定义），如 code、ext6，创建后不可修改',
     `field_code`  VARCHAR(64) NOT NULL DEFAULT '' COMMENT '字段标识（前端/DTO 使用），创建后不可修改',
@@ -704,96 +504,9 @@ CREATE TABLE IF NOT EXISTS `tab_metadata_field`
   COLLATE = utf8mb4_general_ci
   COMMENT = '元数据字段配置目录表';
 
--- 覆盖组织（ORG）、人员（USER）、任职（POSITION）、应用（APP）四类业务对象各自
--- "可开放配置的原有列"与全部 ext1~ext10 扩展列。已有专用交互控件的字段（parentId、
--- orgId、userId、ownerId、status 等）不出现在此目录中，继续保持硬编码渲染；
--- USER 的 gender 已改造为普通字典下拉字段，出现在此目录中；positionType 虽然绑定了
--- 专用的字典类型（position_type），但和其余表单字段定义一样纳入本目录、动态渲染，
--- 并且是承重字段（见 LockedFormFields），不属于"硬编码渲染"这一类。
-
--- ---- 组织（ORG，对应 tab_org） ----
-INSERT INTO `tab_metadata_field`
-    (`biz_type`, `table_name`, `column_name`, `field_code`, `column_type`, `field_name`, `status`, `create_by`, `create_time`,
-     `update_by`, `update_time`)
-VALUES ('ORG', 'tab_org', 'name', 'name', 'VARCHAR(64)', '组织名称', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('ORG', 'tab_org', 'code', 'code', 'VARCHAR(64)', '组织编码', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('ORG', 'tab_org', 'show_order', 'showOrder', 'INT', '显示序号', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('ORG', 'tab_org', 'remark', 'remark', 'VARCHAR(255)', '备注', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('ORG', 'tab_org', 'ext1', 'ext1', 'VARCHAR(255)', '扩展字段 1', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('ORG', 'tab_org', 'ext2', 'ext2', 'VARCHAR(255)', '扩展字段 2', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('ORG', 'tab_org', 'ext3', 'ext3', 'VARCHAR(255)', '扩展字段 3', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('ORG', 'tab_org', 'ext4', 'ext4', 'VARCHAR(255)', '扩展字段 4', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('ORG', 'tab_org', 'ext5', 'ext5', 'VARCHAR(255)', '扩展字段 5', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('ORG', 'tab_org', 'ext6', 'ext6', 'VARCHAR(255)', '扩展字段 6', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('ORG', 'tab_org', 'ext7', 'ext7', 'VARCHAR(255)', '扩展字段 7', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('ORG', 'tab_org', 'ext8', 'ext8', 'VARCHAR(255)', '扩展字段 8', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('ORG', 'tab_org', 'ext9', 'ext9', 'VARCHAR(255)', '扩展字段 9', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('ORG', 'tab_org', 'ext10', 'ext10', 'VARCHAR(255)', '扩展字段 10', 2000, 'admin', NOW(), 'admin', NOW());
-
--- ---- 人员（USER，对应 tab_user） ----
-INSERT INTO `tab_metadata_field`
-    (`biz_type`, `table_name`, `column_name`, `field_code`, `column_type`, `field_name`, `status`, `create_by`, `create_time`,
-     `update_by`, `update_time`)
-VALUES ('USER', 'tab_user', 'name', 'name', 'VARCHAR(64)', '用户姓名', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER', 'tab_user', 'code', 'code', 'VARCHAR(64)', '用户编号', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER', 'tab_user', 'mobile', 'mobile', 'VARCHAR(20)', '手机号', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER', 'tab_user', 'id_card', 'idCard', 'VARCHAR(18)', '身份证号', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER', 'tab_user', 'gender', 'gender', 'VARCHAR(64)', '性别', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER', 'tab_user', 'show_order', 'showOrder', 'INT', '显示序号', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER', 'tab_user', 'remark', 'remark', 'VARCHAR(255)', '备注', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER', 'tab_user', 'ext1', 'ext1', 'VARCHAR(255)', '扩展字段 1', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER', 'tab_user', 'ext2', 'ext2', 'VARCHAR(255)', '扩展字段 2', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER', 'tab_user', 'ext3', 'ext3', 'VARCHAR(255)', '扩展字段 3', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER', 'tab_user', 'ext4', 'ext4', 'VARCHAR(255)', '扩展字段 4', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER', 'tab_user', 'ext5', 'ext5', 'VARCHAR(255)', '扩展字段 5', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER', 'tab_user', 'ext6', 'ext6', 'VARCHAR(255)', '扩展字段 6', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER', 'tab_user', 'ext7', 'ext7', 'VARCHAR(255)', '扩展字段 7', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER', 'tab_user', 'ext8', 'ext8', 'VARCHAR(255)', '扩展字段 8', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER', 'tab_user', 'ext9', 'ext9', 'VARCHAR(255)', '扩展字段 9', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER', 'tab_user', 'ext10', 'ext10', 'VARCHAR(255)', '扩展字段 10', 2000, 'admin', NOW(), 'admin', NOW());
-
--- ---- 任职（POSITION，对应 tab_user_position） ----
-INSERT INTO `tab_metadata_field`
-    (`biz_type`, `table_name`, `column_name`, `field_code`, `column_type`, `field_name`, `status`, `create_by`, `create_time`,
-     `update_by`, `update_time`)
-VALUES ('POSITION', 'tab_user_position', 'position_type', 'positionType', 'VARCHAR(64)', '任职类型', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('POSITION', 'tab_user_position', 'position_address', 'positionAddress', 'VARCHAR(255)', '任职地址', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('POSITION', 'tab_user_position', 'position_phone', 'positionPhone', 'VARCHAR(20)', '任职电话', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('POSITION', 'tab_user_position', 'show_order', 'showOrder', 'INT', '显示序号', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('POSITION', 'tab_user_position', 'remark', 'remark', 'VARCHAR(255)', '备注', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('POSITION', 'tab_user_position', 'ext1', 'ext1', 'VARCHAR(255)', '扩展字段 1', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('POSITION', 'tab_user_position', 'ext2', 'ext2', 'VARCHAR(255)', '扩展字段 2', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('POSITION', 'tab_user_position', 'ext3', 'ext3', 'VARCHAR(255)', '扩展字段 3', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('POSITION', 'tab_user_position', 'ext4', 'ext4', 'VARCHAR(255)', '扩展字段 4', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('POSITION', 'tab_user_position', 'ext5', 'ext5', 'VARCHAR(255)', '扩展字段 5', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('POSITION', 'tab_user_position', 'ext6', 'ext6', 'VARCHAR(255)', '扩展字段 6', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('POSITION', 'tab_user_position', 'ext7', 'ext7', 'VARCHAR(255)', '扩展字段 7', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('POSITION', 'tab_user_position', 'ext8', 'ext8', 'VARCHAR(255)', '扩展字段 8', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('POSITION', 'tab_user_position', 'ext9', 'ext9', 'VARCHAR(255)', '扩展字段 9', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('POSITION', 'tab_user_position', 'ext10', 'ext10', 'VARCHAR(255)', '扩展字段 10', 2000, 'admin', NOW(), 'admin', NOW());
-
--- ---- 应用（APP，对应 tab_app） ----
-INSERT INTO `tab_metadata_field`
-    (`biz_type`, `table_name`, `column_name`, `field_code`, `column_type`, `field_name`, `status`, `create_by`, `create_time`,
-     `update_by`, `update_time`)
-VALUES ('APP', 'tab_app', 'name', 'name', 'VARCHAR(64)', '应用名称', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('APP', 'tab_app', 'code', 'code', 'VARCHAR(64)', '应用编码', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('APP', 'tab_app', 'show_order', 'showOrder', 'INT', '显示序号', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('APP', 'tab_app', 'remark', 'remark', 'VARCHAR(255)', '备注', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('APP', 'tab_app', 'ext1', 'ext1', 'VARCHAR(255)', '扩展字段 1', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('APP', 'tab_app', 'ext2', 'ext2', 'VARCHAR(255)', '扩展字段 2', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('APP', 'tab_app', 'ext3', 'ext3', 'VARCHAR(255)', '扩展字段 3', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('APP', 'tab_app', 'ext4', 'ext4', 'VARCHAR(255)', '扩展字段 4', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('APP', 'tab_app', 'ext5', 'ext5', 'VARCHAR(255)', '扩展字段 5', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('APP', 'tab_app', 'ext6', 'ext6', 'VARCHAR(255)', '扩展字段 6', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('APP', 'tab_app', 'ext7', 'ext7', 'VARCHAR(255)', '扩展字段 7', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('APP', 'tab_app', 'ext8', 'ext8', 'VARCHAR(255)', '扩展字段 8', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('APP', 'tab_app', 'ext9', 'ext9', 'VARCHAR(255)', '扩展字段 9', 2000, 'admin', NOW(), 'admin', NOW()),
-       ('APP', 'tab_app', 'ext10', 'ext10', 'VARCHAR(255)', '扩展字段 10', 2000, 'admin', NOW(), 'admin', NOW());
-
--- ============================================================================
+-- ----------------------------------------------------------------------------
 -- 表单字段定义模块
--- ============================================================================
+-- ----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS `tab_form_field_definition`
 (
@@ -826,96 +539,9 @@ CREATE TABLE IF NOT EXISTS `tab_form_field_definition`
   COLLATE = utf8mb4_general_ci
   COMMENT = '表单字段定义表';
 
--- 为组织/人员/任职/应用四类业务对象各自"可开放配置的原有列"（不含 ext1~ext10）
--- 预置启用状态的字段定义，绑定上面写入的对应元数据字段，使这些页面无需管理员手动
--- 配置即可保持现有展示；USER 的性别字段绑定 gender 字典类型（字典下拉控件）。
--- ext1~ext10 对应的元数据字段默认不预置字段定义，保持"零配置不出现，管理员按需
--- 绑定"的状态。承重字段（组织/用户/应用各自的 name、code）的锁定保护不在此处理，
--- 由 cn.nihility.rbac.formfield.constant.LockedFormFields 白名单在运行时计算。
-
--- ---- 组织（ORG） ----
-INSERT INTO `tab_form_field_definition`
-    (`biz_type`, `metadata_field_id`, `field_name`, `field_code`, `control_type`, `dict_type_code`, `is_unique`,
-     `is_required`, `show_in_list`, `show_in_create`, `show_in_edit`, `editable`, `validate_regex`, `placeholder`,
-     `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES ('ORG', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_org' AND `column_name` = 'name'),
-        '组织名称', 'name', 1, NULL, 0, 1, 1, 1, 1, 1, NULL, NULL, 1, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('ORG', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_org' AND `column_name` = 'code'),
-        '组织编码', 'code', 1, NULL, 1, 1, 1, 1, 1, 1, NULL, NULL, 3, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('ORG',
-        (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_org' AND `column_name` = 'show_order'),
-        '显示序号', 'showOrder', 2, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 5, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('ORG', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_org' AND `column_name` = 'remark'),
-        '备注', 'remark', 1, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 7, 2000, 'admin', NOW(), 'admin', NOW());
-
--- ---- 人员（USER） ----
-INSERT INTO `tab_form_field_definition`
-    (`biz_type`, `metadata_field_id`, `field_name`, `field_code`, `control_type`, `dict_type_code`, `is_unique`,
-     `is_required`, `show_in_list`, `show_in_create`, `show_in_edit`, `editable`, `validate_regex`, `placeholder`,
-     `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'name'),
-        '用户姓名', 'name', 1, NULL, 0, 1, 1, 1, 1, 1, NULL, NULL, 1, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'code'),
-        '用户编号', 'code', 1, NULL, 1, 1, 1, 1, 1, 1, NULL, NULL, 3, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'mobile'),
-        '手机号', 'mobile', 1, NULL, 1, 0, 1, 1, 1, 1, NULL, NULL, 5, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'id_card'),
-        '身份证号', 'idCard', 1, NULL, 1, 0, 1, 1, 1, 1, NULL, NULL, 7, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'gender'),
-        '性别', 'gender', 3, 'gender', 0, 0, 1, 1, 1, 1, NULL, NULL, 7, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER',
-        (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'show_order'),
-        '显示序号', 'showOrder', 2, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 9, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'remark'),
-        '备注', 'remark', 1, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 11, 2000, 'admin', NOW(), 'admin', NOW());
-
--- ---- 任职（POSITION） ----
-INSERT INTO `tab_form_field_definition`
-    (`biz_type`, `metadata_field_id`, `field_name`, `field_code`, `control_type`, `dict_type_code`, `is_unique`,
-     `is_required`, `show_in_list`, `show_in_create`, `show_in_edit`, `editable`, `validate_regex`, `placeholder`,
-     `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES ('POSITION', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user_position' AND `column_name` = 'position_type'),
-        '任职类型', 'positionType', 3, 'position_type', 0, 1, 1, 1, 1,
-        1, NULL, NULL, 1, 2000, 'admin', NOW(), 'admin', NOW()),
-    ('POSITION', (SELECT `id`
-                     FROM `tab_metadata_field`
-                     WHERE `table_name` = 'tab_user_position'
-                       AND `column_name` = 'position_address'), '任职地址', 'positionAddress', 1, NULL, 0, 0, 1, 1, 1,
-        1, NULL, NULL, 1, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('POSITION', (SELECT `id`
-                     FROM `tab_metadata_field`
-                     WHERE `table_name` = 'tab_user_position'
-                       AND `column_name` = 'position_phone'), '任职电话', 'positionPhone', 1, NULL, 0, 0, 1, 1, 1, 1,
-        NULL, NULL, 2, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('POSITION', (SELECT `id`
-                     FROM `tab_metadata_field`
-                     WHERE `table_name` = 'tab_user_position'
-                       AND `column_name` = 'show_order'), '显示序号', 'showOrder', 2, NULL, 0, 0, 1, 1, 1, 1, NULL,
-        NULL, 3, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('POSITION', (SELECT `id`
-                     FROM `tab_metadata_field`
-                     WHERE `table_name` = 'tab_user_position'
-                       AND `column_name` = 'remark'), '备注', 'remark', 1, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 4,
-        2000, 'admin', NOW(), 'admin', NOW());
-
--- ---- 应用（APP） ----
-INSERT INTO `tab_form_field_definition`
-    (`biz_type`, `metadata_field_id`, `field_name`, `field_code`, `control_type`, `dict_type_code`, `is_unique`,
-     `is_required`, `show_in_list`, `show_in_create`, `show_in_edit`, `editable`, `validate_regex`, `placeholder`,
-     `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES ('APP', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_app' AND `column_name` = 'name'),
-        '应用名称', 'name', 1, NULL, 0, 1, 1, 1, 1, 1, NULL, NULL, 1, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('APP', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_app' AND `column_name` = 'code'),
-        '应用编码', 'code', 1, NULL, 1, 1, 1, 1, 1, 1, NULL, NULL, 3, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('APP',
-        (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_app' AND `column_name` = 'show_order'),
-        '显示序号', 'showOrder', 2, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 5, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('APP', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_app' AND `column_name` = 'remark'),
-        '备注', 'remark', 1, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 7, 2000, 'admin', NOW(), 'admin', NOW());
-
--- ============================================================================
+-- ----------------------------------------------------------------------------
 -- Excel 导入字段配置模块
--- ============================================================================
+-- ----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS `tab_import_field_config`
 (
@@ -940,6 +566,698 @@ CREATE TABLE IF NOT EXISTS `tab_import_field_config`
   COLLATE = utf8mb4_general_ci
   COMMENT = 'Excel 导入字段配置表';
 
+-- ============================================================================
+-- 第二部分：种子数据（按依赖关系顺序插入）
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 默认账号引导：默认管理登录用户 admin/admin
+-- ----------------------------------------------------------------------------
+-- 在这条数据之前，业务接口已被 IdentityAuthFilter 统一要求携带 identity-token，
+-- 新装环境没有任何用户就无法通过接口创建第一个用户，形成"先有鸡还是先有蛋"的问题。
+-- 密码摘要用 MySQL 内置 SHA2() 现算，算法与
+-- cn.nihility.rbac.auth.util.PasswordDigestUtils#digest 保持一致：
+-- SHA-256(明文密码 + 盐值) 的十六进制小写字符串。
+-- 首登标识 first_login 置为 1，登录后会被强制要求先修改密码，缩短默认弱口令
+-- （5 位数字字母，短于 ChangePasswordRequest 对"新密码"施加的 6 位下限，但改密
+-- 校验只约束新密码长度，不约束旧密码，因此可以正常改密）暴露的窗口。
+-- 该行是 tab_user 表在全新数据库中插入的第一行，AUTO_INCREMENT 保证其 id 为 1，
+-- 因此这里及后续全部种子数据的 create_by/update_by 直接写字面值 '1'（管理员账号
+-- 自身也自引用该值），不再依赖运行时 SELECT 或后续 UPDATE 改写。
+SET @admin_salt = 'e648f0bb6c2c586063398f07dc2d0e08';
+SET @admin_user_id_text := '1';
+
+INSERT INTO `tab_user` (`name`, `code`, `gender`, `status`, `remark`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES ('系统管理员', 'admin', 'unknown', 2000, '系统初始化默认管理账号，首次登录后请立即修改密码', @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+SET @admin_user_id := LAST_INSERT_ID();
+
+INSERT INTO `tab_user_password` (`user_id`, `password_digest`, `salt`, `first_login`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES (@admin_user_id, LOWER(SHA2(CONCAT('admin', @admin_salt), 256)), @admin_salt, 1, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- ----------------------------------------------------------------------------
+-- 字典种子数据
+-- ----------------------------------------------------------------------------
+
+-- 预置"任职类型"字典数据，供用户管理模块任职记录的 positionType 字段消费
+INSERT INTO `tab_dict_type` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES ('任职类型', 'position_type', 0, '用户管理模块任职类型字段的数据来源', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+INSERT INTO `tab_dict_item` (`dict_type_id`, `label`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+SELECT `id`, '主职', 'primary', 3, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()
+FROM `tab_dict_type`
+WHERE `code` = 'position_type';
+
+INSERT INTO `tab_dict_item` (`dict_type_id`, `label`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+SELECT `id`, '兼职', 'part_time', 2, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()
+FROM `tab_dict_type`
+WHERE `code` = 'position_type';
+
+INSERT INTO `tab_dict_item` (`dict_type_id`, `label`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+SELECT `id`, '挂职', 'temporary', 1, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()
+FROM `tab_dict_type`
+WHERE `code` = 'position_type';
+
+-- 预置"性别"字典数据，供用户管理模块的 gender 字段消费
+INSERT INTO `tab_dict_type` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES ('性别', 'gender', 0, '用户管理模块性别字段的数据来源', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+INSERT INTO `tab_dict_item` (`dict_type_id`, `label`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+SELECT `id`, '未知', 'unknown', 1, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()
+FROM `tab_dict_type`
+WHERE `code` = 'gender';
+
+INSERT INTO `tab_dict_item` (`dict_type_id`, `label`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+SELECT `id`, '男', 'male', 2, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()
+FROM `tab_dict_type`
+WHERE `code` = 'gender';
+
+INSERT INTO `tab_dict_item` (`dict_type_id`, `label`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+SELECT `id`, '女', 'female', 3, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()
+FROM `tab_dict_type`
+WHERE `code` = 'gender';
+
+-- ----------------------------------------------------------------------------
+-- 菜单种子数据（菜单树 + 按钮资源）
+-- ----------------------------------------------------------------------------
+
+-- ---- 第一层：侧边栏一级导航分组（resourceType = 1 菜单，parentId = 0） ----
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('身份管理', 'identity', 0, 1, 40, '侧边栏一级导航分组', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('应用管理', 'application', 0, 1, 30, '侧边栏一级导航分组', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('权限管理', 'permission', 0, 1, 20, '侧边栏一级导航分组', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('系统管理', 'system', 0, 1, 10, '侧边栏一级导航分组', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('日志管理', 'log', 0, 1, 5, '侧边栏一级导航分组', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+SET @identity_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'identity');
+SET @application_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'application');
+SET @permission_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'permission');
+SET @system_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'system');
+SET @log_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'log');
+
+-- ---- 第二层：8 个已实现管理页面（resourceType = 1 菜单） ----
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('组织管理', 'OrgManagement:org:view', @identity_id, 1, 30, '组织管理页面访问（含左侧组织树浏览）', 2000,
+        @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('用户管理', 'UserManagement:user:view', @identity_id, 1, 20, '用户管理页面访问', 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('任职管理', 'PositionManagement:position:view', @identity_id, 1, 10, '任职管理页面访问', 2000, @admin_user_id_text,
+        NOW(), @admin_user_id_text, NOW()),
+       ('应用管理', 'AppManagement:app:view', @application_id, 1, 10, '应用管理页面访问', 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('角色管理', 'RoleManagement:role:view', @permission_id, 1, 20, '角色管理页面访问', 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('权限点管理', 'PermissionManagement:permission:view', @permission_id, 1, 10, '权限点管理页面访问', 2000,
+        @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('菜单管理', 'MenuManagement:menu:view', @system_id, 1, 20, '菜单/资源管理页面访问', 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('字典管理', 'DictManagement:dictType:view', @system_id, 1, 10, '字典管理页面访问（含字典类型列表）', 2000,
+        @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+SET @org_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'OrgManagement:org:view');
+SET @user_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'UserManagement:user:view');
+SET @position_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'PositionManagement:position:view');
+SET @app_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'AppManagement:app:view');
+SET @role_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'RoleManagement:role:view');
+SET @permission_point_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'PermissionManagement:permission:view');
+SET @menu_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'MenuManagement:menu:view');
+SET @dict_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'DictManagement:dictType:view');
+
+-- ---- 第三层：按钮（resourceType = 2 按钮） ----
+
+-- 组织管理（含导入相关按钮：下载模板、批量导入）
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('新增组织', 'OrgManagement:org:add', @org_id, 2, 60, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('查看组织详情', 'OrgManagement:org:detail', @org_id, 2, 50, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('编辑组织', 'OrgManagement:org:edit', @org_id, 2, 40, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('启用组织', 'OrgManagement:org:enable', @org_id, 2, 30, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('停用组织', 'OrgManagement:org:disable', @org_id, 2, 20, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('删除组织', 'OrgManagement:org:delete', @org_id, 2, 10, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('下载组织导入模板', 'OrgManagement:org:importTemplate', @org_id, 2, 5, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+        NOW()),
+       ('批量导入组织', 'OrgManagement:org:import', @org_id, 2, 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- 用户管理（含重置密码按钮、导入相关按钮：下载模板、批量导入）
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('新增用户', 'UserManagement:user:add', @user_id, 2, 60, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('查看用户详情', 'UserManagement:user:detail', @user_id, 2, 50, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('编辑用户', 'UserManagement:user:edit', @user_id, 2, 40, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('启用用户', 'UserManagement:user:enable', @user_id, 2, 30, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('停用用户', 'UserManagement:user:disable', @user_id, 2, 20, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('重置密码', 'UserManagement:user:resetPassword', @user_id, 2, 15, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+        NOW()),
+       ('删除用户', 'UserManagement:user:delete', @user_id, 2, 10, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('下载用户导入模板', 'UserManagement:user:importTemplate', @user_id, 2, 5, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+        NOW()),
+       ('批量导入用户', 'UserManagement:user:import', @user_id, 2, 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- 任职管理（含导入相关按钮：下载模板、批量导入）
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('新增任职记录', 'PositionManagement:position:add', @position_id, 2, 60, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+        NOW()),
+       ('查看任职详情', 'PositionManagement:position:detail', @position_id, 2, 50, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('编辑任职记录', 'PositionManagement:position:edit', @position_id, 2, 40, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+        NOW()),
+       ('启用任职记录', 'PositionManagement:position:enable', @position_id, 2, 30, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('停用任职记录', 'PositionManagement:position:disable', @position_id, 2, 20, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('删除任职记录', 'PositionManagement:position:delete', @position_id, 2, 10, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('下载任职导入模板', 'PositionManagement:position:importTemplate', @position_id, 2, 5, NULL, 2000, @admin_user_id_text,
+        NOW(), @admin_user_id_text, NOW()),
+       ('批量导入任职记录', 'PositionManagement:position:import', @position_id, 2, 0, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW());
+
+-- 应用管理（含导入相关按钮：下载模板、批量导入；应用配置相关按钮：配置入口、重置
+-- SecretKey、修改签名算法、修改同步配置——最终文案"应用配置"）
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('新增应用', 'AppManagement:app:add', @app_id, 2, 60, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('查看应用详情', 'AppManagement:app:detail', @app_id, 2, 50, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('编辑应用', 'AppManagement:app:edit', @app_id, 2, 40, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('启用应用', 'AppManagement:app:enable', @app_id, 2, 30, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('停用应用', 'AppManagement:app:disable', @app_id, 2, 20, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('删除应用', 'AppManagement:app:delete', @app_id, 2, 10, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('下载应用导入模板', 'AppManagement:app:importTemplate', @app_id, 2, 5, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+        NOW()),
+       ('批量导入应用', 'AppManagement:app:import', @app_id, 2, 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('应用配置', 'AppManagement:app:config', @app_id, 2, 4, '应用配置页面访问', 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('重置 SecretKey', 'AppManagement:app:config:resetSecret', @app_id, 2, 3, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('修改签名算法', 'AppManagement:app:config:editSignAlgorithm', @app_id, 2, 2, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('修改同步配置', 'AppManagement:app:config:editSync', @app_id, 2, 1, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW());
+
+-- 角色管理
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('新增角色', 'RoleManagement:role:add', @role_id, 2, 60, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('查看角色详情', 'RoleManagement:role:detail', @role_id, 2, 50, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('编辑角色', 'RoleManagement:role:edit', @role_id, 2, 40, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('启用角色', 'RoleManagement:role:enable', @role_id, 2, 30, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('停用角色', 'RoleManagement:role:disable', @role_id, 2, 20, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('删除角色', 'RoleManagement:role:delete', @role_id, 2, 10, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- 权限点管理
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('新增权限点', 'PermissionManagement:permission:add', @permission_point_id, 2, 60, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('查看权限点详情', 'PermissionManagement:permission:detail', @permission_point_id, 2, 50, NULL, 2000, @admin_user_id_text,
+        NOW(), @admin_user_id_text, NOW()),
+       ('编辑权限点', 'PermissionManagement:permission:edit', @permission_point_id, 2, 40, NULL, 2000, @admin_user_id_text,
+        NOW(), @admin_user_id_text, NOW()),
+       ('启用权限点', 'PermissionManagement:permission:enable', @permission_point_id, 2, 30, NULL, 2000, @admin_user_id_text,
+        NOW(), @admin_user_id_text, NOW()),
+       ('停用权限点', 'PermissionManagement:permission:disable', @permission_point_id, 2, 20, NULL, 2000, @admin_user_id_text,
+        NOW(), @admin_user_id_text, NOW()),
+       ('删除权限点', 'PermissionManagement:permission:delete', @permission_point_id, 2, 10, NULL, 2000, @admin_user_id_text,
+        NOW(), @admin_user_id_text, NOW());
+
+-- 菜单管理
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('新增资源', 'MenuManagement:menu:add', @menu_id, 2, 60, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('查看资源详情', 'MenuManagement:menu:detail', @menu_id, 2, 50, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('编辑资源', 'MenuManagement:menu:edit', @menu_id, 2, 40, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('启用资源', 'MenuManagement:menu:enable', @menu_id, 2, 30, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('停用资源', 'MenuManagement:menu:disable', @menu_id, 2, 20, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('删除资源', 'MenuManagement:menu:delete', @menu_id, 2, 10, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- 字典管理（字典类型 + 字典项两组按钮，同挂在字典管理页面节点下）
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('新增字典类型', 'DictManagement:dictType:add', @dict_id, 2, 100, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('查看字典类型详情', 'DictManagement:dictType:detail', @dict_id, 2, 95, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+        NOW()),
+       ('编辑字典类型', 'DictManagement:dictType:edit', @dict_id, 2, 90, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('启用字典类型', 'DictManagement:dictType:enable', @dict_id, 2, 80, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+        NOW()),
+       ('停用字典类型', 'DictManagement:dictType:disable', @dict_id, 2, 70, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+        NOW()),
+       ('删除字典类型', 'DictManagement:dictType:delete', @dict_id, 2, 60, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+        NOW()),
+       ('新增字典项', 'DictManagement:dictItem:add', @dict_id, 2, 50, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('查看字典项详情', 'DictManagement:dictItem:detail', @dict_id, 2, 45, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+        NOW()),
+       ('编辑字典项', 'DictManagement:dictItem:edit', @dict_id, 2, 40, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('启用字典项', 'DictManagement:dictItem:enable', @dict_id, 2, 30, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('停用字典项', 'DictManagement:dictItem:disable', @dict_id, 2, 20, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+        NOW()),
+       ('删除字典项', 'DictManagement:dictItem:delete', @dict_id, 2, 10, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- 管理员管理（挂在 permission 一级分组下，排在角色管理、权限点管理之后）
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('管理员管理', 'AdminManagement:admin:view', @permission_id, 1, 5, '管理员管理页面访问', 2000, @admin_user_id_text,
+        NOW(), @admin_user_id_text, NOW());
+
+SET @admin_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'AdminManagement:admin:view');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('新增管理员', 'AdminManagement:admin:add', @admin_id, 2, 60, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('查看管理员详情', 'AdminManagement:admin:detail', @admin_id, 2, 50, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+        NOW()),
+       ('编辑管理员', 'AdminManagement:admin:edit', @admin_id, 2, 40, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('启用管理员', 'AdminManagement:admin:enable', @admin_id, 2, 30, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('停用管理员', 'AdminManagement:admin:disable', @admin_id, 2, 20, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('删除管理员', 'AdminManagement:admin:delete', @admin_id, 2, 10, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- 操作日志、登录日志（挂在"日志管理"一级分组下，只读，没有按钮资源）
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('操作日志', 'OperationLogManagement:log:view', @log_id, 1, 5, '操作日志管理页面访问', 2000, @admin_user_id_text,
+        NOW(), @admin_user_id_text, NOW()),
+       ('登录日志', 'LoginLogManagement:loginLog:view', @log_id, 1, 4, '登录日志管理页面访问', 2000, @admin_user_id_text,
+        NOW(), @admin_user_id_text, NOW());
+
+-- 字典类型、字典项"详情"按钮已直接并入上面字典管理的批量 INSERT 中，此处不再重复
+
+-- 元数据配置（挂在 system 一级分组下，只支持编辑/详情，不提供新增/删除入口）
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('元数据配置', 'MetadataFieldManagement:metadataField:view', @system_id, 1, 5, '元数据字段配置页面访问', 2000,
+        @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+SET @metadata_field_id := (SELECT `id`
+                            FROM `tab_menu`
+                            WHERE `code` = 'MetadataFieldManagement:metadataField:view');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('查看元数据字段详情', 'MetadataFieldManagement:metadataField:detail', @metadata_field_id, 2, 40, NULL, 2000,
+        @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('编辑元数据字段', 'MetadataFieldManagement:metadataField:edit', @metadata_field_id, 2, 30, NULL, 2000,
+        @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('启用元数据字段', 'MetadataFieldManagement:metadataField:enable', @metadata_field_id, 2, 20, NULL, 2000,
+        @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('停用元数据字段', 'MetadataFieldManagement:metadataField:disable', @metadata_field_id, 2, 10, NULL, 2000,
+        @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- 表单管理（挂在 system 一级分组下，排在元数据配置之后，完整支持新增/编辑/启停用/删除/详情）
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('表单管理', 'FormFieldManagement:formField:view', @system_id, 1, 1, '表单字段定义管理页面访问', 2000, @admin_user_id_text,
+        NOW(), @admin_user_id_text, NOW());
+
+SET @form_field_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'FormFieldManagement:formField:view');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('新增表单字段', 'FormFieldManagement:formField:add', @form_field_id, 2, 60, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('查看表单字段详情', 'FormFieldManagement:formField:detail', @form_field_id, 2, 50, NULL, 2000, @admin_user_id_text,
+        NOW(), @admin_user_id_text, NOW()),
+       ('编辑表单字段', 'FormFieldManagement:formField:edit', @form_field_id, 2, 40, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('启用表单字段', 'FormFieldManagement:formField:enable', @form_field_id, 2, 30, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('停用表单字段', 'FormFieldManagement:formField:disable', @form_field_id, 2, 20, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('删除表单字段', 'FormFieldManagement:formField:delete', @form_field_id, 2, 10, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW());
+
+-- ----------------------------------------------------------------------------
+-- 权限点种子数据（99 条，按 权限资源.txt 模块分段插入）
+-- ----------------------------------------------------------------------------
+-- 组织/用户/任职/应用/角色/权限点/管理员/菜单/字典/元数据配置/表单管理/操作日志
+-- 共 94 条源自 权限资源.txt（一次性脚本 gen_permission_seed.py 解析生成），登录日志
+-- 1 条与应用配置（页面访问 + 重置 SecretKey + 修改签名算法 + 修改同步配置）4 条为
+-- 后续新增能力追加，合计 99 条。
+
+-- OrgManagement（组织管理，/identity/orgs）
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES
+    ('组织管理页面访问（含左侧组织树浏览）', 'OrgManagement:org:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('新增组织', 'OrgManagement:org:add', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('编辑组织', 'OrgManagement:org:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('查看组织详情', 'OrgManagement:org:detail', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('启用组织', 'OrgManagement:org:enable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('停用组织', 'OrgManagement:org:disable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('删除组织', 'OrgManagement:org:delete', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('下载组织导入模板', 'OrgManagement:org:importTemplate', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('批量导入组织', 'OrgManagement:org:import', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- UserManagement（用户管理，/identity/users）
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES
+    ('用户管理页面访问', 'UserManagement:user:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('新增用户', 'UserManagement:user:add', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('编辑用户', 'UserManagement:user:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('查看用户详情', 'UserManagement:user:detail', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('启用用户', 'UserManagement:user:enable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('停用用户', 'UserManagement:user:disable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('删除用户', 'UserManagement:user:delete', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('下载用户导入模板', 'UserManagement:user:importTemplate', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('批量导入用户', 'UserManagement:user:import', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('重置用户密码', 'UserManagement:user:resetPassword', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- PositionManagement（任职管理，/identity/positions）
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES
+    ('任职管理页面访问', 'PositionManagement:position:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('新增任职记录', 'PositionManagement:position:add', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('编辑任职记录', 'PositionManagement:position:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('查看任职详情', 'PositionManagement:position:detail', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('启用任职记录', 'PositionManagement:position:enable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('停用任职记录', 'PositionManagement:position:disable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('删除任职记录', 'PositionManagement:position:delete', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('下载任职导入模板', 'PositionManagement:position:importTemplate', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('批量导入任职记录', 'PositionManagement:position:import', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- AppManagement（应用管理，/application/list；含应用配置能力：AppId/AccessKey/SecretKey、
+-- 签名算法、同步配置）
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES
+    ('应用管理页面访问', 'AppManagement:app:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('新增应用', 'AppManagement:app:add', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('编辑应用', 'AppManagement:app:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('查看应用详情', 'AppManagement:app:detail', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('启用应用', 'AppManagement:app:enable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('停用应用', 'AppManagement:app:disable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('删除应用', 'AppManagement:app:delete', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('下载应用导入模板', 'AppManagement:app:importTemplate', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('批量导入应用', 'AppManagement:app:import', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('应用配置页面访问', 'AppManagement:app:config', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('重置 SecretKey', 'AppManagement:app:config:resetSecret', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('修改签名算法', 'AppManagement:app:config:editSignAlgorithm', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('修改同步配置', 'AppManagement:app:config:editSync', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- RoleManagement（角色管理，/permission/roles）
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES
+    ('角色管理页面访问', 'RoleManagement:role:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('新增角色', 'RoleManagement:role:add', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('编辑角色', 'RoleManagement:role:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('查看角色详情', 'RoleManagement:role:detail', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('启用角色', 'RoleManagement:role:enable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('停用角色', 'RoleManagement:role:disable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('删除角色', 'RoleManagement:role:delete', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- PermissionManagement（权限点管理，/permission/points）
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES
+    ('权限点管理页面访问', 'PermissionManagement:permission:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('新增权限点', 'PermissionManagement:permission:add', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('编辑权限点', 'PermissionManagement:permission:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('查看权限点详情', 'PermissionManagement:permission:detail', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('启用权限点', 'PermissionManagement:permission:enable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('停用权限点', 'PermissionManagement:permission:disable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('删除权限点', 'PermissionManagement:permission:delete', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- AdminManagement（管理员管理，/permission/admins）
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES
+    ('管理员管理页面访问', 'AdminManagement:admin:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('新增管理员', 'AdminManagement:admin:add', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('编辑管理员', 'AdminManagement:admin:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('查看管理员详情', 'AdminManagement:admin:detail', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('启用管理员', 'AdminManagement:admin:enable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('停用管理员', 'AdminManagement:admin:disable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('删除管理员', 'AdminManagement:admin:delete', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- MenuManagement（菜单管理，/system/menus）
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES
+    ('菜单/资源管理页面访问', 'MenuManagement:menu:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('新增资源', 'MenuManagement:menu:add', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('编辑资源', 'MenuManagement:menu:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('查看资源详情', 'MenuManagement:menu:detail', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('启用资源', 'MenuManagement:menu:enable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('停用资源', 'MenuManagement:menu:disable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('删除资源', 'MenuManagement:menu:delete', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- DictManagement（字典管理，/system/dicts）
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES
+    ('字典管理页面访问（含字典类型列表）', 'DictManagement:dictType:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('新增字典类型', 'DictManagement:dictType:add', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('编辑字典类型', 'DictManagement:dictType:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('查看字典类型详情', 'DictManagement:dictType:detail', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('启用字典类型', 'DictManagement:dictType:enable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('停用字典类型', 'DictManagement:dictType:disable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('删除字典类型', 'DictManagement:dictType:delete', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('新增字典项（需先选中左侧字典类型）', 'DictManagement:dictItem:add', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('编辑字典项', 'DictManagement:dictItem:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('查看字典项详情', 'DictManagement:dictItem:detail', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('启用字典项', 'DictManagement:dictItem:enable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('停用字典项', 'DictManagement:dictItem:disable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('删除字典项', 'DictManagement:dictItem:delete', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- MetadataFieldManagement（元数据配置，/system/metadata-fields）
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES
+    ('元数据配置页面访问', 'MetadataFieldManagement:metadataField:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('编辑元数据字段（仅字段名称可改）', 'MetadataFieldManagement:metadataField:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('查看元数据字段详情', 'MetadataFieldManagement:metadataField:detail', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('启用元数据字段', 'MetadataFieldManagement:metadataField:enable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('停用元数据字段', 'MetadataFieldManagement:metadataField:disable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- FormFieldManagement（表单管理，/system/form-fields）
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES
+    ('表单管理页面访问（含"字段定义""导入模板配置"两个 tab）', 'FormFieldManagement:formField:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('新增表单字段定义（从元数据配置目录选择可用字段绑定）', 'FormFieldManagement:formField:add', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('编辑表单字段定义', 'FormFieldManagement:formField:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('查看表单字段定义详情', 'FormFieldManagement:formField:detail', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('启用表单字段定义', 'FormFieldManagement:formField:enable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('停用表单字段定义', 'FormFieldManagement:formField:disable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('删除表单字段定义', 'FormFieldManagement:formField:delete', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('新增导入字段配置（从当前业务对象类型下启用的表单字段定义中选择关联字段）', 'FormFieldManagement:importFieldConfig:add', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('编辑导入字段配置', 'FormFieldManagement:importFieldConfig:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('删除导入字段配置', 'FormFieldManagement:importFieldConfig:delete', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- OperationLogManagement（操作日志管理，/log/operations）
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES
+    ('操作日志管理页面访问', 'OperationLogManagement:log:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- LoginLogManagement（登录日志管理，/log/logins）
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES
+    ('登录日志管理页面访问', 'LoginLogManagement:loginLog:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- ----------------------------------------------------------------------------
+-- 超级管理员角色，关联全部种子权限点
+-- ----------------------------------------------------------------------------
+
+INSERT INTO `tab_role` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES ('超级管理员', 'SUPER_ADMIN', 0, '系统初始化角色，拥有全部权限点', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+SET @super_admin_role_id := (SELECT `id` FROM `tab_role` WHERE `code` = 'SUPER_ADMIN');
+
+INSERT INTO `tab_role_permission` (`role_id`, `permission_id`, `create_by`, `create_time`, `update_by`, `update_time`)
+SELECT @super_admin_role_id, `id`, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()
+FROM `tab_permission`;
+
+-- ----------------------------------------------------------------------------
+-- 元数据字段配置种子数据
+-- ----------------------------------------------------------------------------
+-- 覆盖组织（ORG）、人员（USER）、任职（POSITION）、应用（APP）、角色（ROLE）五类
+-- 业务对象各自"可开放配置的原有列"与全部 ext1~ext10 扩展列（ROLE 无 ext 扩展列）。
+-- 已有专用交互控件的字段（parentId、orgId、userId、ownerId、status 等）不出现在此
+-- 目录中，继续保持硬编码渲染；USER 的 gender 已改造为普通字典下拉字段，出现在此
+-- 目录中；positionType 虽然绑定了专用的字典类型（position_type），但和其余表单
+-- 字段定义一样纳入本目录、动态渲染，并且是承重字段（见 LockedFormFields），不属于
+-- "硬编码渲染"这一类。ROLE 不加入 FormFieldBizType（角色管理页面不接入动态表单
+-- 渲染管线），仅服务于 tab_app_sync_field_mapping.metadata_field_id 的可选来源。
+
+-- ---- 组织（ORG，对应 tab_org，含 parent_code） ----
+INSERT INTO `tab_metadata_field`
+    (`biz_type`, `table_name`, `column_name`, `field_code`, `column_type`, `field_name`, `status`, `create_by`, `create_time`,
+     `update_by`, `update_time`)
+VALUES ('ORG', 'tab_org', 'name', 'name', 'VARCHAR(64)', '组织名称', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('ORG', 'tab_org', 'code', 'code', 'VARCHAR(64)', '组织编码', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('ORG', 'tab_org', 'parent_code', 'parentCode', 'VARCHAR(64)', '上级组织编码', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('ORG', 'tab_org', 'show_order', 'showOrder', 'INT', '显示序号', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('ORG', 'tab_org', 'remark', 'remark', 'VARCHAR(255)', '备注', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('ORG', 'tab_org', 'ext1', 'ext1', 'VARCHAR(255)', '扩展字段 1', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('ORG', 'tab_org', 'ext2', 'ext2', 'VARCHAR(255)', '扩展字段 2', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('ORG', 'tab_org', 'ext3', 'ext3', 'VARCHAR(255)', '扩展字段 3', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('ORG', 'tab_org', 'ext4', 'ext4', 'VARCHAR(255)', '扩展字段 4', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('ORG', 'tab_org', 'ext5', 'ext5', 'VARCHAR(255)', '扩展字段 5', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('ORG', 'tab_org', 'ext6', 'ext6', 'VARCHAR(255)', '扩展字段 6', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('ORG', 'tab_org', 'ext7', 'ext7', 'VARCHAR(255)', '扩展字段 7', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('ORG', 'tab_org', 'ext8', 'ext8', 'VARCHAR(255)', '扩展字段 8', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('ORG', 'tab_org', 'ext9', 'ext9', 'VARCHAR(255)', '扩展字段 9', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('ORG', 'tab_org', 'ext10', 'ext10', 'VARCHAR(255)', '扩展字段 10', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- ---- 人员（USER，对应 tab_user） ----
+INSERT INTO `tab_metadata_field`
+    (`biz_type`, `table_name`, `column_name`, `field_code`, `column_type`, `field_name`, `status`, `create_by`, `create_time`,
+     `update_by`, `update_time`)
+VALUES ('USER', 'tab_user', 'name', 'name', 'VARCHAR(64)', '用户姓名', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', 'tab_user', 'code', 'code', 'VARCHAR(64)', '用户编号', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', 'tab_user', 'mobile', 'mobile', 'VARCHAR(20)', '手机号', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', 'tab_user', 'id_card', 'idCard', 'VARCHAR(18)', '身份证号', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', 'tab_user', 'gender', 'gender', 'VARCHAR(64)', '性别', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', 'tab_user', 'show_order', 'showOrder', 'INT', '显示序号', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', 'tab_user', 'remark', 'remark', 'VARCHAR(255)', '备注', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', 'tab_user', 'ext1', 'ext1', 'VARCHAR(255)', '扩展字段 1', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', 'tab_user', 'ext2', 'ext2', 'VARCHAR(255)', '扩展字段 2', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', 'tab_user', 'ext3', 'ext3', 'VARCHAR(255)', '扩展字段 3', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', 'tab_user', 'ext4', 'ext4', 'VARCHAR(255)', '扩展字段 4', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', 'tab_user', 'ext5', 'ext5', 'VARCHAR(255)', '扩展字段 5', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', 'tab_user', 'ext6', 'ext6', 'VARCHAR(255)', '扩展字段 6', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', 'tab_user', 'ext7', 'ext7', 'VARCHAR(255)', '扩展字段 7', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', 'tab_user', 'ext8', 'ext8', 'VARCHAR(255)', '扩展字段 8', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', 'tab_user', 'ext9', 'ext9', 'VARCHAR(255)', '扩展字段 9', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', 'tab_user', 'ext10', 'ext10', 'VARCHAR(255)', '扩展字段 10', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- ---- 任职（POSITION，对应 tab_user_position） ----
+INSERT INTO `tab_metadata_field`
+    (`biz_type`, `table_name`, `column_name`, `field_code`, `column_type`, `field_name`, `status`, `create_by`, `create_time`,
+     `update_by`, `update_time`)
+VALUES ('POSITION', 'tab_user_position', 'position_type', 'positionType', 'VARCHAR(64)', '任职类型', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('POSITION', 'tab_user_position', 'position_address', 'positionAddress', 'VARCHAR(255)', '任职地址', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('POSITION', 'tab_user_position', 'position_phone', 'positionPhone', 'VARCHAR(20)', '任职电话', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('POSITION', 'tab_user_position', 'show_order', 'showOrder', 'INT', '显示序号', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('POSITION', 'tab_user_position', 'remark', 'remark', 'VARCHAR(255)', '备注', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('POSITION', 'tab_user_position', 'ext1', 'ext1', 'VARCHAR(255)', '扩展字段 1', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('POSITION', 'tab_user_position', 'ext2', 'ext2', 'VARCHAR(255)', '扩展字段 2', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('POSITION', 'tab_user_position', 'ext3', 'ext3', 'VARCHAR(255)', '扩展字段 3', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('POSITION', 'tab_user_position', 'ext4', 'ext4', 'VARCHAR(255)', '扩展字段 4', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('POSITION', 'tab_user_position', 'ext5', 'ext5', 'VARCHAR(255)', '扩展字段 5', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('POSITION', 'tab_user_position', 'ext6', 'ext6', 'VARCHAR(255)', '扩展字段 6', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('POSITION', 'tab_user_position', 'ext7', 'ext7', 'VARCHAR(255)', '扩展字段 7', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('POSITION', 'tab_user_position', 'ext8', 'ext8', 'VARCHAR(255)', '扩展字段 8', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('POSITION', 'tab_user_position', 'ext9', 'ext9', 'VARCHAR(255)', '扩展字段 9', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('POSITION', 'tab_user_position', 'ext10', 'ext10', 'VARCHAR(255)', '扩展字段 10', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- ---- 应用（APP，对应 tab_app） ----
+INSERT INTO `tab_metadata_field`
+    (`biz_type`, `table_name`, `column_name`, `field_code`, `column_type`, `field_name`, `status`, `create_by`, `create_time`,
+     `update_by`, `update_time`)
+VALUES ('APP', 'tab_app', 'name', 'name', 'VARCHAR(64)', '应用名称', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('APP', 'tab_app', 'code', 'code', 'VARCHAR(64)', '应用编码', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('APP', 'tab_app', 'show_order', 'showOrder', 'INT', '显示序号', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('APP', 'tab_app', 'remark', 'remark', 'VARCHAR(255)', '备注', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('APP', 'tab_app', 'ext1', 'ext1', 'VARCHAR(255)', '扩展字段 1', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('APP', 'tab_app', 'ext2', 'ext2', 'VARCHAR(255)', '扩展字段 2', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('APP', 'tab_app', 'ext3', 'ext3', 'VARCHAR(255)', '扩展字段 3', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('APP', 'tab_app', 'ext4', 'ext4', 'VARCHAR(255)', '扩展字段 4', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('APP', 'tab_app', 'ext5', 'ext5', 'VARCHAR(255)', '扩展字段 5', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('APP', 'tab_app', 'ext6', 'ext6', 'VARCHAR(255)', '扩展字段 6', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('APP', 'tab_app', 'ext7', 'ext7', 'VARCHAR(255)', '扩展字段 7', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('APP', 'tab_app', 'ext8', 'ext8', 'VARCHAR(255)', '扩展字段 8', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('APP', 'tab_app', 'ext9', 'ext9', 'VARCHAR(255)', '扩展字段 9', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('APP', 'tab_app', 'ext10', 'ext10', 'VARCHAR(255)', '扩展字段 10', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- ---- 角色（ROLE，对应 tab_role，无 ext 扩展列） ----
+INSERT INTO `tab_metadata_field`
+    (`biz_type`, `table_name`, `column_name`, `field_code`, `column_type`, `field_name`, `status`, `create_by`,
+     `create_time`, `update_by`, `update_time`)
+VALUES ('ROLE', 'tab_role', 'name', 'name', 'VARCHAR(64)', '角色名称', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('ROLE', 'tab_role', 'code', 'code', 'VARCHAR(64)', '角色编码', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('ROLE', 'tab_role', 'show_order', 'showOrder', 'INT', '显示序号', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('ROLE', 'tab_role', 'remark', 'remark', 'VARCHAR(255)', '备注', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- ----------------------------------------------------------------------------
+-- 表单字段定义种子数据
+-- ----------------------------------------------------------------------------
+-- 为组织/人员/任职/应用四类业务对象各自"可开放配置的原有列"（不含 ext1~ext10）
+-- 预置启用状态的字段定义，绑定上面写入的对应元数据字段，使这些页面无需管理员手动
+-- 配置即可保持现有展示；USER 的性别字段绑定 gender 字典类型（字典下拉控件）。
+-- ext1~ext10 对应的元数据字段默认不预置字段定义，保持"零配置不出现，管理员按需
+-- 绑定"的状态。承重字段（组织/用户/应用各自的 name、code）的锁定保护不在此处理，
+-- 由 cn.nihility.rbac.formfield.constant.LockedFormFields 白名单在运行时计算。
+
+-- ---- 组织（ORG） ----
+INSERT INTO `tab_form_field_definition`
+    (`biz_type`, `metadata_field_id`, `field_name`, `field_code`, `control_type`, `dict_type_code`, `is_unique`,
+     `is_required`, `show_in_list`, `show_in_create`, `show_in_edit`, `editable`, `validate_regex`, `placeholder`,
+     `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES ('ORG', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_org' AND `column_name` = 'name'),
+        '组织名称', 'name', 1, NULL, 0, 1, 1, 1, 1, 1, NULL, NULL, 1, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('ORG', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_org' AND `column_name` = 'code'),
+        '组织编码', 'code', 1, NULL, 1, 1, 1, 1, 1, 1, NULL, NULL, 3, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('ORG',
+        (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_org' AND `column_name` = 'show_order'),
+        '显示序号', 'showOrder', 2, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 5, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('ORG', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_org' AND `column_name` = 'remark'),
+        '备注', 'remark', 1, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 7, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- ---- 人员（USER） ----
+INSERT INTO `tab_form_field_definition`
+    (`biz_type`, `metadata_field_id`, `field_name`, `field_code`, `control_type`, `dict_type_code`, `is_unique`,
+     `is_required`, `show_in_list`, `show_in_create`, `show_in_edit`, `editable`, `validate_regex`, `placeholder`,
+     `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'name'),
+        '用户姓名', 'name', 1, NULL, 0, 1, 1, 1, 1, 1, NULL, NULL, 1, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'code'),
+        '用户编号', 'code', 1, NULL, 1, 1, 1, 1, 1, 1, NULL, NULL, 3, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'mobile'),
+        '手机号', 'mobile', 1, NULL, 1, 0, 1, 1, 1, 1, NULL, NULL, 5, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'id_card'),
+        '身份证号', 'idCard', 1, NULL, 1, 0, 1, 1, 1, 1, NULL, NULL, 7, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'gender'),
+        '性别', 'gender', 3, 'gender', 0, 0, 1, 1, 1, 1, NULL, NULL, 7, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER',
+        (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'show_order'),
+        '显示序号', 'showOrder', 2, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 9, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'remark'),
+        '备注', 'remark', 1, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 11, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- ---- 任职（POSITION） ----
+INSERT INTO `tab_form_field_definition`
+    (`biz_type`, `metadata_field_id`, `field_name`, `field_code`, `control_type`, `dict_type_code`, `is_unique`,
+     `is_required`, `show_in_list`, `show_in_create`, `show_in_edit`, `editable`, `validate_regex`, `placeholder`,
+     `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES ('POSITION', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user_position' AND `column_name` = 'position_type'),
+        '任职类型', 'positionType', 3, 'position_type', 0, 1, 1, 1, 1,
+        1, NULL, NULL, 1, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('POSITION', (SELECT `id`
+                     FROM `tab_metadata_field`
+                     WHERE `table_name` = 'tab_user_position'
+                       AND `column_name` = 'position_address'), '任职地址', 'positionAddress', 1, NULL, 0, 0, 1, 1, 1,
+        1, NULL, NULL, 1, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('POSITION', (SELECT `id`
+                     FROM `tab_metadata_field`
+                     WHERE `table_name` = 'tab_user_position'
+                       AND `column_name` = 'position_phone'), '任职电话', 'positionPhone', 1, NULL, 0, 0, 1, 1, 1, 1,
+        NULL, NULL, 2, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('POSITION', (SELECT `id`
+                     FROM `tab_metadata_field`
+                     WHERE `table_name` = 'tab_user_position'
+                       AND `column_name` = 'show_order'), '显示序号', 'showOrder', 2, NULL, 0, 0, 1, 1, 1, 1, NULL,
+        NULL, 3, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('POSITION', (SELECT `id`
+                     FROM `tab_metadata_field`
+                     WHERE `table_name` = 'tab_user_position'
+                       AND `column_name` = 'remark'), '备注', 'remark', 1, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 4,
+        2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- ---- 应用（APP） ----
+INSERT INTO `tab_form_field_definition`
+    (`biz_type`, `metadata_field_id`, `field_name`, `field_code`, `control_type`, `dict_type_code`, `is_unique`,
+     `is_required`, `show_in_list`, `show_in_create`, `show_in_edit`, `editable`, `validate_regex`, `placeholder`,
+     `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES ('APP', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_app' AND `column_name` = 'name'),
+        '应用名称', 'name', 1, NULL, 0, 1, 1, 1, 1, 1, NULL, NULL, 1, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('APP', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_app' AND `column_name` = 'code'),
+        '应用编码', 'code', 1, NULL, 1, 1, 1, 1, 1, 1, NULL, NULL, 3, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('APP',
+        (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_app' AND `column_name` = 'show_order'),
+        '显示序号', 'showOrder', 2, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 5, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('APP', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_app' AND `column_name` = 'remark'),
+        '备注', 'remark', 1, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 7, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- ----------------------------------------------------------------------------
+-- Excel 导入字段配置种子数据
+-- ----------------------------------------------------------------------------
+
 -- POSITION 的表单字段定义清单里没有、也不应该有 userId/orgId（它们是选择器，不是
 -- 展示字段），但 Excel 导入必须能通过人可读的编码定位到具体的人员和组织。这里预置
 -- 两条不可删除、不可取消必填的固定导入配置行：__userCode（表头"人员编号"，导入时
@@ -950,15 +1268,15 @@ CREATE TABLE IF NOT EXISTS `tab_import_field_config`
 INSERT INTO `tab_import_field_config`
     (`biz_type`, `form_field_definition_id`, `field_code`, `excel_header_name`, `is_primary_key`, `is_required`,
      `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES ('POSITION', NULL, '__userCode', '人员编号', 1, 1, 1, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('POSITION', NULL, '__orgCode', '组织编码', 1, 1, 2, 2000, 'admin', NOW(), 'admin', NOW());
+VALUES ('POSITION', NULL, '__userCode', '人员编号', 1, 1, 1, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('POSITION', NULL, '__orgCode', '组织编码', 1, 1, 2, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
 
 -- APP 的 ownerId/orgId 同理是选择器而非展示字段，比照 POSITION 预置两条固定标识列。
 INSERT INTO `tab_import_field_config`
     (`biz_type`, `form_field_definition_id`, `field_code`, `excel_header_name`, `is_primary_key`, `is_required`,
      `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES ('APP', NULL, '__ownerCode', '负责人编码', 1, 1, 1, 2000, 'admin', NOW(), 'admin', NOW()),
-       ('APP', NULL, '__orgCode', '组织编码', 1, 1, 2, 2000, 'admin', NOW(), 'admin', NOW());
+VALUES ('APP', NULL, '__ownerCode', '负责人编码', 1, 1, 1, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('APP', NULL, '__orgCode', '组织编码', 1, 1, 2, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
 
 -- ORG 的 parentId 同理是选择器（树形选择器）而非展示字段。__parentCode（表头"上级
 -- 组织编码"，导入时匹配 tab_org.code 得到 parentId）是必填（is_required=1）：每一
@@ -967,199 +1285,17 @@ VALUES ('APP', NULL, '__ownerCode', '负责人编码', 1, 1, 1, 2000, 'admin', N
 INSERT INTO `tab_import_field_config`
     (`biz_type`, `form_field_definition_id`, `field_code`, `excel_header_name`, `is_primary_key`, `is_required`,
      `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES ('ORG', NULL, '__parentCode', '上级组织编码', 0, 1, 1, 2000, 'admin', NOW(), 'admin', NOW());
+VALUES ('ORG', NULL, '__parentCode', '上级组织编码', 0, 1, 1, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
 
--- ============================================================================
--- 默认账号与权限初始化种子数据
--- ============================================================================
-
--- ---- 默认管理登录用户 admin/admin ----
--- 在这条数据之前，业务接口已被 IdentityAuthFilter 统一要求携带 identity-token，
--- 新装环境没有任何用户就无法通过接口创建第一个用户，形成"先有鸡还是先有蛋"的问题。
--- 密码摘要用 MySQL 内置 SHA2() 现算，算法与
--- cn.nihility.rbac.auth.util.PasswordDigestUtils#digest 保持一致：
--- SHA-256(明文密码 + 盐值) 的十六进制小写字符串。
--- 首登标识 first_login 置为 1，登录后会被强制要求先修改密码，缩短默认弱口令
--- （5 位数字字母，短于 ChangePasswordRequest 对"新密码"施加的 6 位下限，但改密
--- 校验只约束新密码长度，不约束旧密码，因此可以正常改密）暴露的窗口。
-SET @admin_salt = 'e648f0bb6c2c586063398f07dc2d0e08';
-
-INSERT INTO `tab_user` (`name`, `code`, `gender`, `status`, `remark`, `create_by`, `create_time`)
-VALUES ('系统管理员', 'admin', 'unknown', 2000, '系统初始化默认管理账号，首次登录后请立即修改密码', 'system', NOW());
-
-INSERT INTO `tab_user_password` (`user_id`, `password_digest`, `salt`, `first_login`, `create_by`, `create_time`)
-VALUES (LAST_INSERT_ID(), LOWER(SHA2(CONCAT('admin', @admin_salt), 256)), @admin_salt, 1, 'system', NOW());
-
--- ---- 权限点种子数据（95 条，按 权限资源.txt 模块分段插入） ----
--- 组织/用户/任职/应用/角色/权限点/管理员/菜单/字典/元数据配置/表单管理/操作日志
--- 共 94 条源自 权限资源.txt（一次性脚本 gen_permission_seed.py 解析生成），登录日志
--- 1 条为后续新增能力追加，合计 95 条。
-
--- OrgManagement（组织管理，/identity/orgs）
-INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES
-    ('组织管理页面访问（含左侧组织树浏览）', 'OrgManagement:org:view', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('新增组织', 'OrgManagement:org:add', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('编辑组织', 'OrgManagement:org:edit', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('查看组织详情', 'OrgManagement:org:detail', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('启用组织', 'OrgManagement:org:enable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('停用组织', 'OrgManagement:org:disable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('删除组织', 'OrgManagement:org:delete', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('下载组织导入模板', 'OrgManagement:org:importTemplate', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('批量导入组织', 'OrgManagement:org:import', 0, NULL, 2000, 'system', NOW(), 'system', NOW());
-
--- UserManagement（用户管理，/identity/users）
-INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES
-    ('用户管理页面访问', 'UserManagement:user:view', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('新增用户', 'UserManagement:user:add', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('编辑用户', 'UserManagement:user:edit', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('查看用户详情', 'UserManagement:user:detail', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('启用用户', 'UserManagement:user:enable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('停用用户', 'UserManagement:user:disable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('删除用户', 'UserManagement:user:delete', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('下载用户导入模板', 'UserManagement:user:importTemplate', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('批量导入用户', 'UserManagement:user:import', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('重置用户密码', 'UserManagement:user:resetPassword', 0, NULL, 2000, 'system', NOW(), 'system', NOW());
-
--- PositionManagement（任职管理，/identity/positions）
-INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES
-    ('任职管理页面访问', 'PositionManagement:position:view', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('新增任职记录', 'PositionManagement:position:add', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('编辑任职记录', 'PositionManagement:position:edit', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('查看任职详情', 'PositionManagement:position:detail', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('启用任职记录', 'PositionManagement:position:enable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('停用任职记录', 'PositionManagement:position:disable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('删除任职记录', 'PositionManagement:position:delete', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('下载任职导入模板', 'PositionManagement:position:importTemplate', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('批量导入任职记录', 'PositionManagement:position:import', 0, NULL, 2000, 'system', NOW(), 'system', NOW());
-
--- AppManagement（应用管理，/application/list）
-INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES
-    ('应用管理页面访问', 'AppManagement:app:view', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('新增应用', 'AppManagement:app:add', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('编辑应用', 'AppManagement:app:edit', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('查看应用详情', 'AppManagement:app:detail', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('启用应用', 'AppManagement:app:enable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('停用应用', 'AppManagement:app:disable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('删除应用', 'AppManagement:app:delete', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('下载应用导入模板', 'AppManagement:app:importTemplate', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('批量导入应用', 'AppManagement:app:import', 0, NULL, 2000, 'system', NOW(), 'system', NOW());
-
--- RoleManagement（角色管理，/permission/roles）
-INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES
-    ('角色管理页面访问', 'RoleManagement:role:view', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('新增角色', 'RoleManagement:role:add', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('编辑角色', 'RoleManagement:role:edit', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('查看角色详情', 'RoleManagement:role:detail', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('启用角色', 'RoleManagement:role:enable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('停用角色', 'RoleManagement:role:disable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('删除角色', 'RoleManagement:role:delete', 0, NULL, 2000, 'system', NOW(), 'system', NOW());
-
--- PermissionManagement（权限点管理，/permission/points）
-INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES
-    ('权限点管理页面访问', 'PermissionManagement:permission:view', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('新增权限点', 'PermissionManagement:permission:add', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('编辑权限点', 'PermissionManagement:permission:edit', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('查看权限点详情', 'PermissionManagement:permission:detail', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('启用权限点', 'PermissionManagement:permission:enable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('停用权限点', 'PermissionManagement:permission:disable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('删除权限点', 'PermissionManagement:permission:delete', 0, NULL, 2000, 'system', NOW(), 'system', NOW());
-
--- AdminManagement（管理员管理，/permission/admins）
-INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES
-    ('管理员管理页面访问', 'AdminManagement:admin:view', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('新增管理员', 'AdminManagement:admin:add', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('编辑管理员', 'AdminManagement:admin:edit', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('查看管理员详情', 'AdminManagement:admin:detail', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('启用管理员', 'AdminManagement:admin:enable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('停用管理员', 'AdminManagement:admin:disable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('删除管理员', 'AdminManagement:admin:delete', 0, NULL, 2000, 'system', NOW(), 'system', NOW());
-
--- MenuManagement（菜单管理，/system/menus）
-INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES
-    ('菜单/资源管理页面访问', 'MenuManagement:menu:view', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('新增资源', 'MenuManagement:menu:add', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('编辑资源', 'MenuManagement:menu:edit', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('查看资源详情', 'MenuManagement:menu:detail', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('启用资源', 'MenuManagement:menu:enable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('停用资源', 'MenuManagement:menu:disable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('删除资源', 'MenuManagement:menu:delete', 0, NULL, 2000, 'system', NOW(), 'system', NOW());
-
--- DictManagement（字典管理，/system/dicts）
-INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES
-    ('字典管理页面访问（含字典类型列表）', 'DictManagement:dictType:view', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('新增字典类型', 'DictManagement:dictType:add', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('编辑字典类型', 'DictManagement:dictType:edit', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('查看字典类型详情', 'DictManagement:dictType:detail', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('启用字典类型', 'DictManagement:dictType:enable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('停用字典类型', 'DictManagement:dictType:disable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('删除字典类型', 'DictManagement:dictType:delete', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('新增字典项（需先选中左侧字典类型）', 'DictManagement:dictItem:add', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('编辑字典项', 'DictManagement:dictItem:edit', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('查看字典项详情', 'DictManagement:dictItem:detail', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('启用字典项', 'DictManagement:dictItem:enable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('停用字典项', 'DictManagement:dictItem:disable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('删除字典项', 'DictManagement:dictItem:delete', 0, NULL, 2000, 'system', NOW(), 'system', NOW());
-
--- MetadataFieldManagement（元数据配置，/system/metadata-fields）
-INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES
-    ('元数据配置页面访问', 'MetadataFieldManagement:metadataField:view', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('编辑元数据字段（仅字段名称可改）', 'MetadataFieldManagement:metadataField:edit', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('查看元数据字段详情', 'MetadataFieldManagement:metadataField:detail', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('启用元数据字段', 'MetadataFieldManagement:metadataField:enable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('停用元数据字段', 'MetadataFieldManagement:metadataField:disable', 0, NULL, 2000, 'system', NOW(), 'system', NOW());
-
--- FormFieldManagement（表单管理，/system/form-fields）
-INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES
-    ('表单管理页面访问（含"字段定义""导入模板配置"两个 tab）', 'FormFieldManagement:formField:view', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('新增表单字段定义（从元数据配置目录选择可用字段绑定）', 'FormFieldManagement:formField:add', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('编辑表单字段定义', 'FormFieldManagement:formField:edit', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('查看表单字段定义详情', 'FormFieldManagement:formField:detail', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('启用表单字段定义', 'FormFieldManagement:formField:enable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('停用表单字段定义', 'FormFieldManagement:formField:disable', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('删除表单字段定义', 'FormFieldManagement:formField:delete', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('新增导入字段配置（从当前业务对象类型下启用的表单字段定义中选择关联字段）', 'FormFieldManagement:importFieldConfig:add', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('编辑导入字段配置', 'FormFieldManagement:importFieldConfig:edit', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
-    ('删除导入字段配置', 'FormFieldManagement:importFieldConfig:delete', 0, NULL, 2000, 'system', NOW(), 'system', NOW());
-
--- OperationLogManagement（操作日志管理，/log/operations）
-INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES
-    ('操作日志管理页面访问', 'OperationLogManagement:log:view', 0, NULL, 2000, 'system', NOW(), 'system', NOW());
-
--- LoginLogManagement（登录日志管理，/log/logins）
-INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES
-    ('登录日志管理页面访问', 'LoginLogManagement:loginLog:view', 0, NULL, 2000, 'system', NOW(), 'system', NOW());
-
--- ---- 超级管理员角色，关联全部种子权限点 ----
-INSERT INTO `tab_role` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES ('超级管理员', 'SUPER_ADMIN', 0, '系统初始化角色，拥有全部权限点', 2000, 'system', NOW(), 'system', NOW());
-
-SET @super_admin_role_id := (SELECT `id` FROM `tab_role` WHERE `code` = 'SUPER_ADMIN');
-
-INSERT INTO `tab_role_permission` (`role_id`, `permission_id`, `create_by`, `create_time`, `update_by`, `update_time`)
-SELECT @super_admin_role_id, `id`, 'system', NOW(), 'system', NOW()
-FROM `tab_permission`;
-
--- ---- 默认账号 admin 引导授权：赋予管理员身份并关联超级管理员角色 ----
-SET @admin_user_id := (SELECT `id` FROM `tab_user` WHERE `code` = 'admin');
+-- ----------------------------------------------------------------------------
+-- 默认账号 admin 引导授权：赋予管理员身份并关联超级管理员角色
+-- ----------------------------------------------------------------------------
 
 INSERT INTO `tab_admin` (`name`, `code`, `user_id`, `show_order`, `remark`, `status`, `create_by`, `create_time`,
                           `update_by`, `update_time`)
-VALUES ('系统管理员', 'admin', @admin_user_id, 0, '系统初始化默认管理员身份', 2000, 'system', NOW(), 'system', NOW());
+VALUES ('系统管理员', 'admin', @admin_user_id, 0, '系统初始化默认管理员身份', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
 
 SET @admin_admin_id := (SELECT `id` FROM `tab_admin` WHERE `code` = 'admin');
 
 INSERT INTO `tab_admin_role` (`admin_id`, `role_id`, `create_by`, `create_time`, `update_by`, `update_time`)
-VALUES (@admin_admin_id, @super_admin_role_id, 'system', NOW(), 'system', NOW());
+VALUES (@admin_admin_id, @super_admin_role_id, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());

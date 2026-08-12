@@ -80,6 +80,7 @@ function goBack() {
           <el-descriptions-item label="组织名称">{{ detailData?.name }}</el-descriptions-item>
           <el-descriptions-item label="编码">{{ detailData?.code }}</el-descriptions-item>
           <el-descriptions-item label="上级组织">{{ detailData?.parentName ?? '顶级组织' }}</el-descriptions-item>
+          <el-descriptions-item label="上级组织编码">{{ detailData?.parentCode || '-' }}</el-descriptions-item>
           <el-descriptions-item label="状态">
             <el-tag v-if="detailData?.status === ORG_STATUS_ENABLED" type="success">启用</el-tag>
             <el-tag v-else type="warning">停用</el-tag>
