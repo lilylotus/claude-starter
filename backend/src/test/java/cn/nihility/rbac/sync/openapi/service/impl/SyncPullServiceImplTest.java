@@ -86,7 +86,7 @@ class SyncPullServiceImplTest {
         List<SyncPullRecordVO> result = service.pullByBizIds(SyncDomain.ORG, List.of(1L, 2L));
 
         assertThat(result).isEmpty();
-        verify(appDataChangeLogService, org.mockito.Mockito.never()).selectLatestByBizIds(any(), any());
+        verify(appDataChangeLogService, org.mockito.Mockito.never()).selectLatestByBizIds(any(), any(), any());
     }
 
     /**
@@ -104,7 +104,7 @@ class SyncPullServiceImplTest {
                 .dataSnapshot("{\"code\":\"ORG001\"}")
                 .createTime(LocalDateTime.now())
                 .build();
-        when(appDataChangeLogService.selectLatestByBizIds(SyncDomain.ORG, List.of(88L)))
+        when(appDataChangeLogService.selectLatestByBizIds(1L, SyncDomain.ORG, List.of(88L)))
                 .thenReturn(List.of(changeLog));
         when(bizSnapshotResolver.resolve(SyncDomain.ORG, 88L)).thenReturn(Map.of("code", "ORG001"));
         when(fieldMappingTransformer.transform(eq(1L), eq(SyncDomain.ORG), any()))
@@ -134,7 +134,7 @@ class SyncPullServiceImplTest {
                 .operationType(1)
                 .createTime(LocalDateTime.now())
                 .build();
-        when(appDataChangeLogService.selectLatestByBizIds(SyncDomain.ORG, List.of(99L)))
+        when(appDataChangeLogService.selectLatestByBizIds(1L, SyncDomain.ORG, List.of(99L)))
                 .thenReturn(List.of(changeLog));
         when(bizSnapshotResolver.resolve(SyncDomain.ORG, 99L)).thenReturn(null);
 
@@ -152,12 +152,12 @@ class SyncPullServiceImplTest {
     void pullBySequence_shouldUseDomainPageSizeWhenLimitAbsent() {
         when(appSyncDomainConfigMapper.selectList(any())).thenReturn(List.of(
                 AppSyncDomainConfigEntity.builder().syncDomain(SyncDomain.ORG).syncEnabled(true).pageSize(30).build()));
-        when(appDataChangeLogService.selectBySequence(eq(List.of(SyncDomain.ORG)), eq(1000L), eq(30)))
+        when(appDataChangeLogService.selectBySequence(eq(1L), eq(List.of(SyncDomain.ORG)), eq(1000L), eq(30)))
                 .thenReturn(List.of());
 
         service.pullBySequence(SyncDomain.ORG, 1000L, null);
 
-        verify(appDataChangeLogService).selectBySequence(eq(List.of(SyncDomain.ORG)), eq(1000L), eq(30));
+        verify(appDataChangeLogService).selectBySequence(eq(1L), eq(List.of(SyncDomain.ORG)), eq(1000L), eq(30));
     }
 
     /**
@@ -168,12 +168,12 @@ class SyncPullServiceImplTest {
         when(appSyncDomainConfigMapper.selectList(any())).thenReturn(List.of(
                 AppSyncDomainConfigEntity.builder().syncDomain(SyncDomain.ORG).syncEnabled(true).pageSize(30).build(),
                 AppSyncDomainConfigEntity.builder().syncDomain(SyncDomain.USER).syncEnabled(true).pageSize(10).build()));
-        when(appDataChangeLogService.selectBySequence(anyCollection(), eq(1000L), eq(10)))
+        when(appDataChangeLogService.selectBySequence(eq(1L), anyCollection(), eq(1000L), eq(10)))
                 .thenReturn(List.of());
 
         service.pullBySequence(null, 1000L, null);
 
-        verify(appDataChangeLogService).selectBySequence(anyCollection(), eq(1000L), eq(10));
+        verify(appDataChangeLogService).selectBySequence(eq(1L), anyCollection(), eq(1000L), eq(10));
     }
 
     /**
@@ -183,11 +183,11 @@ class SyncPullServiceImplTest {
     void pullBySequence_shouldPreferExplicitLimit() {
         when(appSyncDomainConfigMapper.selectList(any())).thenReturn(List.of(
                 AppSyncDomainConfigEntity.builder().syncDomain(SyncDomain.ORG).syncEnabled(true).pageSize(30).build()));
-        when(appDataChangeLogService.selectBySequence(eq(List.of(SyncDomain.ORG)), eq(1000L), eq(5)))
+        when(appDataChangeLogService.selectBySequence(eq(1L), eq(List.of(SyncDomain.ORG)), eq(1000L), eq(5)))
                 .thenReturn(List.of());
 
         service.pullBySequence(SyncDomain.ORG, 1000L, 5);
 
-        verify(appDataChangeLogService).selectBySequence(eq(List.of(SyncDomain.ORG)), eq(1000L), eq(5));
+        verify(appDataChangeLogService).selectBySequence(eq(1L), eq(List.of(SyncDomain.ORG)), eq(1000L), eq(5));
     }
 }

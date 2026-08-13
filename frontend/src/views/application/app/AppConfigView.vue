@@ -9,19 +9,23 @@ import { ArrowLeft, CopyDocument, Delete, Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as appApi from '@/api/app'
 import * as metadataFieldApi from '@/api/metadataField'
+import * as orgApi from '@/api/org'
 import {
   SYNC_DOMAIN_FIELD_MAPPING_DOMAINS,
   SYNC_DOMAIN_OPTIONS,
+  SYNC_DOMAIN_ORG_SCOPE_DOMAINS,
   TRANSFORM_TYPE_OPTIONS,
   type AppConfigVO,
   type AppSyncDomainConfigVO,
   type AppSyncFieldMappingVO,
+  type AppSyncOrgScopeFormItem,
   type SignAlgorithm,
   type SyncDomain,
   type SyncMode,
   type TransformType,
 } from '@/types/app'
 import { METADATA_FIELD_STATUS_ENABLED, type MetadataField, type MetadataFieldBizType } from '@/types/metadataField'
+import type { OrgTreeNode } from '@/types/org'
 import { usePermission } from '@/composables/usePermission'
 
 const route = useRoute()
@@ -105,7 +109,9 @@ async function fetchConfig() {
 onMounted(() => {
   fetchConfig()
   fetchDomainConfigs()
+  fetchOrgTree()
   ensureFieldMappingLoaded(syncDomainTab.value)
+  ensureOrgScopeLoaded(syncDomainTab.value)
 })
 
 function goBack() {
@@ -296,6 +302,92 @@ async function saveDomainConfig(domain: SyncDomain) {
   }
 }
 
+// ---- 同步配置：同步范围（组织/用户/任职三个数据域，全部数据/指定组织范围二选一）----
+
+// 支持"同步范围"配置的数据域（组织/用户/任职），应用/角色/字典不展示该区块
+const orgScopeSupportedDomains = SYNC_DOMAIN_ORG_SCOPE_DOMAINS
+
+// 组织树（弹窗/表单里的组织选择器数据源），一次性加载全量，供 6 个数据域共用
+const orgTree = ref<OrgTreeNode[]>([])
+
+async function fetchOrgTree() {
+  orgTree.value = await orgApi.getOrgTree()
+}
+
+type OrgScopeMode = 'ALL' | 'SCOPED'
+
+// 单个数据域的同步范围本地可编辑状态：mode 是纯前端概念（不随请求提交），由加载时的
+// 行数量推导（空=全部数据），rows 是行编辑态，即便 mode 切回“全部数据”也保留在内存里，
+// 方便用户切换单选反复横跳时不丢失已经填好的行
+const orgScopeState = reactive<Record<SyncDomain, { mode: OrgScopeMode; rows: AppSyncOrgScopeFormItem[] }>>({
+  ORG: { mode: 'ALL', rows: [] },
+  USER: { mode: 'ALL', rows: [] },
+  POSITION: { mode: 'ALL', rows: [] },
+  APP: { mode: 'ALL', rows: [] },
+  ROLE: { mode: 'ALL', rows: [] },
+  DICT: { mode: 'ALL', rows: [] },
+})
+// 已加载过的数据域集合，切子 tab 时只按需请求一次，与字段映射的按需加载策略一致
+const orgScopeLoadedDomains = reactive<Partial<Record<SyncDomain, boolean>>>({})
+const orgScopeLoading = ref(false)
+const savingOrgScope = ref(false)
+
+function blankOrgScopeRow(): AppSyncOrgScopeFormItem {
+  return { orgId: null, includeChildren: false }
+}
+
+function addOrgScopeRow(domain: SyncDomain) {
+  orgScopeState[domain].rows.push(blankOrgScopeRow())
+}
+
+function removeOrgScopeRow(domain: SyncDomain, index: number) {
+  orgScopeState[domain].rows.splice(index, 1)
+}
+
+// 切到某个数据域子 tab 时，按需加载该数据域当前的同步范围（仅组织/用户/任职三个数据域）
+async function ensureOrgScopeLoaded(domain: SyncDomain) {
+  if (!orgScopeSupportedDomains.includes(domain)) return
+  if (orgScopeLoadedDomains[domain]) return
+  orgScopeLoading.value = true
+  try {
+    const rows = await appApi.listAppSyncOrgScope(appId.value, domain)
+    orgScopeState[domain].mode = rows.length === 0 ? 'ALL' : 'SCOPED'
+    orgScopeState[domain].rows = rows.map((row) => ({ orgId: row.orgId, includeChildren: row.includeChildren }))
+    orgScopeLoadedDomains[domain] = true
+  } finally {
+    orgScopeLoading.value = false
+  }
+}
+
+function validateOrgScopeRows(state: { mode: OrgScopeMode; rows: AppSyncOrgScopeFormItem[] }): string {
+  if (state.mode !== 'SCOPED') return ''
+  if (state.rows.length === 0) return '已选择“指定组织范围”，请至少添加一个组织'
+  if (state.rows.some((row) => row.orgId === null)) return '存在未选择组织的行，请补全或删除'
+  return ''
+}
+
+async function saveOrgScope(domain: SyncDomain) {
+  const state = orgScopeState[domain]
+  const validationError = validateOrgScopeRows(state)
+  if (validationError) {
+    ElMessage.error(validationError)
+    return
+  }
+  savingOrgScope.value = true
+  try {
+    const payload =
+      state.mode === 'ALL'
+        ? []
+        : state.rows.map((row) => ({ orgId: row.orgId as number, includeChildren: row.includeChildren }))
+    const data = await appApi.replaceAppSyncOrgScope(appId.value, domain, payload)
+    state.mode = data.length === 0 ? 'ALL' : 'SCOPED'
+    state.rows = data.map((row) => ({ orgId: row.orgId, includeChildren: row.includeChildren }))
+    ElMessage.success('保存成功')
+  } finally {
+    savingOrgScope.value = false
+  }
+}
+
 function toFieldMappingRow(vo: AppSyncFieldMappingVO): FieldMappingRow {
   return {
     id: vo.id,
@@ -329,6 +421,7 @@ async function ensureFieldMappingLoaded(domain: SyncDomain) {
 
 function handleDomainTabChange() {
   ensureFieldMappingLoaded(syncDomainTab.value)
+  ensureOrgScopeLoaded(syncDomainTab.value)
 }
 
 function handleAddField(metadataFieldId: number | null) {
@@ -517,6 +610,61 @@ async function saveFieldMappings() {
                   </el-button>
                 </el-form-item>
               </el-form>
+
+              <template v-if="orgScopeSupportedDomains.includes(option.value)">
+                <h5 class="app-config__org-scope-title">同步范围</h5>
+                <div v-loading="orgScopeLoading" class="app-config__org-scope">
+                  <el-radio-group v-model="orgScopeState[option.value].mode">
+                    <el-radio value="ALL">全部数据</el-radio>
+                    <el-radio value="SCOPED">指定组织范围</el-radio>
+                  </el-radio-group>
+
+                  <div v-if="orgScopeState[option.value].mode === 'SCOPED'" class="app-config__org-scope-section">
+                    <div class="app-config__org-scope-section__header">
+                      <el-button link type="primary" @click="addOrgScopeRow(option.value)">+ 添加组织</el-button>
+                    </div>
+
+                    <p v-if="orgScopeState[option.value].rows.length === 0" class="app-config__org-scope-empty">
+                      暂无指定组织，请添加至少一个组织
+                    </p>
+
+                    <div v-else class="app-config__org-scope-list">
+                      <div
+                        v-for="(scope, index) in orgScopeState[option.value].rows"
+                        :key="index"
+                        class="app-config__org-scope-row"
+                      >
+                        <div class="app-config__org-scope-row__fields">
+                          <el-tree-select
+                            v-model="scope.orgId"
+                            :data="orgTree"
+                            :props="{ label: 'name', children: 'children' }"
+                            node-key="id"
+                            check-strictly
+                            placeholder="请选择组织"
+                            style="width: 100%"
+                          />
+                          <el-checkbox v-model="scope.includeChildren">含子组织</el-checkbox>
+                        </div>
+                        <el-button
+                          link
+                          type="danger"
+                          class="app-config__org-scope-row__remove"
+                          @click="removeOrgScopeRow(option.value, index)"
+                        >
+                          删除
+                        </el-button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div v-if="hasPermission('AppManagement:app:config:editSync')" class="app-config__org-scope-save">
+                    <el-button type="primary" :loading="savingOrgScope" @click="saveOrgScope(option.value)">
+                      保存同步范围
+                    </el-button>
+                  </div>
+                </div>
+              </template>
 
               <template v-if="fieldMappingSupportedDomains.includes(option.value)">
                 <div class="app-config__field-mapping-toolbar">
@@ -756,6 +904,84 @@ async function saveFieldMappings() {
 
 .app-config__domain-panel {
   min-height: 120px;
+}
+
+// 同步范围：单选“全部数据/指定组织范围” + 指定时的组织行列表，视觉上直接复用
+// AdminManagementView.vue“管辖组织范围”子表单的链式连接语言（虚线+圆点），
+// 与本页“字段映射”区块并列作为同一个数据域 tab 内的独立保存分区
+.app-config__org-scope-title {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin: 4px 0 12px;
+}
+
+.app-config__org-scope {
+  margin-bottom: 8px;
+}
+
+.app-config__org-scope-section {
+  margin-top: 12px;
+}
+
+.app-config__org-scope-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.app-config__org-scope-empty {
+  font-size: 13px;
+  color: var(--color-text-tertiary);
+  margin: 0 0 8px;
+}
+
+.app-config__org-scope-list {
+  position: relative;
+  padding-left: 16px;
+  border-left: 1px dashed var(--chain-line-color);
+}
+
+.app-config__org-scope-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px dashed var(--color-border);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.app-config__org-scope-row::before {
+  content: '';
+  position: absolute;
+  left: -20px;
+  top: 12px;
+  width: var(--chain-dot-size-sm);
+  height: var(--chain-dot-size-sm);
+  border-radius: 50%;
+  background: var(--chain-line-color-active);
+}
+
+.app-config__org-scope-row__fields {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  column-gap: 12px;
+}
+
+.app-config__org-scope-row__remove {
+  flex-shrink: 0;
+}
+
+.app-config__org-scope-save {
+  margin-top: 12px;
 }
 
 .app-config__field-mapping-toolbar {

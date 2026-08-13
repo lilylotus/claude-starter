@@ -47,6 +47,14 @@ public final class SyncDomain {
     public static final Set<String> CHANGE_LOG_DOMAINS = Set.of(ORG, USER, POSITION, APP, ROLE);
 
     /**
+     * 支持按应用配置同步范围（全部数据/指定组织范围）的 3 个数据域，供接口层校验组织范围
+     * 相关请求的 {@code syncDomain} 参数只能是这三者之一（app-sync-org-scope-and-app-change-log
+     * change design.md Decision 2）。应用/角色/字典三个数据域没有"归属组织"的概念，不提供
+     * 该设置。
+     */
+    public static final Set<String> ORG_SCOPE_DOMAINS = Set.of(ORG, USER, POSITION);
+
+    /**
      * 工具类不允许实例化。
      */
     private SyncDomain() {

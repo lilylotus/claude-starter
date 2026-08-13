@@ -1,11 +1,15 @@
 package cn.nihility.rbac.sync.notify.service.impl;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.app.config.AppSecretProperties;
 import cn.nihility.rbac.app.constant.SignAlgorithm;
+import cn.nihility.rbac.app.constant.SyncMode;
+import cn.nihility.rbac.app.entity.AppConfigEntity;
+import cn.nihility.rbac.app.mapper.AppConfigMapper;
 import cn.nihility.rbac.common.config.HttpClientProperties;
 import cn.nihility.rbac.common.util.HttpClientUtils;
 import cn.nihility.rbac.common.util.JacksonUtils;
@@ -13,10 +17,8 @@ import cn.nihility.rbac.common.util.Sm4JdkUtils;
 import cn.nihility.rbac.operationlog.constant.OperationType;
 import cn.nihility.rbac.sync.changelog.entity.AppDataChangeLogEntity;
 import cn.nihility.rbac.sync.notify.constant.NotifyStatus;
-import cn.nihility.rbac.sync.notify.dto.NotifyTargetRow;
 import cn.nihility.rbac.sync.notify.entity.AppNotifyRecordEntity;
 import cn.nihility.rbac.sync.notify.mapper.AppNotifyRecordMapper;
-import cn.nihility.rbac.sync.notify.mapper.NotifyTargetMapper;
 import cn.nihility.rbac.sync.sign.NotifySignatureAppender;
 import cn.nihility.rbac.sync.sign.SignAlgorithmCodecImpl;
 import com.sun.net.httpserver.HttpExchange;
@@ -26,7 +28,6 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -40,8 +41,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
  * {@link AppNotifyServiceImpl} 的单元测试：本地起一个内嵌 {@link HttpServer} 充当外部应用
- * 的通知回调地址，验证请求体、成功/失败结果落库、以及"一个应用通知失败不影响其他应用"
- * 场景（app-sync-notify-pull spec Scenario）。
+ * 的通知回调地址，验证请求体、成功/失败结果落库，以及 {@code syncMode != NOTIFY} 时直接
+ * 跳过、目标应用查不到时直接跳过等分支（app-sync-org-scope-and-app-change-log change
+ * design.md Decision 6）。
  */
 @ExtendWith(MockitoExtension.class)
 class AppNotifyServiceImplTest {
@@ -53,7 +55,7 @@ class AppNotifyServiceImplTest {
     private static volatile String lastReceivedAppKeyHeader;
 
     @Mock
-    private NotifyTargetMapper notifyTargetMapper;
+    private AppConfigMapper appConfigMapper;
 
     @Mock
     private AppNotifyRecordMapper appNotifyRecordMapper;
@@ -91,7 +93,7 @@ class AppNotifyServiceImplTest {
         appSecretProperties.setSm4Key(Sm4JdkUtils.generateKey());
         NotifySignatureAppender notifySignatureAppender = new NotifySignatureAppender(new SignAlgorithmCodecImpl());
 
-        service = new AppNotifyServiceImpl(notifyTargetMapper, appNotifyRecordMapper, notifySignatureAppender,
+        service = new AppNotifyServiceImpl(appConfigMapper, appNotifyRecordMapper, notifySignatureAppender,
                 appSecretProperties);
 
         lastReceivedBody = null;
@@ -108,28 +110,30 @@ class AppNotifyServiceImplTest {
      * {@code X-App-Key} 请求头，且落库为成功状态。
      */
     @Test
-    void notifyMatchedApps_shouldSendCorrectPayloadAndRecordSuccess() {
-        NotifyTargetRow target = NotifyTargetRow.builder()
+    void notifyIfConfigured_shouldSendCorrectPayloadAndRecordSuccess() {
+        AppConfigEntity target = AppConfigEntity.builder()
                 .appRefId(1L)
                 .appId("open-app-1")
                 .accessKey("access-key-1")
                 .secretKey(Sm4JdkUtils.encrypt("secret", appSecretProperties.getSm4Key()))
                 .signAlgorithm(SignAlgorithm.SHA256)
+                .syncMode(SyncMode.NOTIFY)
                 .needSign(false)
                 .notifyUrl(successUrl)
                 .notifyParams(null)
                 .build();
-        when(notifyTargetMapper.selectNotifyTargets("ORG")).thenReturn(List.of(target));
+        when(appConfigMapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(target);
 
         AppDataChangeLogEntity changeLog = AppDataChangeLogEntity.builder()
                 .id(1024L)
+                .appRefId(1L)
                 .dataType("ORG")
                 .bizId(88L)
                 .operationType(OperationType.CREATE)
                 .createTime(LocalDateTime.now())
                 .build();
 
-        service.notifyMatchedApps(changeLog);
+        service.notifyIfConfigured(changeLog);
 
         assertThat(lastReceivedAppKeyHeader).isEqualTo("access-key-1");
         Map<String, Object> payload = JacksonUtils.toObj(lastReceivedBody, JacksonUtils.MAP_OBJECT_TYPE_REFERENCE);
@@ -148,55 +152,83 @@ class AppNotifyServiceImplTest {
     }
 
     /**
-     * 一条变更事件同时匹配两个应用的通知条件，其中一个应用的通知因返回失败状态码而失败时，
-     * 不应影响向另一个应用发起通知（app-sync-notify-pull spec"一个应用通知失败不影响其他
-     * 应用"场景）。
+     * 通知回调返回非成功状态码时应落库为失败状态。
      */
     @Test
-    void notifyMatchedApps_shouldContinueOtherAppsWhenOneFails() {
-        String sm4Key = appSecretProperties.getSm4Key();
-        NotifyTargetRow failingTarget = NotifyTargetRow.builder()
-                .appRefId(1L)
-                .appId("open-app-1")
-                .accessKey("access-key-1")
-                .secretKey(Sm4JdkUtils.encrypt("secret", sm4Key))
-                .signAlgorithm(SignAlgorithm.SHA256)
-                .needSign(false)
-                .notifyUrl(failureUrl)
-                .build();
-        NotifyTargetRow okTarget = NotifyTargetRow.builder()
+    void notifyIfConfigured_shouldRecordFailure_whenCallbackFails() {
+        AppConfigEntity target = AppConfigEntity.builder()
                 .appRefId(2L)
                 .appId("open-app-2")
                 .accessKey("access-key-2")
-                .secretKey(Sm4JdkUtils.encrypt("secret", sm4Key))
+                .secretKey(Sm4JdkUtils.encrypt("secret", appSecretProperties.getSm4Key()))
                 .signAlgorithm(SignAlgorithm.SHA256)
+                .syncMode(SyncMode.NOTIFY)
                 .needSign(false)
-                .notifyUrl(successUrl)
+                .notifyUrl(failureUrl)
                 .build();
-        when(notifyTargetMapper.selectNotifyTargets("ORG")).thenReturn(List.of(failingTarget, okTarget));
+        when(appConfigMapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(target);
 
         AppDataChangeLogEntity changeLog = AppDataChangeLogEntity.builder()
                 .id(1025L)
+                .appRefId(2L)
                 .dataType("ORG")
                 .bizId(89L)
                 .operationType(OperationType.UPDATE)
                 .createTime(LocalDateTime.now())
                 .build();
 
-        service.notifyMatchedApps(changeLog);
+        service.notifyIfConfigured(changeLog);
 
         ArgumentCaptor<AppNotifyRecordEntity> captor = ArgumentCaptor.forClass(AppNotifyRecordEntity.class);
-        verify(appNotifyRecordMapper, org.mockito.Mockito.times(2)).insert(captor.capture());
-        List<AppNotifyRecordEntity> records = captor.getAllValues();
-        assertThat(records).hasSize(2);
-        assertThat(records).anySatisfy(r -> {
-            assertThat(r.getAppRefId()).isEqualTo(1L);
-            assertThat(r.getNotifyStatus()).isEqualTo(NotifyStatus.FAILURE);
-        });
-        assertThat(records).anySatisfy(r -> {
-            assertThat(r.getAppRefId()).isEqualTo(2L);
-            assertThat(r.getNotifyStatus()).isEqualTo(NotifyStatus.SUCCESS);
-        });
+        verify(appNotifyRecordMapper).insert(captor.capture());
+        assertThat(captor.getValue().getAppRefId()).isEqualTo(2L);
+        assertThat(captor.getValue().getNotifyStatus()).isEqualTo(NotifyStatus.FAILURE);
+    }
+
+    /**
+     * 目标应用当前同步方式不是 {@code NOTIFY} 时，应直接跳过，不发起任何请求、不落库。
+     */
+    @Test
+    void notifyIfConfigured_shouldSkip_whenSyncModeNotNotify() {
+        AppConfigEntity target = AppConfigEntity.builder()
+                .appRefId(3L)
+                .syncMode(SyncMode.PULL)
+                .build();
+        when(appConfigMapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(target);
+
+        AppDataChangeLogEntity changeLog = AppDataChangeLogEntity.builder()
+                .id(1026L)
+                .appRefId(3L)
+                .dataType("ORG")
+                .bizId(90L)
+                .operationType(OperationType.CREATE)
+                .createTime(LocalDateTime.now())
+                .build();
+
+        service.notifyIfConfigured(changeLog);
+
+        verify(appNotifyRecordMapper, never()).insert(org.mockito.ArgumentMatchers.any(AppNotifyRecordEntity.class));
+    }
+
+    /**
+     * 目标应用当前配置查不到时，应直接跳过，不发起任何请求、不落库。
+     */
+    @Test
+    void notifyIfConfigured_shouldSkip_whenTargetNotFound() {
+        when(appConfigMapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(null);
+
+        AppDataChangeLogEntity changeLog = AppDataChangeLogEntity.builder()
+                .id(1027L)
+                .appRefId(4L)
+                .dataType("ORG")
+                .bizId(91L)
+                .operationType(OperationType.CREATE)
+                .createTime(LocalDateTime.now())
+                .build();
+
+        service.notifyIfConfigured(changeLog);
+
+        verify(appNotifyRecordMapper, never()).insert(org.mockito.ArgumentMatchers.any(AppNotifyRecordEntity.class));
     }
 
     private static void handleOk(HttpExchange exchange) throws IOException {

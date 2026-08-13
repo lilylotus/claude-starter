@@ -127,6 +127,10 @@ export const SYNC_DOMAIN_OPTIONS: Array<{ value: SyncDomain; label: string }> = 
 // （字典仍只是布尔开关+分页大小，见 design.md Decision 10）
 export const SYNC_DOMAIN_FIELD_MAPPING_DOMAINS: SyncDomain[] = ['ORG', 'USER', 'POSITION', 'APP', 'ROLE']
 
+// 支持"同步范围"（全部数据/指定组织范围）配置的数据域：组织/用户/任职三个，
+// 应用/角色/字典没有"归属组织"的概念，不提供该配置（见 design.md Decision 2/4）
+export const SYNC_DOMAIN_ORG_SCOPE_DOMAINS: SyncDomain[] = ['ORG', 'USER', 'POSITION']
+
 // 转换方式：不转换 / 固定值 / 转换脚本，与后端 app/sync/constant/TransformType 对齐
 export type TransformType = 'NO_TRANSFORM' | 'FIXED_VALUE' | 'SCRIPT'
 
@@ -171,4 +175,29 @@ export interface AppSyncFieldMappingSaveRequest {
   appFieldCode: string
   transformType: TransformType
   transformValue: string | null
+}
+
+// ---- 同步配置·同步范围：组织/用户/任职三个数据域按应用配置的组织范围（全部数据/指定
+// 组织范围），与后台管理员"管辖组织范围"物理隔离的独立一套配置，形状对齐
+// types/admin.ts 里的 AdminOrgScopeRow/AdminOrgScopeFormItem ----
+
+// 同步范围行，来自 GET /api/apps/{id}/config/sync/domains/{syncDomain}/org-scope、
+// PUT 同一地址的返回值；空数组表示"全部数据"
+export interface AppSyncOrgScopeRow {
+  orgId: number
+  orgName: string
+  includeChildren: boolean
+}
+
+// 整体替换同步范围时子表单一行的本地可编辑结构，orgId 允许暂时为空（由用户手动选择）
+export interface AppSyncOrgScopeFormItem {
+  orgId: number | null
+  includeChildren: boolean
+}
+
+// 整体替换同步范围列表的请求体元素，对应
+// PUT /api/apps/{id}/config/sync/domains/{syncDomain}/org-scope 的请求体
+export interface AppSyncOrgScopeSaveRequest {
+  orgId: number
+  includeChildren: boolean
 }

@@ -4,12 +4,16 @@ import cn.nihility.rbac.app.sync.dto.AppSyncDomainConfigUpdateRequest;
 import cn.nihility.rbac.app.sync.dto.AppSyncDomainConfigVO;
 import cn.nihility.rbac.app.sync.dto.AppSyncFieldMappingSaveRequest;
 import cn.nihility.rbac.app.sync.dto.AppSyncFieldMappingVO;
+import cn.nihility.rbac.app.sync.dto.AppSyncOrgScopeRequest;
+import cn.nihility.rbac.app.sync.dto.AppSyncOrgScopeVO;
 import java.util.List;
 
 /**
  * 应用同步配置业务逻辑接口：负责组织/用户/任职/应用/角色/字典 6 个数据域启用开关+拉取分页
- * 大小的默认生成、查询、修改，以及组织/用户/任职/应用/角色 5 个数据域字段级同步映射的查询、
- * 整体替换保存（app-sync-field-mapping change proposal.md）。
+ * 大小的默认生成、查询、修改，组织/用户/任职/应用/角色 5 个数据域字段级同步映射的查询、
+ * 整体替换保存（app-sync-field-mapping change proposal.md），以及组织/用户/任职 3 个数据域
+ * 按应用配置的同步范围（全部数据/指定组织范围）的查询、整体替换保存
+ * （app-sync-org-scope-and-app-change-log change proposal.md）。
  */
 public interface AppSyncConfigService {
 
@@ -63,4 +67,24 @@ public interface AppSyncConfigService {
      */
     List<AppSyncFieldMappingVO> replaceFieldMappings(Long appRefId, String syncDomain,
             List<AppSyncFieldMappingSaveRequest> requests);
+
+    /**
+     * 查询指定应用某个数据域配置的同步范围（组织列表）。
+     *
+     * @param appRefId   应用 id（{@code tab_app.id}）
+     * @param syncDomain 数据域，必须落在 {@code SyncDomain.ORG_SCOPE_DOMAINS} 内
+     * @return 同步范围视图对象列表，空列表表示"全部数据"
+     */
+    List<AppSyncOrgScopeVO> listOrgScope(Long appRefId, String syncDomain);
+
+    /**
+     * 整体替换指定应用某个数据域的同步范围（组织列表）：先按 {@code (appRefId, syncDomain)}
+     * 物理删除既有范围行，再按提交内容批量插入，整个操作在一个事务内完成，不做按行 diff。
+     *
+     * @param appRefId   应用 id（{@code tab_app.id}）
+     * @param syncDomain 数据域，必须落在 {@code SyncDomain.ORG_SCOPE_DOMAINS} 内
+     * @param requests   本次提交的完整同步范围行列表，空列表表示改为"全部数据"
+     * @return 保存后的同步范围视图对象列表
+     */
+    List<AppSyncOrgScopeVO> replaceOrgScope(Long appRefId, String syncDomain, List<AppSyncOrgScopeRequest> requests);
 }

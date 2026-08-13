@@ -4,6 +4,8 @@ import cn.nihility.rbac.app.sync.dto.AppSyncDomainConfigUpdateRequest;
 import cn.nihility.rbac.app.sync.dto.AppSyncDomainConfigVO;
 import cn.nihility.rbac.app.sync.dto.AppSyncFieldMappingSaveRequest;
 import cn.nihility.rbac.app.sync.dto.AppSyncFieldMappingVO;
+import cn.nihility.rbac.app.sync.dto.AppSyncOrgScopeRequest;
+import cn.nihility.rbac.app.sync.dto.AppSyncOrgScopeVO;
 import cn.nihility.rbac.app.sync.service.AppSyncConfigService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -91,5 +93,36 @@ public class AppSyncConfigController {
             @Parameter(description = "数据域：ORG/USER/POSITION/APP/ROLE") @RequestParam String domain,
             @Valid @RequestBody List<AppSyncFieldMappingSaveRequest> requests) {
         return appSyncConfigService.replaceFieldMappings(id, domain, requests);
+    }
+
+    /**
+     * 查询应用某个数据域配置的同步范围。
+     *
+     * @param id         应用 id（{@code tab_app.id}）
+     * @param syncDomain 数据域：ORG/USER/POSITION
+     * @return 同步范围（组织）列表，空列表表示"全部数据"
+     */
+    @Operation(summary = "查询同步范围", description = "查询组织/用户/任职数据域按应用配置的同步范围（组织列表），空列表表示全部数据")
+    @GetMapping("/api/apps/{id}/config/sync/domains/{syncDomain}/org-scope")
+    public List<AppSyncOrgScopeVO> listOrgScope(@PathVariable Long id,
+            @Parameter(description = "数据域：ORG/USER/POSITION") @PathVariable String syncDomain) {
+        return appSyncConfigService.listOrgScope(id, syncDomain);
+    }
+
+    /**
+     * 整体替换应用某个数据域配置的同步范围。
+     *
+     * @param id         应用 id（{@code tab_app.id}）
+     * @param syncDomain 数据域：ORG/USER/POSITION
+     * @param requests   本次提交的完整同步范围行列表，空列表表示改为"全部数据"
+     * @return 保存后的同步范围列表
+     */
+    @Operation(summary = "保存同步范围", description = "整体替换语义：提交当前数据域的完整同步范围（组织）行列表，先删后插，"
+            + "空列表表示改为全部数据，仅支持组织/用户/任职三个数据域")
+    @PutMapping("/api/apps/{id}/config/sync/domains/{syncDomain}/org-scope")
+    public List<AppSyncOrgScopeVO> replaceOrgScope(@PathVariable Long id,
+            @Parameter(description = "数据域：ORG/USER/POSITION") @PathVariable String syncDomain,
+            @Valid @RequestBody List<AppSyncOrgScopeRequest> requests) {
+        return appSyncConfigService.replaceOrgScope(id, syncDomain, requests);
     }
 }

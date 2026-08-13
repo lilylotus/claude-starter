@@ -10,10 +10,14 @@ import cn.nihility.rbac.app.sync.dto.AppSyncDomainConfigVO;
 import cn.nihility.rbac.app.sync.dto.AppSyncFieldMappingRow;
 import cn.nihility.rbac.app.sync.dto.AppSyncFieldMappingSaveRequest;
 import cn.nihility.rbac.app.sync.dto.AppSyncFieldMappingVO;
+import cn.nihility.rbac.app.sync.dto.AppSyncOrgScopeRequest;
+import cn.nihility.rbac.app.sync.dto.AppSyncOrgScopeVO;
 import cn.nihility.rbac.app.sync.entity.AppSyncDomainConfigEntity;
 import cn.nihility.rbac.app.sync.entity.AppSyncFieldMappingEntity;
+import cn.nihility.rbac.app.sync.entity.AppSyncOrgScopeEntity;
 import cn.nihility.rbac.app.sync.mapper.AppSyncDomainConfigMapper;
 import cn.nihility.rbac.app.sync.mapper.AppSyncFieldMappingMapper;
+import cn.nihility.rbac.app.sync.mapper.AppSyncOrgScopeMapper;
 import cn.nihility.rbac.app.sync.mapstruct.AppSyncDomainConfigConvert;
 import cn.nihility.rbac.app.sync.mapstruct.AppSyncFieldMappingConvert;
 import cn.nihility.rbac.app.sync.service.AppSyncConfigService;
@@ -61,6 +65,9 @@ public class AppSyncConfigServiceImpl implements AppSyncConfigService {
 
     /** 应用同步字段映射数据访问接口。 */
     private final AppSyncFieldMappingMapper appSyncFieldMappingMapper;
+
+    /** 应用同步组织范围数据访问接口。 */
+    private final AppSyncOrgScopeMapper appSyncOrgScopeMapper;
 
     /** 应用数据访问接口，仅用于只读查询应用实体（校验存在性、管辖组织范围）。 */
     private final AppMapper appMapper;
@@ -256,6 +263,76 @@ public class AppSyncConfigServiceImpl implements AppSyncConfigService {
                 throw new BusinessException("转换方式为转换脚本时，转换取值不能为空");
             }
             TransformScriptValidator.validateSyntax(transformValue);
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public List<AppSyncOrgScopeVO> listOrgScope(Long appRefId, String syncDomain) {
+        if (!SyncDomain.ORG_SCOPE_DOMAINS.contains(syncDomain)) {
+            throw new BusinessException("该数据域不支持同步范围配置");
+        }
+        return appSyncOrgScopeMapper.selectByAppRefIdAndDomain(appRefId, syncDomain);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    @Transactional
+    public List<AppSyncOrgScopeVO> replaceOrgScope(Long appRefId, String syncDomain,
+            List<AppSyncOrgScopeRequest> requests) {
+        if (!SyncDomain.ORG_SCOPE_DOMAINS.contains(syncDomain)) {
+            throw new BusinessException("该数据域不支持同步范围配置");
+        }
+        AppEntity appEntity = AppScopeGuard.getExistingAppInScope(appMapper, orgScopeService, appRefId);
+        List<AppSyncOrgScopeRequest> effectiveRequests = requests == null ? List.of() : requests;
+        assertOrgScopeRequestsValid(effectiveRequests);
+
+        LambdaQueryWrapper<AppSyncOrgScopeEntity> deleteWrapper = new LambdaQueryWrapper<AppSyncOrgScopeEntity>()
+                .eq(AppSyncOrgScopeEntity::getAppRefId, appRefId)
+                .eq(AppSyncOrgScopeEntity::getSyncDomain, syncDomain);
+        Long beforeCount = appSyncOrgScopeMapper.selectCount(deleteWrapper);
+        beforeCount = beforeCount == null ? 0L : beforeCount;
+        appSyncOrgScopeMapper.delete(deleteWrapper);
+
+        String operator = Objects.toString(currentOperatorService.resolveUserId(), null);
+        LocalDateTime now = LocalDateTime.now();
+        for (AppSyncOrgScopeRequest request : effectiveRequests) {
+            AppSyncOrgScopeEntity entity = AppSyncOrgScopeEntity.builder()
+                    .appRefId(appRefId)
+                    .syncDomain(syncDomain)
+                    .orgId(request.getOrgId())
+                    .includeChildren(request.getIncludeChildren())
+                    .createBy(operator)
+                    .createTime(now)
+                    .updateBy(operator)
+                    .updateTime(now)
+                    .build();
+            appSyncOrgScopeMapper.insert(entity);
+        }
+
+        operationLogRecorder.recordUpdate(OperationLogResourceType.APP, appRefId, appEntity.getName(),
+                Map.of("同步范围", beforeCount + " 行"), Map.of("同步范围", effectiveRequests.size() + " 行"));
+        return listOrgScope(appRefId, syncDomain);
+    }
+
+    /**
+     * 逐项校验同步范围保存请求：{@code orgId} 必填；同一请求列表内 {@code orgId} 不允许重复。
+     *
+     * @param requests 本次提交的完整同步范围行列表
+     */
+    private void assertOrgScopeRequestsValid(List<AppSyncOrgScopeRequest> requests) {
+        Set<Long> seenOrgIds = new HashSet<>();
+        for (AppSyncOrgScopeRequest request : requests) {
+            if (request.getOrgId() == null) {
+                throw new BusinessException("组织不能为空");
+            }
+            if (!seenOrgIds.add(request.getOrgId())) {
+                throw new BusinessException("同一数据域下，同一组织不能重复添加");
+            }
         }
     }
 

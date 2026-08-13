@@ -75,8 +75,9 @@ AppManagement（应用管理，/application/list）
 - AppManagement:app:config:resetSecret       重置 SecretKey
 - AppManagement:app:config:editSignAlgorithm 修改签名算法
 - AppManagement:app:config:editSync          修改同步配置（是否需要签名/验签校验，组织/用户/
-  任职/应用/角色/字典六个数据域的启用开关+拉取分页大小，以及组织/用户/任职/应用/角色五个
-  数据域的字段级同步映射配置）
+  任职/应用/角色/字典六个数据域的启用开关+拉取分页大小，组织/用户/任职/应用/角色五个
+  数据域的字段级同步映射配置，以及组织/用户/任职三个数据域按应用配置的同步范围——全部数据
+  或指定组织范围（可选含子孙组织））
 
 
 权限管理

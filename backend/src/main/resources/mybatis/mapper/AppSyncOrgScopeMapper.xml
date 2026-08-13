@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 应用同步组织范围查询：tab_app_sync_org_scope 关联 tab_org 回填组织名称。用
+     INNER JOIN（而非 LEFT JOIN）是有意为之：组织若已被删除，对应的同步范围行没有展示
+     价值，直接不返回。 -->
+<mapper namespace="cn.nihility.rbac.app.sync.mapper.AppSyncOrgScopeMapper">
+
+    <select id="selectByAppRefIdAndDomain" resultType="cn.nihility.rbac.app.sync.dto.AppSyncOrgScopeVO">
+        SELECT
+        s.org_id AS org_id,
+        o.name AS org_name,
+        s.include_children AS include_children
+        FROM tab_app_sync_org_scope s
+        INNER JOIN tab_org o ON o.id = s.org_id
+        WHERE s.app_ref_id = #{appRefId}
+        AND s.sync_domain = #{syncDomain}
+        ORDER BY o.show_order DESC, o.id ASC
+    </select>
+
+</mapper>

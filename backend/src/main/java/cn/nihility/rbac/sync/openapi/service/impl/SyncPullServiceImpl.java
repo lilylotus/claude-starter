@@ -57,7 +57,7 @@ public class SyncPullServiceImpl implements SyncPullService {
             return List.of();
         }
 
-        List<AppDataChangeLogEntity> logs = appDataChangeLogService.selectLatestByBizIds(dataType, bizIds);
+        List<AppDataChangeLogEntity> logs = appDataChangeLogService.selectLatestByBizIds(appRefId, dataType, bizIds);
         return logs.stream().map(changeLog -> toVO(appRefId, changeLog)).filter(Optional::isPresent)
                 .map(Optional::get).toList();
     }
@@ -80,7 +80,7 @@ public class SyncPullServiceImpl implements SyncPullService {
                 return List.of();
             }
             int effectiveLimit = effectiveLimit(limit, domainConfig.getPageSize());
-            List<AppDataChangeLogEntity> logs = appDataChangeLogService.selectBySequence(List.of(dataType),
+            List<AppDataChangeLogEntity> logs = appDataChangeLogService.selectBySequence(appRefId, List.of(dataType),
                     fromSequence, effectiveLimit);
             return logs.stream().map(changeLog -> toVO(appRefId, changeLog)).filter(Optional::isPresent)
                     .map(Optional::get).toList();
@@ -96,7 +96,7 @@ public class SyncPullServiceImpl implements SyncPullService {
         int effectiveLimit = effectiveLimit(limit, minPageSize);
         Set<String> domains = new LinkedHashSet<>();
         enabledConfigs.forEach(config -> domains.add(config.getSyncDomain()));
-        List<AppDataChangeLogEntity> logs = appDataChangeLogService.selectBySequence(domains, fromSequence,
+        List<AppDataChangeLogEntity> logs = appDataChangeLogService.selectBySequence(appRefId, domains, fromSequence,
                 effectiveLimit);
         return logs.stream().map(changeLog -> toVO(appRefId, changeLog)).filter(Optional::isPresent)
                 .map(Optional::get).toList();

@@ -21,10 +21,14 @@ import cn.nihility.rbac.app.sync.dto.AppSyncDomainConfigVO;
 import cn.nihility.rbac.app.sync.dto.AppSyncFieldMappingRow;
 import cn.nihility.rbac.app.sync.dto.AppSyncFieldMappingSaveRequest;
 import cn.nihility.rbac.app.sync.dto.AppSyncFieldMappingVO;
+import cn.nihility.rbac.app.sync.dto.AppSyncOrgScopeRequest;
+import cn.nihility.rbac.app.sync.dto.AppSyncOrgScopeVO;
 import cn.nihility.rbac.app.sync.entity.AppSyncDomainConfigEntity;
 import cn.nihility.rbac.app.sync.entity.AppSyncFieldMappingEntity;
+import cn.nihility.rbac.app.sync.entity.AppSyncOrgScopeEntity;
 import cn.nihility.rbac.app.sync.mapper.AppSyncDomainConfigMapper;
 import cn.nihility.rbac.app.sync.mapper.AppSyncFieldMappingMapper;
+import cn.nihility.rbac.app.sync.mapper.AppSyncOrgScopeMapper;
 import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.common.exception.BusinessException;
@@ -60,6 +64,10 @@ class AppSyncConfigServiceImplTest {
     @Mock
     private AppSyncFieldMappingMapper appSyncFieldMappingMapper;
 
+    /** 被测服务的应用同步组织范围数据访问依赖，使用 Mockito 打桩。 */
+    @Mock
+    private AppSyncOrgScopeMapper appSyncOrgScopeMapper;
+
     /** 被测服务的应用数据访问依赖，使用 Mockito 打桩。 */
     @Mock
     private AppMapper appMapper;
@@ -90,7 +98,8 @@ class AppSyncConfigServiceImplTest {
     @BeforeEach
     void setUp() {
         appSyncConfigService = new AppSyncConfigServiceImpl(appSyncDomainConfigMapper, appSyncFieldMappingMapper,
-                appMapper, metadataFieldMapper, orgScopeService, currentOperatorService, operationLogRecorder);
+                appSyncOrgScopeMapper, appMapper, metadataFieldMapper, orgScopeService, currentOperatorService,
+                operationLogRecorder);
         lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.empty());
         lenient().when(orgScopeService.isOrgIdAllowed(any(), any())).thenAnswer(invocation -> orgScopeService
                 .resolveAllowedOrgIds(invocation.getArgument(0))
@@ -366,6 +375,133 @@ class AppSyncConfigServiceImplTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("应用不存在");
         verify(appSyncFieldMappingMapper, never()).delete(any());
+    }
+
+    /**
+     * 查询同步范围时，非法数据域（APP/ROLE/DICT）应拒绝，不查询数据库。
+     */
+    @Test
+    void listOrgScope_shouldThrowException_whenDomainNotSupported() {
+        assertThatThrownBy(() -> appSyncConfigService.listOrgScope(10L, SyncDomain.APP))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("不支持同步范围配置");
+        verify(appSyncOrgScopeMapper, never()).selectByAppRefIdAndDomain(any(), any());
+    }
+
+    /**
+     * 查询同步范围时，合法数据域应委托给 Mapper 查询并直接返回。
+     */
+    @Test
+    void listOrgScope_shouldDelegateToMapper_whenDomainSupported() {
+        when(appSyncOrgScopeMapper.selectByAppRefIdAndDomain(10L, SyncDomain.ORG)).thenReturn(List.of(
+                AppSyncOrgScopeVO.builder().orgId(100L).orgName("总部").includeChildren(true).build()));
+
+        List<AppSyncOrgScopeVO> result = appSyncConfigService.listOrgScope(10L, SyncDomain.ORG);
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getOrgName()).isEqualTo("总部");
+    }
+
+    /**
+     * 整体替换同步范围（先删后插）：应按 (appRefId, syncDomain) 删除既有行，再按提交内容
+     * 批量插入，返回保存后的视图对象列表。
+     */
+    @Test
+    void replaceOrgScope_shouldDeleteThenInsert() {
+        AppEntity appEntity = buildAppEntity(10L, 100L, AppStatus.ENABLED);
+        when(appMapper.selectById(10L)).thenReturn(appEntity);
+        when(appSyncOrgScopeMapper.selectCount(any())).thenReturn(2L);
+        when(appSyncOrgScopeMapper.selectByAppRefIdAndDomain(10L, SyncDomain.ORG)).thenReturn(List.of(
+                AppSyncOrgScopeVO.builder().orgId(200L).orgName("分部").includeChildren(false).build()));
+
+        AppSyncOrgScopeRequest request = new AppSyncOrgScopeRequest();
+        request.setOrgId(200L);
+        request.setIncludeChildren(false);
+
+        List<AppSyncOrgScopeVO> result = appSyncConfigService.replaceOrgScope(10L, SyncDomain.ORG, List.of(request));
+
+        verify(appSyncOrgScopeMapper).delete(any());
+        ArgumentCaptor<AppSyncOrgScopeEntity> captor = ArgumentCaptor.forClass(AppSyncOrgScopeEntity.class);
+        verify(appSyncOrgScopeMapper).insert(captor.capture());
+        assertThat(captor.getValue().getAppRefId()).isEqualTo(10L);
+        assertThat(captor.getValue().getSyncDomain()).isEqualTo(SyncDomain.ORG);
+        assertThat(captor.getValue().getOrgId()).isEqualTo(200L);
+        assertThat(captor.getValue().getIncludeChildren()).isFalse();
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getOrgName()).isEqualTo("分部");
+    }
+
+    /**
+     * 提交空列表时应改为"全部数据"：删除既有行后不再插入任何行。
+     */
+    @Test
+    void replaceOrgScope_shouldClearScope_whenRequestsEmpty() {
+        AppEntity appEntity = buildAppEntity(10L, 100L, AppStatus.ENABLED);
+        when(appMapper.selectById(10L)).thenReturn(appEntity);
+        when(appSyncOrgScopeMapper.selectCount(any())).thenReturn(1L);
+
+        List<AppSyncOrgScopeVO> result = appSyncConfigService.replaceOrgScope(10L, SyncDomain.ORG, List.of());
+
+        verify(appSyncOrgScopeMapper).delete(any());
+        verify(appSyncOrgScopeMapper, never()).insert(any(AppSyncOrgScopeEntity.class));
+        assertThat(result).isEmpty();
+    }
+
+    /**
+     * 非法数据域（APP/ROLE/DICT）应拒绝保存，不做任何数据库操作。
+     */
+    @Test
+    void replaceOrgScope_shouldThrowException_whenDomainNotSupported() {
+        AppSyncOrgScopeRequest request = new AppSyncOrgScopeRequest();
+        request.setOrgId(200L);
+        request.setIncludeChildren(false);
+
+        assertThatThrownBy(() -> appSyncConfigService.replaceOrgScope(10L, SyncDomain.DICT, List.of(request)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("不支持同步范围配置");
+        verify(appMapper, never()).selectById(anyLong());
+        verify(appSyncOrgScopeMapper, never()).delete(any());
+    }
+
+    /**
+     * 请求列表内 {@code orgId} 重复时应拒绝保存。
+     */
+    @Test
+    void replaceOrgScope_shouldThrowException_whenDuplicateOrgId() {
+        AppEntity appEntity = buildAppEntity(10L, 100L, AppStatus.ENABLED);
+        when(appMapper.selectById(10L)).thenReturn(appEntity);
+
+        AppSyncOrgScopeRequest request1 = new AppSyncOrgScopeRequest();
+        request1.setOrgId(200L);
+        request1.setIncludeChildren(false);
+        AppSyncOrgScopeRequest request2 = new AppSyncOrgScopeRequest();
+        request2.setOrgId(200L);
+        request2.setIncludeChildren(true);
+
+        assertThatThrownBy(() -> appSyncConfigService.replaceOrgScope(10L, SyncDomain.ORG,
+                List.of(request1, request2)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("不能重复添加");
+        verify(appSyncOrgScopeMapper, never()).delete(any());
+    }
+
+    /**
+     * 管辖范围受限时，保存一个不在管辖范围内的应用的同步范围，应复用"应用不存在"错误文案。
+     */
+    @Test
+    void replaceOrgScope_shouldThrowException_whenOrgOutOfScope() {
+        AppEntity appEntity = buildAppEntity(10L, 100L, AppStatus.ENABLED);
+        when(appMapper.selectById(10L)).thenReturn(appEntity);
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(999L)));
+
+        AppSyncOrgScopeRequest request = new AppSyncOrgScopeRequest();
+        request.setOrgId(200L);
+        request.setIncludeChildren(false);
+
+        assertThatThrownBy(() -> appSyncConfigService.replaceOrgScope(10L, SyncDomain.ORG, List.of(request)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("应用不存在");
+        verify(appSyncOrgScopeMapper, never()).delete(any());
     }
 
     /**

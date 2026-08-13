@@ -7,6 +7,8 @@ import type {
   AppSyncDomainConfigVO,
   AppSyncFieldMappingSaveRequest,
   AppSyncFieldMappingVO,
+  AppSyncOrgScopeRow,
+  AppSyncOrgScopeSaveRequest,
   PageResult,
   SecretKeyResult,
   SignAlgorithmUpdateRequest,
@@ -104,4 +106,20 @@ export function replaceAppSyncFieldMappings(
   data: AppSyncFieldMappingSaveRequest[],
 ): Promise<AppSyncFieldMappingVO[]> {
   return request.put(`/apps/${id}/config/sync/field-mappings`, data, { params: { domain } })
+}
+
+// ---- 同步配置·同步范围：组织/用户/任职三个数据域按应用配置的组织范围（全部数据/指定组织范围）----
+
+// 查询某个数据域当前配置的同步范围（组织列表），空数组表示"全部数据"
+export function listAppSyncOrgScope(id: number, domain: SyncDomain): Promise<AppSyncOrgScopeRow[]> {
+  return request.get(`/apps/${id}/config/sync/domains/${domain}/org-scope`)
+}
+
+// 整体替换某个数据域的同步范围列表（先删后插语义），提交空数组即改为"全部数据"
+export function replaceAppSyncOrgScope(
+  id: number,
+  domain: SyncDomain,
+  data: AppSyncOrgScopeSaveRequest[],
+): Promise<AppSyncOrgScopeRow[]> {
+  return request.put(`/apps/${id}/config/sync/domains/${domain}/org-scope`, data)
 }

@@ -1,6 +1,9 @@
 package cn.nihility.rbac.sync.notify.service.impl;
 
 import cn.nihility.rbac.app.config.AppSecretProperties;
+import cn.nihility.rbac.app.constant.SyncMode;
+import cn.nihility.rbac.app.entity.AppConfigEntity;
+import cn.nihility.rbac.app.mapper.AppConfigMapper;
 import cn.nihility.rbac.common.util.HttpClientUtils;
 import cn.nihility.rbac.common.util.JacksonUtils;
 import cn.nihility.rbac.common.util.Sm4JdkUtils;
@@ -8,17 +11,15 @@ import cn.nihility.rbac.sync.changelog.entity.AppDataChangeLogEntity;
 import cn.nihility.rbac.sync.constant.SyncOperationType;
 import cn.nihility.rbac.sync.notify.constant.NotifyStatus;
 import cn.nihility.rbac.sync.notify.dto.NotifyPayload;
-import cn.nihility.rbac.sync.notify.dto.NotifyTargetRow;
 import cn.nihility.rbac.sync.notify.entity.AppNotifyRecordEntity;
 import cn.nihility.rbac.sync.notify.mapper.AppNotifyRecordMapper;
-import cn.nihility.rbac.sync.notify.mapper.NotifyTargetMapper;
 import cn.nihility.rbac.sync.notify.service.AppNotifyService;
 import cn.nihility.rbac.sync.sign.NotifySignatureAppender;
 import cn.nihility.rbac.sync.sign.SignConstants;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,8 +40,8 @@ public class AppNotifyServiceImpl implements AppNotifyService {
     /** 通知/落库场景下审计字段的固定操作人标识：变更事件消费发生在后台线程，无登录用户上下文。 */
     private static final String SYSTEM_OPERATOR = "system";
 
-    /** 通知目标应用查询数据访问接口。 */
-    private final NotifyTargetMapper notifyTargetMapper;
+    /** 应用对外接口凭证配置数据访问接口，按 {@code appRefId} 查询目标应用当前的同步方式与通知配置。 */
+    private final AppConfigMapper appConfigMapper;
 
     /** 应用通知发送记录数据访问接口。 */
     private final AppNotifyRecordMapper appNotifyRecordMapper;
@@ -55,18 +56,20 @@ public class AppNotifyServiceImpl implements AppNotifyService {
      * {@inheritDoc}
      */
     @Override
-    public void notifyMatchedApps(AppDataChangeLogEntity changeLog) {
-        List<NotifyTargetRow> targets = notifyTargetMapper.selectNotifyTargets(changeLog.getDataType());
-        for (NotifyTargetRow target : targets) {
-            try {
-                notifyOneApp(changeLog, target);
-            } catch (Exception e) {
-                // 单个应用通知异常不应影响其余应用（app-sync-notify-pull spec"一个应用通知
-                // 失败不影响其他应用"场景），此处兜底捕获，notifyOneApp 内部已经把网络异常
-                // 转换为失败记录，这里只是防御性兜底，避免遗漏的运行时异常打断循环。
-                log.warn("向应用[{}]发送变更通知时发生未预期异常，跳过并继续处理其余应用",
-                        target.getAppId(), e);
-            }
+    public void notifyIfConfigured(AppDataChangeLogEntity changeLog) {
+        AppConfigEntity target = appConfigMapper.selectOne(new LambdaQueryWrapper<AppConfigEntity>()
+                .eq(AppConfigEntity::getAppRefId, changeLog.getAppRefId()));
+        if (target == null || !SyncMode.NOTIFY.equals(target.getSyncMode())) {
+            return;
+        }
+
+        try {
+            notifyOneApp(changeLog, target);
+        } catch (Exception e) {
+            // 单个应用通知异常不应影响处理领域变更事件的调用方（app-sync-notify-pull
+            // spec"一个应用通知失败不影响其他应用"场景），此处兜底捕获，notifyOneApp 内部
+            // 已经把网络异常转换为失败记录，这里只是防御性兜底，避免遗漏的运行时异常向外传播。
+            log.warn("向应用[{}]发送变更通知时发生未预期异常", target.getAppId(), e);
         }
     }
 
@@ -74,9 +77,9 @@ public class AppNotifyServiceImpl implements AppNotifyService {
      * 向单个应用发起一次通知请求，并把结果写入 {@code tab_app_notify_record}。
      *
      * @param changeLog 变更记录
-     * @param target    通知目标应用配置
+     * @param target    目标应用对外接口凭证配置
      */
-    private void notifyOneApp(AppDataChangeLogEntity changeLog, NotifyTargetRow target) {
+    private void notifyOneApp(AppDataChangeLogEntity changeLog, AppConfigEntity target) {
         NotifyPayload payload = NotifyPayload.builder()
                 .sequence(changeLog.getId())
                 .dataType(changeLog.getDataType())

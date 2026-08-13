@@ -16,25 +16,30 @@ import org.apache.ibatis.annotations.Param;
 public interface AppDataChangeLogMapper extends BaseMapper<AppDataChangeLogEntity> {
 
     /**
-     * 按数据类型 + 一批变更对象 id，查询每个 id 命中的最新一条变更记录
-     * （app-sync-notify-pull-api change design.md Decision 9）。
+     * 按应用 id + 数据类型 + 一批变更对象 id，查询每个 id 命中的最新一条变更记录
+     * （app-sync-notify-pull-api change design.md Decision 9；按应用过滤见
+     * app-sync-org-scope-and-app-change-log change design.md Decision 7）。
      *
+     * @param appRefId 调用方应用 id（{@code tab_app.id}）
      * @param dataType 数据类型
      * @param bizIds   变更对象 id 列表
      * @return 每个 id 最新一条变更记录列表（未命中的 id 不出现在结果中）
      */
-    List<AppDataChangeLogEntity> selectLatestByBizIds(@Param("dataType") String dataType,
-            @Param("bizIds") List<Long> bizIds);
+    List<AppDataChangeLogEntity> selectLatestByBizIds(@Param("appRefId") Long appRefId,
+            @Param("dataType") String dataType, @Param("bizIds") List<Long> bizIds);
 
     /**
-     * 按数据类型集合 + 起始序列号，升序批量查询变更记录，最多返回 {@code limit} 条
-     * （app-sync-notify-pull-api change design.md Decision 9）。
+     * 按应用 id + 数据类型集合 + 起始序列号，升序批量查询变更记录，最多返回 {@code limit} 条
+     * （app-sync-notify-pull-api change design.md Decision 9；按应用过滤见
+     * app-sync-org-scope-and-app-change-log change design.md Decision 7）。
      *
+     * @param appRefId     调用方应用 id（{@code tab_app.id}）
      * @param dataTypes    数据类型集合（调用方已按应用允许同步的数据域过滤好）
      * @param fromSequence 起始序列号，只返回大于该值的记录
      * @param limit        最多返回条数
      * @return 变更记录列表，按 {@code id} 升序排列
      */
-    List<AppDataChangeLogEntity> selectBySequence(@Param("dataTypes") Collection<String> dataTypes,
-            @Param("fromSequence") Long fromSequence, @Param("limit") int limit);
+    List<AppDataChangeLogEntity> selectBySequence(@Param("appRefId") Long appRefId,
+            @Param("dataTypes") Collection<String> dataTypes, @Param("fromSequence") Long fromSequence,
+            @Param("limit") int limit);
 }
