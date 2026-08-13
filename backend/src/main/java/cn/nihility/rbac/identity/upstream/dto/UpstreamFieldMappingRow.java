@@ -39,6 +39,9 @@ public class UpstreamFieldMappingRow {
     /** 目标字段编码，实时取自关联的元数据字段，等价于对应请求对象的 Java 属性名。 */
     private String fieldCode;
 
+    /** 是否作为落库匹配的主键标识字段之一，同一数据域可多选组成联合主键（AND 语义）。 */
+    private Boolean isPrimaryKey;
+
     /** 转换方式：NO_TRANSFORM/FIXED_VALUE/SCRIPT。 */
     private String transformType;
 

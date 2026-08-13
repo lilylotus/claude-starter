@@ -17,6 +17,7 @@
         m.metadata_field_id AS metadataFieldId,
         mf.field_name AS fieldName,
         mf.field_code AS fieldCode,
+        m.is_primary_key AS isPrimaryKey,
         m.transform_type AS transformType,
         m.transform_value AS transformValue
         FROM tab_upstream_field_mapping m

@@ -45,6 +45,9 @@ public class UpstreamFieldMappingEntity {
     /** 目标元数据字段 id，关联 {@code tab_metadata_field.id}。 */
     private Long metadataFieldId;
 
+    /** 是否作为落库匹配的主键标识字段之一，同一数据域可多选组成联合主键（AND 语义）。 */
+    private Boolean isPrimaryKey;
+
     /** 转换方式：NO_TRANSFORM/FIXED_VALUE/SCRIPT。 */
     private String transformType;
 

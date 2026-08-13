@@ -23,6 +23,7 @@ import cn.nihility.rbac.user.mapper.UserPositionMapper;
 import cn.nihility.rbac.user.service.PositionService;
 import cn.nihility.rbac.user.service.UserService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -38,9 +39,15 @@ import org.springframework.util.StringUtils;
  * 上游同步单行落库处理器，按 {@link UpstreamDataType} 路由到组织/用户/任职三种匹配+落库
  * 算法。算法参照（不是直接依赖）{@code cn.nihility.rbac.excelimport.service.support.ImportRowExecutor}
  * 的 {@code processOrg}/{@code processUser}/{@code processPosition}/{@code bindProperties}
- * 写法：按编码匹配已有记录，命中零条调用既有 {@code create}、命中一条调用既有
- * {@code update}、命中多条判定失败，复用组织/用户/任职模块既有的创建/更新校验规则
- * （必填/格式/唯一性等），不重新实现一套（design.md Decision 3）。
+ * 写法：按调用方传入的主键标识字段（{@code primaryKeyFieldCodes}，由字段映射配置的
+ * "主键标识"勾选项决定，upstream-field-mapping-primary-key change）动态匹配已有记录，
+ * 命中零条调用既有 {@code create}、命中一条调用既有 {@code update}、命中多条判定失败，
+ * 复用组织/用户/任职模块既有的创建/更新校验规则（必填/格式/唯一性等），不重新实现一套
+ * （design.md Decision 3）。主键字段是运行时才知道的动态集合，无法用
+ * {@link LambdaQueryWrapper} 的方法引用语法表达，改用 {@link QueryWrapper} 配合
+ * {@code com.baomidou.mybatisplus.core.toolkit.StringUtils#camelToUnderline} 把字段编码
+ * 转成数据库列名逐个拼接 {@code eq} 条件（多个 {@code eq} 默认 AND 语义，天然满足联合
+ * 主键"全部相等"的要求，见 upstream-field-mapping-primary-key change design.md Decision 2）。
  *
  * <p>与 {@code ImportRowExecutor} 的差异：本类只保留"按编码匹配 + 调用既有 create/update
  * service + BeanWrapper 反射赋值"这部分算法，不引入 Excel 导入场景专属的字段配置驱动的
@@ -87,44 +94,48 @@ public class UpstreamRowUpserter {
      * 回滚，由调用方（{@code UpstreamSyncExecutor}）捕获并计入该数据域同步记录的失败
      * 明细，不影响其余行的处理（design.md Decision 4）。
      *
-     * @param dataType      数据域：ORG/USER/POSITION
-     * @param transformedRow 经字段映射转换后的一行数据，key 为系统字段编码
-     * @param rawRow        取数阶段拉取到的原始行（转换前），key 为上游字段编码；
-     *                      ORG 数据域用其解析 {@link UpstreamOrgPseudoFieldCode#PARENT_CODE}，
-     *                      POSITION 数据域用其解析 {@link UpstreamPositionPseudoFieldCode}
-     *                      约定的两个固定编码，USER 数据域不使用
+     * @param dataType             数据域：ORG/USER/POSITION
+     * @param transformedRow       经字段映射转换后的一行数据，key 为系统字段编码
+     * @param rawRow               取数阶段拉取到的原始行（转换前），key 为上游字段编码；
+     *                             ORG 数据域用其解析 {@link UpstreamOrgPseudoFieldCode#PARENT_CODE}，
+     *                             POSITION 数据域用其解析 {@link UpstreamPositionPseudoFieldCode}
+     *                             约定的两个固定编码，USER 数据域不使用
+     * @param primaryKeyFieldCodes 该数据域字段映射中标记为"主键标识"的系统字段编码列表
+     *                             （一个或多个，联合、AND 语义），由调用方
+     *                             （{@code UpstreamSyncExecutor}）保证非空
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void upsertRow(String dataType, Map<String, Object> transformedRow, Map<String, Object> rawRow) {
+    public void upsertRow(String dataType, Map<String, Object> transformedRow, Map<String, Object> rawRow,
+            List<String> primaryKeyFieldCodes) {
         switch (dataType) {
-            case UpstreamDataType.ORG -> upsertOrg(transformedRow, rawRow);
-            case UpstreamDataType.USER -> upsertUser(transformedRow);
-            case UpstreamDataType.POSITION -> upsertPosition(transformedRow, rawRow);
+            case UpstreamDataType.ORG -> upsertOrg(transformedRow, rawRow, primaryKeyFieldCodes);
+            case UpstreamDataType.USER -> upsertUser(transformedRow, primaryKeyFieldCodes);
+            case UpstreamDataType.POSITION -> upsertPosition(transformedRow, rawRow, primaryKeyFieldCodes);
             default -> throw new BusinessException("不支持的数据域：" + dataType);
         }
     }
 
     /**
-     * 处理一行组织数据：按组织编码（{@code code}）匹配已有记录；"上级组织编码"
-     * （{@link UpstreamOrgPseudoFieldCode#PARENT_CODE}）解析 {@code parentId}：取不到该
-     * 编码、取值为空或字面为 {@code "0"} 均视为顶级组织（{@code parentId=0}，不判定
-     * 失败——上游同步没有 Excel 模板"固定必填列"那样的前置保障，管理员可能就是只想同步
-     * 一批平级组织）；其余取值按 {@code tab_org.code} 匹配已有组织，匹配不到时该行判定
-     * 失败。
+     * 处理一行组织数据：按字段映射标记为"主键标识"的系统字段（一个或多个，联合、AND
+     * 语义，见 {@link #appendPrimaryKeyConditions}）匹配已有记录，替换掉写死按
+     * {@code code} 匹配的旧逻辑（upstream-field-mapping-primary-key change）；"上级组织
+     * 编码"（{@link UpstreamOrgPseudoFieldCode#PARENT_CODE}）解析 {@code parentId}：
+     * 取不到该编码、取值为空或字面为 {@code "0"} 均视为顶级组织（{@code parentId=0}，
+     * 不判定失败——上游同步没有 Excel 模板"固定必填列"那样的前置保障，管理员可能就是
+     * 只想同步一批平级组织）；其余取值按 {@code tab_org.code} 匹配已有组织，匹配不到时
+     * 该行判定失败。
      *
-     * @param row    转换后的一行数据
-     * @param rawRow 取数阶段拉取到的原始行（转换前），解析上级组织编码
+     * @param row                  转换后的一行数据
+     * @param rawRow               取数阶段拉取到的原始行（转换前），解析上级组织编码
+     * @param primaryKeyFieldCodes 标记为主键标识的系统字段编码列表
      */
-    private void upsertOrg(Map<String, Object> row, Map<String, Object> rawRow) {
-        String code = toText(row.get("code"));
-        if (!StringUtils.hasText(code)) {
-            throw new BusinessException("组织编码不能为空");
-        }
-        List<OrgEntity> matches = orgMapper.selectList(new LambdaQueryWrapper<OrgEntity>()
-                .eq(OrgEntity::getCode, code)
-                .ne(OrgEntity::getStatus, OrgStatus.DELETED));
+    private void upsertOrg(Map<String, Object> row, Map<String, Object> rawRow, List<String> primaryKeyFieldCodes) {
+        QueryWrapper<OrgEntity> wrapper = new QueryWrapper<>();
+        appendPrimaryKeyConditions(wrapper, row, primaryKeyFieldCodes);
+        wrapper.ne("status", OrgStatus.DELETED);
+        List<OrgEntity> matches = orgMapper.selectList(wrapper);
         if (matches.size() > 1) {
-            throw new BusinessException("组织编码[" + code + "]匹配到多条已存在记录，无法确定更新目标");
+            throw new BusinessException("按主键字段匹配到多条已存在的组织记录，无法确定更新目标");
         }
         Long parentId = resolveParentId(rawRow);
         if (matches.isEmpty()) {
@@ -164,20 +175,20 @@ public class UpstreamRowUpserter {
     }
 
     /**
-     * 处理一行用户数据：按用户编号（{@code code}）匹配已有记录。
+     * 处理一行用户数据：按字段映射标记为"主键标识"的系统字段（一个或多个，联合、AND
+     * 语义，见 {@link #appendPrimaryKeyConditions}）匹配已有记录，替换掉写死按
+     * {@code code} 匹配的旧逻辑（upstream-field-mapping-primary-key change）。
      *
-     * @param row 转换后的一行数据
+     * @param row                  转换后的一行数据
+     * @param primaryKeyFieldCodes 标记为主键标识的系统字段编码列表
      */
-    private void upsertUser(Map<String, Object> row) {
-        String code = toText(row.get("code"));
-        if (!StringUtils.hasText(code)) {
-            throw new BusinessException("用户编号不能为空");
-        }
-        List<UserEntity> matches = userMapper.selectList(new LambdaQueryWrapper<UserEntity>()
-                .eq(UserEntity::getCode, code)
-                .ne(UserEntity::getStatus, UserStatus.DELETED));
+    private void upsertUser(Map<String, Object> row, List<String> primaryKeyFieldCodes) {
+        QueryWrapper<UserEntity> wrapper = new QueryWrapper<>();
+        appendPrimaryKeyConditions(wrapper, row, primaryKeyFieldCodes);
+        wrapper.ne("status", UserStatus.DELETED);
+        List<UserEntity> matches = userMapper.selectList(wrapper);
         if (matches.size() > 1) {
-            throw new BusinessException("用户编号[" + code + "]匹配到多条已存在记录，无法确定更新目标");
+            throw new BusinessException("按主键字段匹配到多条已存在的用户记录，无法确定更新目标");
         }
         if (matches.isEmpty()) {
             UserCreateRequest request = new UserCreateRequest();
@@ -195,12 +206,18 @@ public class UpstreamRowUpserter {
      * 按 {@code tab_user.code}/{@code mobile}/{@code idCard} 三者任一精确相等匹配得到
      * {@code userId}，"组织编码"（{@link UpstreamPositionPseudoFieldCode#ORG_CODE}）按
      * {@code tab_org.code} 匹配得到 {@code orgId}，任一匹配不到或匹配到多条时该行判定
-     * 失败；再按 {@code userId+orgId+positionType} 复合键匹配已有任职记录。
+     * 失败——这两步只负责解析任职记录归属的所属人员、所属组织这层外键关系，不属于本次改动
+     * 范围；在此基础上，再叠加字段映射标记为"主键标识"的系统字段（一个或多个，
+     * 联合、AND 语义，见 {@link #appendPrimaryKeyConditions}）在该所属人员、所属组织
+     * 范围内匹配已有任职记录，替换掉"提供了 {@code positionType} 就按它匹配、否则任选
+     * 一条"的旧逻辑（upstream-field-mapping-primary-key change）。
      *
-     * @param row    转换后的一行数据（{@code positionType} 等 POSITION bizType 元数据字段）
-     * @param rawRow 取数阶段拉取到的原始行（转换前），解析人员标识/组织编码
+     * @param row                  转换后的一行数据（{@code positionType} 等 POSITION bizType 元数据字段）
+     * @param rawRow               取数阶段拉取到的原始行（转换前），解析人员标识/组织编码
+     * @param primaryKeyFieldCodes 标记为主键标识的系统字段编码列表
      */
-    private void upsertPosition(Map<String, Object> row, Map<String, Object> rawRow) {
+    private void upsertPosition(Map<String, Object> row, Map<String, Object> rawRow,
+            List<String> primaryKeyFieldCodes) {
         Map<String, Object> source = rawRow != null ? rawRow : Map.of();
         String userIdentifier = toText(source.get(UpstreamPositionPseudoFieldCode.USER_IDENTIFIER));
         if (!StringUtils.hasText(userIdentifier)) {
@@ -224,17 +241,14 @@ public class UpstreamRowUpserter {
             throw new BusinessException("所属组织编码[" + orgCode + "]无法匹配到已有组织记录");
         }
 
-        String positionType = toText(row.get("positionType"));
-        LambdaQueryWrapper<UserPositionEntity> wrapper = new LambdaQueryWrapper<UserPositionEntity>()
-                .eq(UserPositionEntity::getUserId, user.getId())
-                .eq(UserPositionEntity::getOrgId, org.getId())
-                .ne(UserPositionEntity::getStatus, PositionStatus.DELETED);
-        if (StringUtils.hasText(positionType)) {
-            wrapper.eq(UserPositionEntity::getPositionType, positionType);
-        }
+        QueryWrapper<UserPositionEntity> wrapper = new QueryWrapper<UserPositionEntity>()
+                .eq("user_id", user.getId())
+                .eq("org_id", org.getId())
+                .ne("status", PositionStatus.DELETED);
+        appendPrimaryKeyConditions(wrapper, row, primaryKeyFieldCodes);
         List<UserPositionEntity> matches = userPositionMapper.selectList(wrapper);
         if (matches.size() > 1) {
-            throw new BusinessException("匹配到多条已存在的任职记录，无法确定更新目标");
+            throw new BusinessException("按主键字段匹配到多条已存在的任职记录，无法确定更新目标");
         }
 
         if (matches.isEmpty()) {
@@ -248,6 +262,30 @@ public class UpstreamRowUpserter {
             bindProperties(request, row);
             request.setOrgId(org.getId());
             positionService.update(matches.get(0).getId(), request);
+        }
+    }
+
+    /**
+     * 把主键标识字段列表逐个转换为查询条件追加到给定的 {@link QueryWrapper} 上（多个
+     * {@code eq} 默认 AND 语义，天然满足联合主键"全部相等"的要求）：字段编码通过
+     * {@code com.baomidou.mybatisplus.core.toolkit.StringUtils#camelToUnderline} 转换成
+     * 数据库列名——元数据字段目录里的字段本身就是"与业务表物理列一一对应的开放配置列"这一
+     * 既有不变量，不存在字段编码与列名对不上驼峰/下划线转换规则的情形
+     * （upstream-field-mapping-primary-key change design.md Decision 2）。任一主键字段
+     * 在转换后的行里取值为空（{@code null} 或空白字符串）时，该行直接判定失败。
+     *
+     * @param wrapper              待追加条件的查询构造器
+     * @param row                  转换后的一行数据，key 为系统字段编码
+     * @param primaryKeyFieldCodes 标记为主键标识的系统字段编码列表
+     */
+    private void appendPrimaryKeyConditions(QueryWrapper<?> wrapper, Map<String, Object> row,
+            List<String> primaryKeyFieldCodes) {
+        for (String fieldCode : primaryKeyFieldCodes) {
+            Object value = row.get(fieldCode);
+            if (!StringUtils.hasText(toText(value))) {
+                throw new BusinessException("主键字段[" + fieldCode + "]取值为空，无法判断新增或更新");
+            }
+            wrapper.eq(com.baomidou.mybatisplus.core.toolkit.StringUtils.camelToUnderline(fieldCode), value);
         }
     }
 

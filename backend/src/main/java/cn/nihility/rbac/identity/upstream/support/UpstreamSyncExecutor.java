@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -98,9 +99,12 @@ public class UpstreamSyncExecutor {
     }
 
     /**
-     * 同步一个数据域：取数→字段映射转换→逐行落库→汇总写入一条同步记录。取数阶段异常
-     * 直接记一条 {@code FAILED} 记录，不影响其余数据域继续处理（design.md Decision 5
-     * Scenario：取数阶段异常记录为 FAILED）。
+     * 同步一个数据域：先校验字段映射中是否配置了至少一个"主键标识"字段，未配置时直接
+     * 判定失败并返回，不发起取数请求（design.md Decision 4：兜底本次改动上线前保存、
+     * 默认零主键字段的历史配置，避免用空匹配条件误伤本地数据）；配置了主键字段时才
+     * 取数→字段映射转换→逐行落库→汇总写入一条同步记录。取数阶段异常直接记一条
+     * {@code FAILED} 记录，不影响其余数据域继续处理（design.md Decision 5 Scenario：
+     * 取数阶段异常记录为 FAILED）。
      *
      * @param source       上游数据源
      * @param domainConfig 数据域配置
@@ -109,6 +113,20 @@ public class UpstreamSyncExecutor {
     private void syncDomain(UpstreamSourceEntity source, UpstreamDomainConfigEntity domainConfig,
             String triggerType) {
         LocalDateTime startTime = LocalDateTime.now();
+        List<UpstreamFieldMappingRow> mappings = upstreamFieldMappingMapper.selectBySourceIdAndDataType(
+                source.getId(), domainConfig.getDataType());
+        List<String> primaryKeyFieldCodes = mappings.stream()
+                .filter(mapping -> Boolean.TRUE.equals(mapping.getIsPrimaryKey()))
+                .map(UpstreamFieldMappingRow::getFieldCode)
+                .collect(Collectors.toList());
+        if (primaryKeyFieldCodes.isEmpty()) {
+            log.warn("上游数据源[{}]数据域[{}]未配置主键字段，跳过本次同步", source.getId(), domainConfig.getDataType());
+            saveSyncRecord(source.getId(), domainConfig.getDataType(), triggerType, startTime, LocalDateTime.now(),
+                    UpstreamSyncStatus.FAILED, 0, 0, 0,
+                    "该数据域尚未在字段映射中标记主键字段，无法判断新增/更新，请先在字段映射里标记至少一个主键字段后再同步");
+            return;
+        }
+
         List<Map<String, Object>> rawRows;
         try {
             rawRows = fetchRawRows(source, domainConfig);
@@ -119,16 +137,14 @@ public class UpstreamSyncExecutor {
             return;
         }
 
-        List<UpstreamFieldMappingRow> mappings = upstreamFieldMappingMapper.selectBySourceIdAndDataType(
-                source.getId(), domainConfig.getDataType());
-
         int total = rawRows.size();
         int success = 0;
         List<String> failMessages = new ArrayList<>();
         for (Map<String, Object> rawRow : rawRows) {
             try {
                 Map<String, Object> transformedRow = upstreamFieldMappingTransformer.transform(mappings, rawRow);
-                upstreamRowUpserter.upsertRow(domainConfig.getDataType(), transformedRow, rawRow);
+                upstreamRowUpserter.upsertRow(domainConfig.getDataType(), transformedRow, rawRow,
+                        primaryKeyFieldCodes);
                 success++;
             } catch (Exception e) {
                 String message = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();

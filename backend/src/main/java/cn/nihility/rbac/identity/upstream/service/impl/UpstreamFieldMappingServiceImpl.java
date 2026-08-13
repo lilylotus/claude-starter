@@ -98,12 +98,19 @@ public class UpstreamFieldMappingServiceImpl implements UpstreamFieldMappingServ
      * {@code metadataFieldId} 必须存在、状态启用、{@code bizType} 与 {@code dataType}
      * 一致，且同一请求列表内不重复；{@code transformType=FIXED_VALUE} 时
      * {@code transformValue} 必填；{@code transformType=SCRIPT} 时 {@code transformValue}
-     * 必填且语法必须合法。
+     * 必填且语法必须合法；若本次提交的列表非空，须至少有一行标记为主键标识，否则拒绝
+     * 保存（upstream-field-mapping-primary-key change：落库匹配键从写死的 code/
+     * positionType 改为按主键标识字段动态匹配，至少要有一个主键字段才能判断新增/更新）。
      *
      * @param dataType 数据域
      * @param requests 本次提交的完整字段映射行列表
      */
     private void assertRequestsValid(String dataType, List<UpstreamFieldMappingSaveRequest> requests) {
+        boolean hasPrimaryKey = requests.stream().anyMatch(request -> Boolean.TRUE.equals(request.getIsPrimaryKey()));
+        if (!requests.isEmpty() && !hasPrimaryKey) {
+            throw new BusinessException("请至少标记一个字段作为主键标识，用于判断新增或更新");
+        }
+
         Set<String> seenUpstreamFieldCodes = new HashSet<>();
         Set<Long> seenMetadataFieldIds = new HashSet<>();
         for (UpstreamFieldMappingSaveRequest request : requests) {

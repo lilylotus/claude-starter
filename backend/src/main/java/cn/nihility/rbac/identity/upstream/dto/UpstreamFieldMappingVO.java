@@ -44,6 +44,10 @@ public class UpstreamFieldMappingVO {
     @Schema(description = "目标字段编码，只读")
     private String fieldCode;
 
+    /** 是否作为落库匹配的主键标识字段之一，同一数据域可多选组成联合主键（AND 语义）。 */
+    @Schema(description = "是否作为落库匹配的主键标识字段之一")
+    private Boolean isPrimaryKey;
+
     /** 转换方式：NO_TRANSFORM/FIXED_VALUE/SCRIPT。 */
     @Schema(description = "转换方式：NO_TRANSFORM（不转换）/FIXED_VALUE（固定值）/SCRIPT（转换脚本）")
     private String transformType;

@@ -34,6 +34,12 @@ public class UpstreamFieldMappingSaveRequest {
     @Schema(description = "目标元数据字段 id，关联元数据字段")
     private Long metadataFieldId;
 
+    /** 是否作为落库匹配的主键标识字段之一，必填；同一数据域可多选组成联合主键（AND 语义），
+     * 若本次提交的列表非空，须至少有一行为 {@code true}（服务层校验）。 */
+    @NotNull(message = "主键标识不能为空")
+    @Schema(description = "是否作为落库匹配的主键标识字段之一")
+    private Boolean isPrimaryKey;
+
     /** 转换方式，必填，只能是 NO_TRANSFORM/FIXED_VALUE/SCRIPT。 */
     @NotBlank(message = "转换方式不能为空")
     @Pattern(regexp = "^(NO_TRANSFORM|FIXED_VALUE|SCRIPT)$", message = "转换方式只能是 NO_TRANSFORM、FIXED_VALUE 或 SCRIPT")
