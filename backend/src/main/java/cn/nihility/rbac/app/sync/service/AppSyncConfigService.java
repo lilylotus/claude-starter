@@ -7,14 +7,14 @@ import cn.nihility.rbac.app.sync.dto.AppSyncFieldMappingVO;
 import java.util.List;
 
 /**
- * 应用同步配置业务逻辑接口：负责组织/用户/应用/角色/字典 5 个数据域启用开关+拉取分页
- * 大小的默认生成、查询、修改，以及组织/用户/应用/角色 4 个数据域字段级同步映射的查询、
+ * 应用同步配置业务逻辑接口：负责组织/用户/任职/应用/角色/字典 6 个数据域启用开关+拉取分页
+ * 大小的默认生成、查询、修改，以及组织/用户/任职/应用/角色 5 个数据域字段级同步映射的查询、
  * 整体替换保存（app-sync-field-mapping change proposal.md）。
  */
 public interface AppSyncConfigService {
 
     /**
-     * 为一个刚创建的应用生成默认的 5 行数据域配置（组织/用户/应用/角色/字典各一行，默认
+     * 为一个刚创建的应用生成默认的 6 行数据域配置（组织/用户/任职/应用/角色/字典各一行，默认
      * 全部不启用，分页大小默认 20），供 {@code AppConfigServiceImpl#createDefaultConfig}
      * 在同一事务内调用。
      *
@@ -24,7 +24,7 @@ public interface AppSyncConfigService {
     void createDefaultDomainConfigs(Long appRefId, String operator);
 
     /**
-     * 查询指定应用的 5 行数据域配置。
+     * 查询指定应用的 6 行数据域配置。
      *
      * @param appRefId 应用 id（{@code tab_app.id}）
      * @return 数据域配置视图对象列表
@@ -35,7 +35,7 @@ public interface AppSyncConfigService {
      * 修改指定应用某个数据域的启用开关与拉取分页大小。
      *
      * @param appRefId   应用 id（{@code tab_app.id}）
-     * @param syncDomain 数据域，必须是 {@code SyncDomain} 五个常量之一
+     * @param syncDomain 数据域，必须是 {@code SyncDomain} 六个常量之一
      * @param request    数据域配置修改请求
      * @return 修改后的数据域配置视图对象
      */

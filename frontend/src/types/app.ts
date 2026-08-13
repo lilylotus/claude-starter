@@ -71,8 +71,8 @@ export type SyncMode = 'NOTIFY' | 'PULL'
 
 // 应用对外接口配置，来自 GET /api/apps/{id}/config、PUT .../sign-algorithm、PUT .../sync
 // 的返回值；出于安全策略，永远不包含 secretKey 字段（明文只在重置接口的响应里出现一次）。
-// 数据范围（组织/用户/应用/角色/字典各自的启用开关+分页大小）从 v2 起改由独立的
-// AppSyncDomainConfigVO 五行承载（见下方 GET /api/apps/{id}/config/sync/domains），
+// 数据范围（组织/用户/任职/应用/角色/字典各自的启用开关+分页大小）从 v2 起改由独立的
+// AppSyncDomainConfigVO 六行承载（见下方 GET /api/apps/{id}/config/sync/domains），
 // 不再随这个接口一起返回。
 export interface AppConfigVO {
   appId: string
@@ -82,6 +82,8 @@ export interface AppConfigVO {
   // 同步方式为 NOTIFY 时才有意义；PULL 模式下也可能保留上一次填写的值（后端不强制清空）
   notifyUrl: string
   notifyParams: Record<string, string>
+  // 是否需要签名/验签校验：出站"通知"请求携带签名参数、入站"拉取"请求做验签校验
+  needSign: boolean
   createBy: string
   createTime: string
   updateBy: string
@@ -99,6 +101,7 @@ export interface SyncConfigUpdateRequest {
   syncMode: SyncMode
   notifyUrl: string
   notifyParams: Record<string, string>
+  needSign: boolean
 }
 
 // 重置 SecretKey 响应，对应 POST /api/apps/{id}/config/secret-key/reset；
@@ -107,21 +110,22 @@ export interface SecretKeyResult {
   secretKey: string
 }
 
-// ---- 同步配置·数据范围：数据域（组织/用户/应用/角色/字典），与后端
+// ---- 同步配置·数据范围：数据域（组织/用户/任职/应用/角色/字典），与后端
 // app/sync/constant/SyncDomain 对齐 ----
-export type SyncDomain = 'ORG' | 'USER' | 'APP' | 'ROLE' | 'DICT'
+export type SyncDomain = 'ORG' | 'USER' | 'POSITION' | 'APP' | 'ROLE' | 'DICT'
 
 export const SYNC_DOMAIN_OPTIONS: Array<{ value: SyncDomain; label: string }> = [
   { value: 'ORG', label: '组织' },
   { value: 'USER', label: '用户' },
+  { value: 'POSITION', label: '任职' },
   { value: 'APP', label: '应用' },
   { value: 'ROLE', label: '角色' },
   { value: 'DICT', label: '字典' },
 ]
 
-// 支持字段级同步映射配置的数据域：组织/用户/应用/角色四个，不含字典
+// 支持字段级同步映射配置的数据域：组织/用户/任职/应用/角色五个，不含字典
 // （字典仍只是布尔开关+分页大小，见 design.md Decision 10）
-export const SYNC_DOMAIN_FIELD_MAPPING_DOMAINS: SyncDomain[] = ['ORG', 'USER', 'APP', 'ROLE']
+export const SYNC_DOMAIN_FIELD_MAPPING_DOMAINS: SyncDomain[] = ['ORG', 'USER', 'POSITION', 'APP', 'ROLE']
 
 // 转换方式：不转换 / 固定值 / 转换脚本，与后端 app/sync/constant/TransformType 对齐
 export type TransformType = 'NO_TRANSFORM' | 'FIXED_VALUE' | 'SCRIPT'

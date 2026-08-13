@@ -60,7 +60,13 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
     /** {@code menu} 请求头格式：模块:资源:操作，如 {@code OrgManagement:org:view}。 */
     private static final Pattern MENU_PATTERN = Pattern.compile("^[A-Za-z]+:[A-Za-z]+:[A-Za-z]+$");
 
-    /** 完全豁免身份校验（含 {@code menu} 请求头校验）的路径：登录相关接口 + springdoc/swagger-ui。 */
+    /**
+     * 完全豁免身份校验（含 {@code menu} 请求头校验）的路径：登录相关接口 +
+     * springdoc/swagger-ui + 对外同步拉取接口。{@code /open/api/sync/**} 面向外部应用，
+     * 鉴权只走 AccessKey + 签名（{@code cn.nihility.rbac.sync.sign.OpenApiSignInterceptor}），
+     * 不使用本过滤器基于登录会话的 {@code identity-token}/{@code menu} 校验
+     * （app-sync-notify-pull-api change design.md Decision 9）。
+     */
     private static final List<String> FULL_WHITELIST = List.of(
             "/api/auth/public-key",
             "/api/auth/login",
@@ -70,7 +76,8 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
             "/v3/api-docs",
             "/v3/api-docs/**",
             "/swagger-resources/**",
-            "/webjars/**");
+            "/webjars/**",
+            "/open/api/sync/**");
 
     /**
      * 仍需 {@code identity-token}/{@code menu} 校验，但豁免"首登强制改密"拦截与

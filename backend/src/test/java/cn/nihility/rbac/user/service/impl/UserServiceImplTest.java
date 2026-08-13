@@ -24,6 +24,7 @@ import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
 import cn.nihility.rbac.formfield.support.FormFieldSnapshotSupport;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.mapper.OrgMapper;
+import cn.nihility.rbac.sync.event.DomainEventPublisher;
 import cn.nihility.rbac.user.constant.PositionStatus;
 import cn.nihility.rbac.user.constant.UserStatus;
 import cn.nihility.rbac.user.dto.UserCreateRequest;
@@ -104,6 +105,10 @@ class UserServiceImplTest {
     @Mock
     private UserDisplayService userDisplayService;
 
+    /** 被测服务的数据变更事件发布依赖，使用 Mockito 打桩。 */
+    @Mock
+    private DomainEventPublisher domainEventPublisher;
+
     /** 被测服务实例。 */
     private UserServiceImpl userService;
 
@@ -129,7 +134,7 @@ class UserServiceImplTest {
         userService = new UserServiceImpl(userMapper, userPositionMapper, orgMapper, operationLogRecorder,
                 formFieldDefinitionService, formFieldSnapshotSupport, dictItemService, positionDynamicFieldSupport,
                 positionLogSnapshotSupport, passwordService, orgScopeService, currentOperatorService,
-                userDisplayService);
+                userDisplayService, domainEventPublisher);
         lenient().when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
         lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.empty());

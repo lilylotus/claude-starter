@@ -5,8 +5,13 @@ import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.app.sync.constant.SyncDomain;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
+import cn.nihility.rbac.operationlog.constant.OperationType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.sync.event.DomainChangeEvent;
+import cn.nihility.rbac.sync.event.DomainEventPublisher;
+import cn.nihility.rbac.sync.event.DomainSnapshotSupport;
 import cn.nihility.rbac.user.constant.PositionStatus;
 import cn.nihility.rbac.user.dto.PositionCreateRequest;
 import cn.nihility.rbac.user.dto.PositionUpdateRequest;
@@ -69,6 +74,13 @@ public class PositionServiceImpl implements PositionService {
 
     /** 审计字段（{@code createBy}/{@code updateBy}）展示名批量解析服务。 */
     private final UserDisplayService userDisplayService;
+
+    /**
+     * 数据变更事件发布抽象，任职数据新增/编辑/启用/停用/删除写操作成功后紧邻
+     * {@code operationLogRecorder} 调用之后发布一次同步事件
+     * （app-sync-notify-pull-api change design.md Decision 1/5）。
+     */
+    private final DomainEventPublisher domainEventPublisher;
 
     /**
      * {@inheritDoc}
@@ -135,6 +147,14 @@ public class PositionServiceImpl implements PositionService {
 
         operationLogRecorder.recordCreate(OperationLogResourceType.POSITION, entity.getId(),
                 positionLogSnapshotSupport.targetName(entity), positionLogSnapshotSupport.snapshot(entity));
+        domainEventPublisher.publish(DomainChangeEvent.builder()
+                .dataType(SyncDomain.POSITION)
+                .bizId(entity.getId())
+                .operationType(OperationType.CREATE)
+                .snapshot(DomainSnapshotSupport.snapshot(entity))
+                .operator(entity.getCreateBy())
+                .occurredAt(LocalDateTime.now())
+                .build());
 
         return getById(entity.getId());
     }
@@ -157,6 +177,14 @@ public class PositionServiceImpl implements PositionService {
         operationLogRecorder.recordUpdate(OperationLogResourceType.POSITION, id,
                 positionLogSnapshotSupport.targetName(entity), beforeSnapshot,
                 positionLogSnapshotSupport.snapshot(entity));
+        domainEventPublisher.publish(DomainChangeEvent.builder()
+                .dataType(SyncDomain.POSITION)
+                .bizId(id)
+                .operationType(OperationType.UPDATE)
+                .snapshot(DomainSnapshotSupport.snapshot(entity))
+                .operator(entity.getUpdateBy())
+                .occurredAt(LocalDateTime.now())
+                .build());
 
         return getById(id);
     }
@@ -184,6 +212,7 @@ public class PositionServiceImpl implements PositionService {
     public void delete(Long id) {
         UserPositionEntity entity = getExistingEntityInScope(id);
         Map<String, Object> beforeSnapshot = positionLogSnapshotSupport.snapshot(entity);
+        Map<String, Object> beforeEventSnapshot = DomainSnapshotSupport.snapshot(entity);
 
         entity.setStatus(PositionStatus.DELETED);
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
@@ -192,6 +221,14 @@ public class PositionServiceImpl implements PositionService {
 
         operationLogRecorder.recordDelete(OperationLogResourceType.POSITION, id,
                 positionLogSnapshotSupport.targetName(entity), beforeSnapshot);
+        domainEventPublisher.publish(DomainChangeEvent.builder()
+                .dataType(SyncDomain.POSITION)
+                .bizId(id)
+                .operationType(OperationType.DELETE)
+                .snapshot(beforeEventSnapshot)
+                .operator(entity.getUpdateBy())
+                .occurredAt(LocalDateTime.now())
+                .build());
     }
 
     /**
@@ -213,6 +250,14 @@ public class PositionServiceImpl implements PositionService {
         operationLogRecorder.recordStatusChange(OperationLogResourceType.POSITION, id,
                 positionLogSnapshotSupport.targetName(entity), status == PositionStatus.ENABLED, beforeSnapshot,
                 positionLogSnapshotSupport.snapshot(entity));
+        domainEventPublisher.publish(DomainChangeEvent.builder()
+                .dataType(SyncDomain.POSITION)
+                .bizId(id)
+                .operationType(status == PositionStatus.ENABLED ? OperationType.ENABLE : OperationType.DISABLE)
+                .snapshot(DomainSnapshotSupport.snapshot(entity))
+                .operator(entity.getUpdateBy())
+                .occurredAt(LocalDateTime.now())
+                .build());
         return getById(id);
     }
 

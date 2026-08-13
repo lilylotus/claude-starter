@@ -19,8 +19,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 应用同步配置接口，提供组织/用户/应用/角色/字典 5 个数据域启用开关+拉取分页大小的查询、
- * 修改，以及组织/用户/应用/角色 4 个数据域字段级同步映射的查询、整体替换保存
+ * 应用同步配置接口，提供组织/用户/任职/应用/角色/字典 6 个数据域启用开关+拉取分页大小的查询、
+ * 修改，以及组织/用户/任职/应用/角色 5 个数据域字段级同步映射的查询、整体替换保存
  * （app-sync-field-mapping change proposal.md）。写操作复用 {@code AppConfigController}
  * 既有的权限点 {@code AppManagement:app:config:editSync}（前端路由/按钮层面控制，接口层
  * 不新增权限校验注解，与 {@code AppConfigController} 现状一致）。本模块只负责管理后台的
@@ -35,12 +35,12 @@ public class AppSyncConfigController {
     private final AppSyncConfigService appSyncConfigService;
 
     /**
-     * 查询应用的 5 个数据域配置。
+     * 查询应用的 6 个数据域配置。
      *
      * @param id 应用 id（{@code tab_app.id}）
      * @return 数据域配置列表
      */
-    @Operation(summary = "查询同步数据域配置", description = "返回组织/用户/应用/角色/字典 5 行数据域配置")
+    @Operation(summary = "查询同步数据域配置", description = "返回组织/用户/任职/应用/角色/字典 6 行数据域配置")
     @GetMapping("/api/apps/{id}/config/sync/domains")
     public List<AppSyncDomainConfigVO> listDomainConfigs(@PathVariable Long id) {
         return appSyncConfigService.listDomainConfigs(id);
@@ -50,14 +50,14 @@ public class AppSyncConfigController {
      * 修改应用某个数据域的启用开关与拉取分页大小。
      *
      * @param id         应用 id（{@code tab_app.id}）
-     * @param syncDomain 数据域：ORG/USER/APP/ROLE/DICT
+     * @param syncDomain 数据域：ORG/USER/POSITION/APP/ROLE/DICT
      * @param request    数据域配置修改请求
      * @return 修改后的数据域配置
      */
     @Operation(summary = "修改同步数据域配置", description = "修改指定数据域的启用开关与拉取分页大小")
     @PutMapping("/api/apps/{id}/config/sync/domains/{syncDomain}")
     public AppSyncDomainConfigVO updateDomainConfig(@PathVariable Long id,
-            @Parameter(description = "数据域：ORG/USER/APP/ROLE/DICT") @PathVariable String syncDomain,
+            @Parameter(description = "数据域：ORG/USER/POSITION/APP/ROLE/DICT") @PathVariable String syncDomain,
             @Valid @RequestBody AppSyncDomainConfigUpdateRequest request) {
         return appSyncConfigService.updateDomainConfig(id, syncDomain, request);
     }
@@ -66,13 +66,13 @@ public class AppSyncConfigController {
      * 查询应用某个数据域的字段映射列表。
      *
      * @param id     应用 id（{@code tab_app.id}）
-     * @param domain 数据域：ORG/USER/APP/ROLE，传 DICT 时直接返回空列表
+     * @param domain 数据域：ORG/USER/POSITION/APP/ROLE，传 DICT 时直接返回空列表
      * @return 字段映射列表
      */
-    @Operation(summary = "查询同步字段映射", description = "查询组织/用户/应用/角色数据域的字段级同步映射列表，字典数据域直接返回空列表")
+    @Operation(summary = "查询同步字段映射", description = "查询组织/用户/任职/应用/角色数据域的字段级同步映射列表，字典数据域直接返回空列表")
     @GetMapping("/api/apps/{id}/config/sync/field-mappings")
     public List<AppSyncFieldMappingVO> listFieldMappings(@PathVariable Long id,
-            @Parameter(description = "数据域：ORG/USER/APP/ROLE") @RequestParam String domain) {
+            @Parameter(description = "数据域：ORG/USER/POSITION/APP/ROLE") @RequestParam String domain) {
         return appSyncConfigService.listFieldMappings(id, domain);
     }
 
@@ -80,7 +80,7 @@ public class AppSyncConfigController {
      * 整体替换应用某个数据域的字段映射列表。
      *
      * @param id       应用 id（{@code tab_app.id}）
-     * @param domain   数据域：ORG/USER/APP/ROLE（不支持 DICT）
+     * @param domain   数据域：ORG/USER/POSITION/APP/ROLE（不支持 DICT）
      * @param requests 本次提交的完整字段映射行列表
      * @return 保存后的字段映射列表
      */
@@ -88,7 +88,7 @@ public class AppSyncConfigController {
             + "不支持字典数据域；转换方式为转换脚本时保存前做 JavaScript 语法校验（不执行）")
     @PutMapping("/api/apps/{id}/config/sync/field-mappings")
     public List<AppSyncFieldMappingVO> replaceFieldMappings(@PathVariable Long id,
-            @Parameter(description = "数据域：ORG/USER/APP/ROLE") @RequestParam String domain,
+            @Parameter(description = "数据域：ORG/USER/POSITION/APP/ROLE") @RequestParam String domain,
             @Valid @RequestBody List<AppSyncFieldMappingSaveRequest> requests) {
         return appSyncConfigService.replaceFieldMappings(id, domain, requests);
     }

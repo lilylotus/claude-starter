@@ -23,6 +23,7 @@ import cn.nihility.rbac.org.dto.OrgUpdateRequest;
 import cn.nihility.rbac.org.dto.OrgVO;
 import cn.nihility.rbac.org.entity.OrgEntity;
 import cn.nihility.rbac.org.mapper.OrgMapper;
+import cn.nihility.rbac.sync.event.DomainEventPublisher;
 import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -71,6 +72,10 @@ class OrgServiceImplTest {
     @Mock
     private UserDisplayService userDisplayService;
 
+    /** 被测服务的数据变更事件发布依赖，使用 Mockito 打桩。 */
+    @Mock
+    private DomainEventPublisher domainEventPublisher;
+
     /** 被测服务实例。 */
     private OrgServiceImpl orgService;
 
@@ -88,7 +93,8 @@ class OrgServiceImplTest {
     @BeforeEach
     void setUp() {
         orgService = new OrgServiceImpl(orgMapper, operationLogRecorder, formFieldDefinitionService,
-                formFieldSnapshotSupport, orgScopeService, currentOperatorService, userDisplayService);
+                formFieldSnapshotSupport, orgScopeService, currentOperatorService, userDisplayService,
+                domainEventPublisher);
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
         lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.empty());
         lenient().when(orgScopeService.isOrgIdAllowed(any(), any())).thenAnswer(invocation -> orgScopeService
@@ -273,6 +279,18 @@ class OrgServiceImplTest {
         verify(operationLogRecorder, times(1))
                 .recordDelete(org.mockito.ArgumentMatchers.eq("org"), org.mockito.ArgumentMatchers.eq(1L),
                         org.mockito.ArgumentMatchers.eq("总公司"), any(Map.class));
+
+        // 紧邻 operationLogRecorder.recordDelete 之后应发布一次组织删除的同步事件，快照取
+        // 删除前的字段状态（app-sync-notify-pull-api change design.md Decision 5）。
+        org.mockito.ArgumentCaptor<cn.nihility.rbac.sync.event.DomainChangeEvent> eventCaptor =
+                org.mockito.ArgumentCaptor.forClass(cn.nihility.rbac.sync.event.DomainChangeEvent.class);
+        verify(domainEventPublisher).publish(eventCaptor.capture());
+        cn.nihility.rbac.sync.event.DomainChangeEvent publishedEvent = eventCaptor.getValue();
+        assertThat(publishedEvent.getDataType()).isEqualTo(cn.nihility.rbac.app.sync.constant.SyncDomain.ORG);
+        assertThat(publishedEvent.getBizId()).isEqualTo(1L);
+        assertThat(publishedEvent.getOperationType())
+                .isEqualTo(cn.nihility.rbac.operationlog.constant.OperationType.DELETE);
+        assertThat(publishedEvent.getSnapshot()).containsEntry("name", "总公司");
     }
 
     /**

@@ -13,10 +13,15 @@ import cn.nihility.rbac.formfield.dto.FormFieldDefinitionVO;
 import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
 import cn.nihility.rbac.formfield.support.DynamicFieldValidator;
 import cn.nihility.rbac.formfield.support.FormFieldSnapshotSupport;
+import cn.nihility.rbac.app.sync.constant.SyncDomain;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
+import cn.nihility.rbac.operationlog.constant.OperationType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.entity.OrgEntity;
 import cn.nihility.rbac.org.mapper.OrgMapper;
+import cn.nihility.rbac.sync.event.DomainChangeEvent;
+import cn.nihility.rbac.sync.event.DomainEventPublisher;
+import cn.nihility.rbac.sync.event.DomainSnapshotSupport;
 import cn.nihility.rbac.user.constant.PositionStatus;
 import cn.nihility.rbac.user.constant.UserStatus;
 import cn.nihility.rbac.user.dto.UserCreateRequest;
@@ -126,6 +131,13 @@ public class UserServiceImpl implements UserService {
     private final UserDisplayService userDisplayService;
 
     /**
+     * 数据变更事件发布抽象，用户数据新增/编辑/启用/停用/删除写操作成功后紧邻
+     * {@code operationLogRecorder} 调用之后发布一次同步事件
+     * （app-sync-notify-pull-api change design.md Decision 5）。
+     */
+    private final DomainEventPublisher domainEventPublisher;
+
+    /**
      * {@inheritDoc}
      * <p>
      * 受限时（管辖范围非空）追加"存在至少一条未删除、所属组织落在管辖范围内的任职记录"
@@ -192,6 +204,14 @@ public class UserServiceImpl implements UserService {
 
         operationLogRecorder.recordCreate(OperationLogResourceType.USER, entity.getId(), entity.getName(),
                 toLogSnapshot(entity));
+        domainEventPublisher.publish(DomainChangeEvent.builder()
+                .dataType(SyncDomain.USER)
+                .bizId(entity.getId())
+                .operationType(OperationType.CREATE)
+                .snapshot(DomainSnapshotSupport.snapshot(entity))
+                .operator(entity.getCreateBy())
+                .occurredAt(LocalDateTime.now())
+                .build());
 
         return getById(entity.getId());
     }
@@ -217,6 +237,14 @@ public class UserServiceImpl implements UserService {
 
         operationLogRecorder.recordUpdate(OperationLogResourceType.USER, id, entity.getName(),
                 beforeSnapshot, toLogSnapshot(entity));
+        domainEventPublisher.publish(DomainChangeEvent.builder()
+                .dataType(SyncDomain.USER)
+                .bizId(id)
+                .operationType(OperationType.UPDATE)
+                .snapshot(DomainSnapshotSupport.snapshot(entity))
+                .operator(entity.getUpdateBy())
+                .occurredAt(LocalDateTime.now())
+                .build());
 
         return getById(id);
     }
@@ -244,6 +272,7 @@ public class UserServiceImpl implements UserService {
     public void delete(Long id) {
         UserEntity entity = getExistingEntity(id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+        Map<String, Object> beforeEventSnapshot = DomainSnapshotSupport.snapshot(entity);
 
         entity.setStatus(UserStatus.DELETED);
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
@@ -251,6 +280,14 @@ public class UserServiceImpl implements UserService {
         userMapper.updateById(entity);
 
         operationLogRecorder.recordDelete(OperationLogResourceType.USER, id, entity.getName(), beforeSnapshot);
+        domainEventPublisher.publish(DomainChangeEvent.builder()
+                .dataType(SyncDomain.USER)
+                .bizId(id)
+                .operationType(OperationType.DELETE)
+                .snapshot(beforeEventSnapshot)
+                .operator(entity.getUpdateBy())
+                .occurredAt(LocalDateTime.now())
+                .build());
     }
 
     /**
@@ -280,6 +317,14 @@ public class UserServiceImpl implements UserService {
 
         operationLogRecorder.recordStatusChange(OperationLogResourceType.USER, id, entity.getName(),
                 status == UserStatus.ENABLED, beforeSnapshot, toLogSnapshot(entity));
+        domainEventPublisher.publish(DomainChangeEvent.builder()
+                .dataType(SyncDomain.USER)
+                .bizId(id)
+                .operationType(status == UserStatus.ENABLED ? OperationType.ENABLE : OperationType.DISABLE)
+                .snapshot(DomainSnapshotSupport.snapshot(entity))
+                .operator(entity.getUpdateBy())
+                .occurredAt(LocalDateTime.now())
+                .build());
         return getById(id);
     }
 

@@ -126,6 +126,7 @@ class AppConfigServiceImplTest {
         assertThat(decrypted).hasSize(48).matches("[0-9a-f]{48}");
         assertThat(captured.getSecretKey()).isNotEqualTo(decrypted);
         assertThat(captured.getSignAlgorithm()).isEqualTo(SignAlgorithm.SHA256);
+        assertThat(captured.getNeedSign()).isFalse();
         assertThat(captured.getSyncMode()).isEqualTo(SyncMode.PULL);
         assertThat(captured.getCreateBy()).isEqualTo("1");
         assertThat(captured.getUpdateBy()).isEqualTo("1");
@@ -335,6 +336,7 @@ class AppConfigServiceImplTest {
     private SyncConfigUpdateRequest validSyncConfigUpdateRequest() {
         SyncConfigUpdateRequest request = new SyncConfigUpdateRequest();
         request.setSyncMode(SyncMode.PULL);
+        request.setNeedSign(false);
         return request;
     }
 

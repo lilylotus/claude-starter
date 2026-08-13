@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 通知目标应用查询：tab_app_config INNER JOIN tab_app INNER JOIN
+     tab_app_sync_domain_config，联表条件写在 ON 后，业务过滤条件（sync_mode/
+     sync_domain/sync_enabled/应用状态）写在 WHERE 后（app-sync-notify-pull-api change
+     design.md Decision 3/8）。 -->
+<mapper namespace="cn.nihility.rbac.sync.notify.mapper.NotifyTargetMapper">
+
+    <select id="selectNotifyTargets" resultType="cn.nihility.rbac.sync.notify.dto.NotifyTargetRow">
+        SELECT
+        c.app_id AS appRefId,
+        c.open_app_id AS appId,
+        c.access_key AS accessKey,
+        c.secret_key AS secretKey,
+        c.sign_algorithm AS signAlgorithm,
+        c.need_sign AS needSign,
+        c.notify_url AS notifyUrl,
+        c.notify_params AS notifyParams
+        FROM tab_app_config c
+        INNER JOIN tab_app a ON a.id = c.app_id
+        INNER JOIN tab_app_sync_domain_config d ON d.app_ref_id = c.app_id
+        WHERE c.sync_mode = 'NOTIFY'
+        AND d.sync_domain = #{dataType}
+        AND d.sync_enabled = 1
+        AND a.status = 2000
+    </select>
+
+</mapper>

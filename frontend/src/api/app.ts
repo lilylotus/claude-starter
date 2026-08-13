@@ -61,8 +61,9 @@ export function updateAppSignAlgorithm(id: number, data: SignAlgorithmUpdateRequ
   return request.put(`/apps/${id}/config/sign-algorithm`, data)
 }
 
-// 修改同步配置（同步方式、通知回调地址/参数；组织/用户/应用/角色/字典的数据范围配置
-// 已迁移到下方 sync/domains、sync/field-mappings 系列接口，不再随这个接口一起提交）
+// 修改同步配置（同步方式、通知回调地址/参数、是否需要签名/验签校验；组织/用户/任职/应用/
+// 角色/字典的数据范围配置已迁移到下方 sync/domains、sync/field-mappings 系列接口，不再随
+// 这个接口一起提交）
 export function updateAppSyncConfig(id: number, data: SyncConfigUpdateRequest): Promise<AppConfigVO> {
   return request.put(`/apps/${id}/config/sync`, data)
 }
@@ -72,9 +73,9 @@ export function resetAppSecretKey(id: number): Promise<SecretKeyResult> {
   return request.post(`/apps/${id}/config/secret-key/reset`)
 }
 
-// ---- 同步配置·数据范围：数据域（组织/用户/应用/角色/字典）启用开关+分页大小 ----
+// ---- 同步配置·数据范围：数据域（组织/用户/任职/应用/角色/字典）启用开关+分页大小 ----
 
-// 一次性查询该应用的 5 个数据域配置行
+// 一次性查询该应用的 6 个数据域配置行
 export function listAppSyncDomainConfigs(id: number): Promise<AppSyncDomainConfigVO[]> {
   return request.get(`/apps/${id}/config/sync/domains`)
 }
@@ -88,7 +89,7 @@ export function updateAppSyncDomainConfig(
   return request.put(`/apps/${id}/config/sync/domains/${syncDomain}`, data)
 }
 
-// ---- 同步配置·字段映射：组织/用户/应用/角色四个数据域的字段级同步映射 ----
+// ---- 同步配置·字段映射：组织/用户/任职/应用/角色五个数据域的字段级同步映射 ----
 
 // 查询某个数据域当前的字段映射列表（不含字典，字典不支持字段级配置）
 export function listAppSyncFieldMappings(id: number, domain: SyncDomain): Promise<AppSyncFieldMappingVO[]> {

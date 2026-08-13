@@ -12,7 +12,7 @@ import lombok.Setter;
 
 /**
  * 应用同步数据域配置持久化实体，对应表 {@code tab_app_sync_domain_config}。每个应用固定
- * 5 行，分别对应组织/用户/应用/角色/字典五个数据域（{@link cn.nihility.rbac.app.sync.constant.SyncDomain}），
+ * 6 行，分别对应组织/用户/任职/应用/角色/字典六个数据域（{@link cn.nihility.rbac.app.sync.constant.SyncDomain}），
  * 每行携带"是否启用"与"每次拉取分页大小"两个属性（app-sync-field-mapping change design.md
  * Decision 1）。
  */

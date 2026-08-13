@@ -66,3 +66,16 @@ rbac:
     # SecretKey 落库前的对称加密；仅用于本地开发/演示，生产环境务必替换为独立生成的密钥，
     # 不要沿用仓库中的默认值。
     sm4-key: R8r2MjLGO0oLMkIVVXcPrQ==
+
+  # HttpClientUtils 统一 HTTP 客户端配置（app-sync-notify-pull-api change design.md
+  # Decision 11），全部为默认值，此处显式列出便于按需覆盖。
+  http-client:
+    connect-timeout-millis: 5000
+    response-timeout-millis: 5000
+    max-total: 200
+    max-per-route: 50
+    skip-ssl-verify: false
+
+  # 数据同步事件总线配置（app-sync-notify-pull-api change design.md Decision 4）。
+  sync:
+    ring-buffer-size: 1024

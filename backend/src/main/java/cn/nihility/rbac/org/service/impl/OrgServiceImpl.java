@@ -11,7 +11,9 @@ import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
 import cn.nihility.rbac.formfield.support.DynamicFieldValidator;
 import cn.nihility.rbac.formfield.support.FormFieldSnapshotSupport;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
+import cn.nihility.rbac.operationlog.constant.OperationType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.app.sync.constant.SyncDomain;
 import cn.nihility.rbac.org.constant.OrgStatus;
 import cn.nihility.rbac.org.dto.OrgCreateRequest;
 import cn.nihility.rbac.org.dto.OrgTreeNodeVO;
@@ -21,6 +23,9 @@ import cn.nihility.rbac.org.entity.OrgEntity;
 import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.org.mapstruct.OrgConvert;
 import cn.nihility.rbac.org.service.OrgService;
+import cn.nihility.rbac.sync.event.DomainChangeEvent;
+import cn.nihility.rbac.sync.event.DomainEventPublisher;
+import cn.nihility.rbac.sync.event.DomainSnapshotSupport;
 import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -83,6 +88,13 @@ public class OrgServiceImpl implements OrgService {
 
     /** 审计字段（{@code createBy}/{@code updateBy}）展示名批量解析服务。 */
     private final UserDisplayService userDisplayService;
+
+    /**
+     * 数据变更事件发布抽象，组织数据新增/编辑/启用/停用/删除写操作成功后紧邻
+     * {@code operationLogRecorder} 调用之后发布一次同步事件
+     * （app-sync-notify-pull-api change design.md Decision 5）。
+     */
+    private final DomainEventPublisher domainEventPublisher;
 
     /**
      * {@inheritDoc}
@@ -194,6 +206,14 @@ public class OrgServiceImpl implements OrgService {
 
         operationLogRecorder.recordCreate(OperationLogResourceType.ORG, entity.getId(), entity.getName(),
                 toLogSnapshot(entity));
+        domainEventPublisher.publish(DomainChangeEvent.builder()
+                .dataType(SyncDomain.ORG)
+                .bizId(entity.getId())
+                .operationType(OperationType.CREATE)
+                .snapshot(DomainSnapshotSupport.snapshot(entity))
+                .operator(entity.getCreateBy())
+                .occurredAt(LocalDateTime.now())
+                .build());
 
         return getById(entity.getId());
     }
@@ -241,6 +261,14 @@ public class OrgServiceImpl implements OrgService {
 
         operationLogRecorder.recordUpdate(OperationLogResourceType.ORG, id, entity.getName(),
                 beforeSnapshot, toLogSnapshot(entity));
+        domainEventPublisher.publish(DomainChangeEvent.builder()
+                .dataType(SyncDomain.ORG)
+                .bizId(id)
+                .operationType(OperationType.UPDATE)
+                .snapshot(DomainSnapshotSupport.snapshot(entity))
+                .operator(entity.getUpdateBy())
+                .occurredAt(LocalDateTime.now())
+                .build());
 
         return getById(id);
     }
@@ -291,12 +319,21 @@ public class OrgServiceImpl implements OrgService {
         }
 
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+        Map<String, Object> beforeEventSnapshot = DomainSnapshotSupport.snapshot(entity);
         entity.setStatus(OrgStatus.DELETED);
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         orgMapper.updateById(entity);
 
         operationLogRecorder.recordDelete(OperationLogResourceType.ORG, id, entity.getName(), beforeSnapshot);
+        domainEventPublisher.publish(DomainChangeEvent.builder()
+                .dataType(SyncDomain.ORG)
+                .bizId(id)
+                .operationType(OperationType.DELETE)
+                .snapshot(beforeEventSnapshot)
+                .operator(entity.getUpdateBy())
+                .occurredAt(LocalDateTime.now())
+                .build());
     }
 
     /**
@@ -317,6 +354,14 @@ public class OrgServiceImpl implements OrgService {
 
         operationLogRecorder.recordStatusChange(OperationLogResourceType.ORG, id, entity.getName(),
                 status == OrgStatus.ENABLED, beforeSnapshot, toLogSnapshot(entity));
+        domainEventPublisher.publish(DomainChangeEvent.builder()
+                .dataType(SyncDomain.ORG)
+                .bizId(id)
+                .operationType(status == OrgStatus.ENABLED ? OperationType.ENABLE : OperationType.DISABLE)
+                .snapshot(DomainSnapshotSupport.snapshot(entity))
+                .operator(entity.getUpdateBy())
+                .occurredAt(LocalDateTime.now())
+                .build());
         return getById(id);
     }
 

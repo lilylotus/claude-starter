@@ -19,6 +19,7 @@ import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
 import cn.nihility.rbac.formfield.support.FormFieldSnapshotSupport;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.mapper.OrgMapper;
+import cn.nihility.rbac.sync.event.DomainEventPublisher;
 import cn.nihility.rbac.user.constant.PositionStatus;
 import cn.nihility.rbac.user.dto.PositionCreateRequest;
 import cn.nihility.rbac.user.dto.PositionUpdateRequest;
@@ -91,6 +92,10 @@ class PositionServiceImplTest {
     @Mock
     private UserDisplayService userDisplayService;
 
+    /** 被测服务的数据变更事件发布依赖，使用 Mockito 打桩。 */
+    @Mock
+    private DomainEventPublisher domainEventPublisher;
+
     /** 被测服务实例。 */
     private PositionServiceImpl positionService;
 
@@ -112,7 +117,7 @@ class PositionServiceImplTest {
                 formFieldDefinitionService, formFieldSnapshotSupport, dictItemService);
         positionService = new PositionServiceImpl(userPositionMapper, operationLogRecorder,
                 positionDynamicFieldSupport, positionLogSnapshotSupport, orgScopeService, currentOperatorService,
-                userDisplayService);
+                userDisplayService, domainEventPublisher);
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
         lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.empty());
         // 委托调用 resolveAllowedOrgIds 的当前打桩结果计算，与真实实现（OrgScopeServiceImpl）

@@ -46,9 +46,12 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class AppSyncConfigServiceImpl implements AppSyncConfigService {
 
-    /** 5 个数据域的默认插入顺序，同时也是 {@link #listDomainConfigs} 返回列表的自然顺序。 */
-    private static final List<String> DEFAULT_DOMAIN_ORDER =
-            List.of(SyncDomain.ORG, SyncDomain.USER, SyncDomain.APP, SyncDomain.ROLE, SyncDomain.DICT);
+    /**
+     * 6 个数据域的默认插入顺序，同时也是 {@link #listDomainConfigs} 返回列表的自然顺序
+     * （任职域补入见 app-sync-notify-pull-api change design.md Decision 1）。
+     */
+    private static final List<String> DEFAULT_DOMAIN_ORDER = List.of(SyncDomain.ORG, SyncDomain.USER,
+            SyncDomain.POSITION, SyncDomain.APP, SyncDomain.ROLE, SyncDomain.DICT);
 
     /** 新建应用时每个数据域默认的拉取分页大小。 */
     private static final int DEFAULT_PAGE_SIZE = 20;

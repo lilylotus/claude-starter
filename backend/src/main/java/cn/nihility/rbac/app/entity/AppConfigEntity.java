@@ -52,10 +52,16 @@ public class AppConfigEntity {
 
     /**
      * 同步方式：{@code NOTIFY}（通知，本系统主动回调 {@link #notifyUrl}）或 {@code PULL}
-     * （拉取，外部系统主动调用本系统接口）。整个应用只有一份，不区分组织/用户/应用/字典
-     * 四个数据域。
+     * （拉取，外部系统主动调用本系统接口）。整个应用只有一份，不区分组织/用户/任职/应用/
+     * 角色/字典六个数据域。
      */
     private String syncMode;
+
+    /**
+     * 是否需要签名/验签校验：出站通知请求与入站拉取请求均按此开关决定是否附加/校验签名参数
+     * （app-sync-notify-pull-api change design.md Decision 3）。
+     */
+    private Boolean needSign;
 
     /** 通知回调接口地址（http/https），{@code syncMode} 为 {@code NOTIFY} 时必填。 */
     private String notifyUrl;

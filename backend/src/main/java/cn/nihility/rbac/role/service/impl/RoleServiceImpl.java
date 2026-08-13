@@ -3,7 +3,9 @@ package cn.nihility.rbac.role.service.impl;
 import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.app.sync.constant.SyncDomain;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
+import cn.nihility.rbac.operationlog.constant.OperationType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.permission.dto.PermissionOptionVO;
 import cn.nihility.rbac.role.constant.RoleStatus;
@@ -17,6 +19,9 @@ import cn.nihility.rbac.role.mapper.RoleMapper;
 import cn.nihility.rbac.role.mapper.RolePermissionMapper;
 import cn.nihility.rbac.role.mapstruct.RoleConvert;
 import cn.nihility.rbac.role.service.RoleService;
+import cn.nihility.rbac.sync.event.DomainChangeEvent;
+import cn.nihility.rbac.sync.event.DomainEventPublisher;
+import cn.nihility.rbac.sync.event.DomainSnapshotSupport;
 import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -54,6 +59,13 @@ public class RoleServiceImpl implements RoleService {
 
     /** 审计字段（{@code createBy}/{@code updateBy}）展示名批量解析服务。 */
     private final UserDisplayService userDisplayService;
+
+    /**
+     * 数据变更事件发布抽象，角色数据新增/编辑/启用/停用/删除写操作成功后紧邻
+     * {@code operationLogRecorder} 调用之后发布一次同步事件
+     * （app-sync-notify-pull-api change design.md Decision 5）。
+     */
+    private final DomainEventPublisher domainEventPublisher;
 
     /**
      * {@inheritDoc}
@@ -103,6 +115,14 @@ public class RoleServiceImpl implements RoleService {
 
         operationLogRecorder.recordCreate(OperationLogResourceType.ROLE, entity.getId(), entity.getName(),
                 toLogSnapshot(entity));
+        domainEventPublisher.publish(DomainChangeEvent.builder()
+                .dataType(SyncDomain.ROLE)
+                .bizId(entity.getId())
+                .operationType(OperationType.CREATE)
+                .snapshot(DomainSnapshotSupport.snapshot(entity))
+                .operator(entity.getCreateBy())
+                .occurredAt(LocalDateTime.now())
+                .build());
 
         return getById(entity.getId());
     }
@@ -126,6 +146,14 @@ public class RoleServiceImpl implements RoleService {
 
         operationLogRecorder.recordUpdate(OperationLogResourceType.ROLE, id, entity.getName(),
                 beforeSnapshot, toLogSnapshot(entity));
+        domainEventPublisher.publish(DomainChangeEvent.builder()
+                .dataType(SyncDomain.ROLE)
+                .bizId(id)
+                .operationType(OperationType.UPDATE)
+                .snapshot(DomainSnapshotSupport.snapshot(entity))
+                .operator(entity.getUpdateBy())
+                .occurredAt(LocalDateTime.now())
+                .build());
 
         return getById(id);
     }
@@ -153,6 +181,7 @@ public class RoleServiceImpl implements RoleService {
     public void delete(Long id) {
         RoleEntity entity = getExistingEntity(id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+        Map<String, Object> beforeEventSnapshot = DomainSnapshotSupport.snapshot(entity);
 
         entity.setStatus(RoleStatus.DELETED);
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
@@ -160,6 +189,14 @@ public class RoleServiceImpl implements RoleService {
         roleMapper.updateById(entity);
 
         operationLogRecorder.recordDelete(OperationLogResourceType.ROLE, id, entity.getName(), beforeSnapshot);
+        domainEventPublisher.publish(DomainChangeEvent.builder()
+                .dataType(SyncDomain.ROLE)
+                .bizId(id)
+                .operationType(OperationType.DELETE)
+                .snapshot(beforeEventSnapshot)
+                .operator(entity.getUpdateBy())
+                .occurredAt(LocalDateTime.now())
+                .build());
     }
 
     /**
@@ -192,6 +229,14 @@ public class RoleServiceImpl implements RoleService {
 
         operationLogRecorder.recordStatusChange(OperationLogResourceType.ROLE, id, entity.getName(),
                 status == RoleStatus.ENABLED, beforeSnapshot, toLogSnapshot(entity));
+        domainEventPublisher.publish(DomainChangeEvent.builder()
+                .dataType(SyncDomain.ROLE)
+                .bizId(id)
+                .operationType(status == RoleStatus.ENABLED ? OperationType.ENABLE : OperationType.DISABLE)
+                .snapshot(DomainSnapshotSupport.snapshot(entity))
+                .operator(entity.getUpdateBy())
+                .occurredAt(LocalDateTime.now())
+                .build());
         return getById(id);
     }
 

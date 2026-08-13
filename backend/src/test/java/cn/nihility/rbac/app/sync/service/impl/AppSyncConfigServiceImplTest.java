@@ -44,9 +44,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * {@link AppSyncConfigServiceImpl} 的单元测试，重点覆盖 5 行默认数据域配置生成、单个数据域
- * 启用开关/分页大小修改、字段映射整体替换（新增/更新/删除混合场景）及各类拒绝分支、管辖组织
- * 范围校验（app-sync-field-mapping change tasks.md 10.1）。
+ * {@link AppSyncConfigServiceImpl} 的单元测试，重点覆盖 6 行默认数据域配置生成（含
+ * app-sync-notify-pull-api change 新增的任职域）、单个数据域启用开关/分页大小修改、字段映射
+ * 整体替换（新增/更新/删除混合场景）及各类拒绝分支、管辖组织范围校验（app-sync-field-mapping
+ * change tasks.md 10.1）。
  */
 @ExtendWith(MockitoExtension.class)
 class AppSyncConfigServiceImplTest {
@@ -99,19 +100,20 @@ class AppSyncConfigServiceImplTest {
     }
 
     /**
-     * 创建默认数据域配置时，应插入组织/用户/应用/角色/字典 5 行，均不启用、分页大小默认 20。
+     * 创建默认数据域配置时，应插入组织/用户/任职/应用/角色/字典 6 行，均不启用、分页大小默认 20。
      */
     @Test
-    void createDefaultDomainConfigs_shouldInsertFiveRows() {
+    void createDefaultDomainConfigs_shouldInsertSixRows() {
         appSyncConfigService.createDefaultDomainConfigs(10L, "1");
 
         ArgumentCaptor<AppSyncDomainConfigEntity> captor = ArgumentCaptor.forClass(AppSyncDomainConfigEntity.class);
-        verify(appSyncDomainConfigMapper, times(5)).insert(captor.capture());
+        verify(appSyncDomainConfigMapper, times(6)).insert(captor.capture());
 
         List<AppSyncDomainConfigEntity> captured = captor.getAllValues();
-        assertThat(captured).hasSize(5);
+        assertThat(captured).hasSize(6);
         assertThat(captured).extracting(AppSyncDomainConfigEntity::getSyncDomain)
-                .containsExactly(SyncDomain.ORG, SyncDomain.USER, SyncDomain.APP, SyncDomain.ROLE, SyncDomain.DICT);
+                .containsExactly(SyncDomain.ORG, SyncDomain.USER, SyncDomain.POSITION, SyncDomain.APP,
+                        SyncDomain.ROLE, SyncDomain.DICT);
         assertThat(captured).allSatisfy(entity -> {
             assertThat(entity.getAppRefId()).isEqualTo(10L);
             assertThat(entity.getSyncEnabled()).isFalse();

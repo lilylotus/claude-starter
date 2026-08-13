@@ -42,14 +42,16 @@ const activeTab = ref<'basic' | 'signature' | 'sync'>('basic')
 const signAlgorithmForm = ref<SignAlgorithm>('SHA256')
 const savingSignAlgorithm = ref(false)
 
-// 同步配置卡片：基础同步配置项（同步方式、通知回调地址）的本地可编辑副本；数据范围（组织/
-// 用户/应用/角色/字典五个数据域各自的启用开关+分页大小+字段映射）改由下方独立的"数据范围"
-// 区块管理，不再是这个表单的一部分（见 openspec/changes/app-sync-field-mapping）。
+// 同步配置卡片：基础同步配置项（同步方式、通知回调地址、是否需要签名/验签校验）的本地可
+// 编辑副本；数据范围（组织/用户/任职/应用/角色/字典六个数据域各自的启用开关+分页大小+
+// 字段映射）改由下方独立的"数据范围"区块管理，不再是这个表单的一部分（见
+// openspec/changes/app-sync-field-mapping、app-sync-notify-pull-api）。
 // notifyParams 不直接用 Record 编辑（模板里动态 key 不便双向绑定），拆成一个 { key, value }
 // 行数组，保存前再收敛回 Record<string, string>
 const syncForm = ref({
   syncMode: 'PULL' as SyncMode,
   notifyUrl: '',
+  needSign: false,
 })
 const notifyParamRows = ref<{ key: string; value: string }[]>([])
 const savingSync = ref(false)
@@ -82,6 +84,7 @@ function applyConfig(data: AppConfigVO) {
   syncForm.value = {
     syncMode: data.syncMode,
     notifyUrl: data.notifyUrl,
+    needSign: data.needSign,
   }
   notifyParamRows.value = notifyParamsToRows(data.notifyParams)
 }
@@ -205,20 +208,21 @@ async function saveSyncConfig() {
   }
 }
 
-// ---- 同步配置：数据范围（左侧纵向 tabs，组织/用户/应用/角色/字典 5 个数据域） ----
+// ---- 同步配置：数据范围（左侧纵向 tabs，组织/用户/任职/应用/角色/字典 6 个数据域） ----
 
-// 支持字段级同步映射的数据域（组织/用户/应用/角色），字典不展示字段映射表格
+// 支持字段级同步映射的数据域（组织/用户/任职/应用/角色），字典不展示字段映射表格
 const fieldMappingSupportedDomains = SYNC_DOMAIN_FIELD_MAPPING_DOMAINS
 
 // 当前激活的数据域子 tab
 const syncDomainTab = ref<SyncDomain>('ORG')
 
-// 5 个数据域的启用开关+拉取分页大小，一次性拉取缓存在本地，切换子 tab 不重新请求；
+// 6 个数据域的启用开关+拉取分页大小，一次性拉取缓存在本地，切换子 tab 不重新请求；
 // 编辑态直接绑定这份缓存本身（这个区块和同步配置其余区块一样是"编辑完点保存"节奏，
 // 没有单独的取消态需要区分本地副本与已加载展示态）
 const domainConfigs = reactive<Record<SyncDomain, { syncEnabled: boolean; pageSize: number }>>({
   ORG: { syncEnabled: false, pageSize: 20 },
   USER: { syncEnabled: false, pageSize: 20 },
+  POSITION: { syncEnabled: false, pageSize: 20 },
   APP: { syncEnabled: false, pageSize: 20 },
   ROLE: { syncEnabled: false, pageSize: 20 },
   DICT: { syncEnabled: false, pageSize: 20 },
@@ -473,6 +477,9 @@ async function saveFieldMappings() {
               </div>
             </el-form-item>
           </template>
+          <el-form-item label="需要签名/验签校验">
+            <el-switch v-model="syncForm.needSign" />
+          </el-form-item>
 
           <el-form-item v-if="hasPermission('AppManagement:app:config:editSync')">
             <el-button type="primary" :loading="savingSync" @click="saveSyncConfig">保存</el-button>
@@ -735,7 +742,7 @@ async function saveFieldMappings() {
   }
 }
 
-// 数据范围：左侧纵向 tabs（组织/用户/应用/角色/字典），呼应仓库整体的“链式连接”视觉语言，
+// 数据范围：左侧纵向 tabs（组织/用户/任职/应用/角色/字典），呼应仓库整体的“链式连接”视觉语言，
 // 用一条虚线把每个子 tab 的内容和外层"数据范围"标题隔开
 .app-config__domain-tabs {
   border: 1px dashed var(--color-border);

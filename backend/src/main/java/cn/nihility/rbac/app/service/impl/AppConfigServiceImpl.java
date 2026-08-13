@@ -81,6 +81,7 @@ public class AppConfigServiceImpl implements AppConfigService {
                 .accessKey(AppCredentialGenerator.generateAccessKey())
                 .secretKey(Sm4JdkUtils.encrypt(plainSecretKey, appSecretProperties.getSm4Key()))
                 .signAlgorithm(SignAlgorithm.SHA256)
+                .needSign(false)
                 .syncMode(SyncMode.PULL)
                 .createBy(operator)
                 .createTime(now)
@@ -139,6 +140,7 @@ public class AppConfigServiceImpl implements AppConfigService {
         entity.setNotifyUrl(request.getNotifyUrl());
         entity.setNotifyParams(JacksonUtils.toJson(
                 request.getNotifyParams() != null ? request.getNotifyParams() : Map.of()));
+        entity.setNeedSign(request.getNeedSign());
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         appConfigMapper.updateById(entity);
@@ -251,6 +253,7 @@ public class AppConfigServiceImpl implements AppConfigService {
         snapshot.put("AppId", entity.getAppId());
         snapshot.put("AccessKey", entity.getAccessKey());
         snapshot.put("签名算法", entity.getSignAlgorithm());
+        snapshot.put("是否需要签名验签校验", Boolean.TRUE.equals(entity.getNeedSign()) ? "是" : "否");
         snapshot.put("同步方式", entity.getSyncMode());
         snapshot.put("通知回调接口地址", entity.getNotifyUrl());
         snapshot.put("通知自定义参数", entity.getNotifyParams());

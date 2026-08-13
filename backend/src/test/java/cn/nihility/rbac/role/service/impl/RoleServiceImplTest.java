@@ -22,6 +22,7 @@ import cn.nihility.rbac.role.entity.RoleEntity;
 import cn.nihility.rbac.role.entity.RolePermissionEntity;
 import cn.nihility.rbac.role.mapper.RoleMapper;
 import cn.nihility.rbac.role.mapper.RolePermissionMapper;
+import cn.nihility.rbac.sync.event.DomainEventPublisher;
 import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -62,6 +63,10 @@ class RoleServiceImplTest {
     @Mock
     private UserDisplayService userDisplayService;
 
+    /** 被测服务的数据变更事件发布依赖，使用 Mockito 打桩。 */
+    @Mock
+    private DomainEventPublisher domainEventPublisher;
+
     /** 被测服务实例。 */
     private RoleServiceImpl roleService;
 
@@ -72,7 +77,7 @@ class RoleServiceImplTest {
     @BeforeEach
     void setUp() {
         roleService = new RoleServiceImpl(roleMapper, rolePermissionMapper, operationLogRecorder,
-                currentOperatorService, userDisplayService);
+                currentOperatorService, userDisplayService, domainEventPublisher);
         lenient().when(currentOperatorService.resolveUserId()).thenReturn(1L);
         lenient().when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
     }
@@ -121,6 +126,39 @@ class RoleServiceImplTest {
         assertThat(captured.getCreateTime()).isNotNull();
         verify(operationLogRecorder).recordCreate(org.mockito.ArgumentMatchers.eq("role"), any(),
                 org.mockito.ArgumentMatchers.eq("测试角色"), any(Map.class));
+    }
+
+    /**
+     * 创建角色成功后，应紧邻 {@code operationLogRecorder.recordCreate} 之后发布一次角色
+     * 新增的同步事件（app-sync-notify-pull-api change design.md Decision 5）。
+     */
+    @Test
+    void create_shouldPublishDomainChangeEvent() {
+        RoleEntity inserted = buildEntity(10L, RoleStatus.ENABLED);
+        when(roleMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+        when(roleMapper.selectById(any())).thenReturn(inserted);
+        doAnswer(invocation -> {
+            RoleEntity entity = invocation.getArgument(0);
+            entity.setId(10L);
+            return 1;
+        }).when(roleMapper).insert(any(RoleEntity.class));
+
+        RoleCreateRequest request = new RoleCreateRequest();
+        request.setName("测试角色");
+        request.setCode("role001");
+        request.setShowOrder(0);
+
+        roleService.create(request);
+
+        ArgumentCaptor<cn.nihility.rbac.sync.event.DomainChangeEvent> eventCaptor =
+                ArgumentCaptor.forClass(cn.nihility.rbac.sync.event.DomainChangeEvent.class);
+        verify(domainEventPublisher).publish(eventCaptor.capture());
+        cn.nihility.rbac.sync.event.DomainChangeEvent publishedEvent = eventCaptor.getValue();
+        assertThat(publishedEvent.getDataType()).isEqualTo(cn.nihility.rbac.app.sync.constant.SyncDomain.ROLE);
+        assertThat(publishedEvent.getBizId()).isEqualTo(10L);
+        assertThat(publishedEvent.getOperationType())
+                .isEqualTo(cn.nihility.rbac.operationlog.constant.OperationType.CREATE);
+        assertThat(publishedEvent.getSnapshot()).containsEntry("code", "role001");
     }
 
     /**

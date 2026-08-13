@@ -23,6 +23,7 @@ import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
 import cn.nihility.rbac.formfield.support.FormFieldSnapshotSupport;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.mapper.OrgMapper;
+import cn.nihility.rbac.sync.event.DomainEventPublisher;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -90,6 +91,10 @@ class AppServiceImplTest {
     @Mock
     private AppConfigService appConfigService;
 
+    /** 被测服务的数据变更事件发布依赖，使用 Mockito 打桩。 */
+    @Mock
+    private DomainEventPublisher domainEventPublisher;
+
     /** 被测服务实例。 */
     private AppServiceImpl appService;
 
@@ -116,7 +121,7 @@ class AppServiceImplTest {
     void setUp() {
         appService = new AppServiceImpl(appMapper, userMapper, orgMapper, operationLogRecorder,
                 formFieldDefinitionService, formFieldSnapshotSupport, orgScopeService, currentOperatorService,
-                userDisplayService, appConfigService);
+                userDisplayService, appConfigService, domainEventPublisher);
         lenient().when(userMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());

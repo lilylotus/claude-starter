@@ -34,6 +34,10 @@ public class AppConfigVO {
     @Schema(description = "接口签名算法：SHA256 或 SM3")
     private String signAlgorithm;
 
+    /** 是否需要签名/验签校验。 */
+    @Schema(description = "是否需要签名/验签校验")
+    private Boolean needSign;
+
     /** 同步方式：NOTIFY（通知）或 PULL（拉取），整个应用一份。 */
     @Schema(description = "同步方式：NOTIFY（通知）或 PULL（拉取）")
     private String syncMode;

@@ -19,10 +19,15 @@ import cn.nihility.rbac.formfield.dto.FormFieldDefinitionVO;
 import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
 import cn.nihility.rbac.formfield.support.DynamicFieldValidator;
 import cn.nihility.rbac.formfield.support.FormFieldSnapshotSupport;
+import cn.nihility.rbac.app.sync.constant.SyncDomain;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
+import cn.nihility.rbac.operationlog.constant.OperationType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.entity.OrgEntity;
 import cn.nihility.rbac.org.mapper.OrgMapper;
+import cn.nihility.rbac.sync.event.DomainChangeEvent;
+import cn.nihility.rbac.sync.event.DomainEventPublisher;
+import cn.nihility.rbac.sync.event.DomainSnapshotSupport;
 import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import cn.nihility.rbac.user.service.UserDisplayService;
@@ -97,6 +102,13 @@ public class AppServiceImpl implements AppService {
     private final AppConfigService appConfigService;
 
     /**
+     * 数据变更事件发布抽象，应用数据新增/编辑/启用/停用/删除写操作成功后紧邻
+     * {@code operationLogRecorder} 调用之后发布一次同步事件
+     * （app-sync-notify-pull-api change design.md Decision 5）。
+     */
+    private final DomainEventPublisher domainEventPublisher;
+
+    /**
      * {@inheritDoc}
      */
     @Override
@@ -164,6 +176,14 @@ public class AppServiceImpl implements AppService {
 
         operationLogRecorder.recordCreate(OperationLogResourceType.APP, entity.getId(), entity.getName(),
                 toLogSnapshot(entity));
+        domainEventPublisher.publish(DomainChangeEvent.builder()
+                .dataType(SyncDomain.APP)
+                .bizId(entity.getId())
+                .operationType(OperationType.CREATE)
+                .snapshot(DomainSnapshotSupport.snapshot(entity))
+                .operator(entity.getCreateBy())
+                .occurredAt(LocalDateTime.now())
+                .build());
 
         return getById(entity.getId());
     }
@@ -186,6 +206,14 @@ public class AppServiceImpl implements AppService {
 
         operationLogRecorder.recordUpdate(OperationLogResourceType.APP, id, entity.getName(),
                 beforeSnapshot, toLogSnapshot(entity));
+        domainEventPublisher.publish(DomainChangeEvent.builder()
+                .dataType(SyncDomain.APP)
+                .bizId(id)
+                .operationType(OperationType.UPDATE)
+                .snapshot(DomainSnapshotSupport.snapshot(entity))
+                .operator(entity.getUpdateBy())
+                .occurredAt(LocalDateTime.now())
+                .build());
 
         return getById(id);
     }
@@ -213,6 +241,7 @@ public class AppServiceImpl implements AppService {
     public void delete(Long id) {
         AppEntity entity = getExistingEntityInScope(id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+        Map<String, Object> beforeEventSnapshot = DomainSnapshotSupport.snapshot(entity);
 
         entity.setStatus(AppStatus.DELETED);
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
@@ -220,6 +249,14 @@ public class AppServiceImpl implements AppService {
         appMapper.updateById(entity);
 
         operationLogRecorder.recordDelete(OperationLogResourceType.APP, id, entity.getName(), beforeSnapshot);
+        domainEventPublisher.publish(DomainChangeEvent.builder()
+                .dataType(SyncDomain.APP)
+                .bizId(id)
+                .operationType(OperationType.DELETE)
+                .snapshot(beforeEventSnapshot)
+                .operator(entity.getUpdateBy())
+                .occurredAt(LocalDateTime.now())
+                .build());
     }
 
     /**
@@ -240,6 +277,14 @@ public class AppServiceImpl implements AppService {
 
         operationLogRecorder.recordStatusChange(OperationLogResourceType.APP, id, entity.getName(),
                 status == AppStatus.ENABLED, beforeSnapshot, toLogSnapshot(entity));
+        domainEventPublisher.publish(DomainChangeEvent.builder()
+                .dataType(SyncDomain.APP)
+                .bizId(id)
+                .operationType(status == AppStatus.ENABLED ? OperationType.ENABLE : OperationType.DISABLE)
+                .snapshot(DomainSnapshotSupport.snapshot(entity))
+                .operator(entity.getUpdateBy())
+                .occurredAt(LocalDateTime.now())
+                .build());
         return getById(id);
     }
 

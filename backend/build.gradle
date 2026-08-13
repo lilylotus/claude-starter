@@ -51,6 +51,7 @@ dependencies {
     implementation 'org.graalvm.polyglot:polyglot:23.1.12'
     implementation 'org.graalvm.polyglot:js-community:23.1.12'
 
+    implementation 'com.lmax:disruptor:4.0.0'
     implementation 'org.apache.httpcomponents.client5:httpclient5:5.6.4'
 
 	compileOnly 'org.projectlombok:lombok'

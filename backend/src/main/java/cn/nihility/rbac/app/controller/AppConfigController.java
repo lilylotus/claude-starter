@@ -64,9 +64,9 @@ public class AppConfigController {
      * @return 修改后的应用配置详情
      */
     @Operation(summary = "修改同步配置",
-            description = "整个应用一份的同步方式（NOTIFY/PULL）、通知模式下的回调接口地址与自定义参数；"
-                    + "组织/用户/应用/角色/字典五个数据域各自的启用开关、拉取分页大小与字段级同步映射，"
-                    + "改由 AppSyncConfigController 的数据域配置/字段映射接口单独维护")
+            description = "整个应用一份的同步方式（NOTIFY/PULL）、通知模式下的回调接口地址与自定义参数、"
+                    + "是否需要签名/验签校验（needSign）；组织/用户/任职/应用/角色/字典六个数据域各自的启用开关、"
+                    + "拉取分页大小与字段级同步映射，改由 AppSyncConfigController 的数据域配置/字段映射接口单独维护")
     @PutMapping("/api/apps/{id}/config/sync")
     public AppConfigVO updateSyncConfig(@PathVariable Long id, @Valid @RequestBody SyncConfigUpdateRequest request) {
         return appConfigService.updateSyncConfig(id, request);
