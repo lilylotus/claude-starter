@@ -56,6 +56,7 @@ export const PERMISSION_MODULE_LABELS: Record<string, string> = {
   OrgManagement: '组织管理',
   UserManagement: '用户管理',
   PositionManagement: '任职管理',
+  UpstreamManagement: '上游数据管理',
   AppManagement: '应用管理',
   RoleManagement: '角色管理',
   PermissionManagement: '权限点管理',
