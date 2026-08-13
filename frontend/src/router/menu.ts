@@ -11,6 +11,7 @@ export const MENU_GROUPS: MenuGroup[] = [
       { title: '组织管理', path: '/identity/orgs', permissionKey: 'OrgManagement:org:view' },
       { title: '用户管理', path: '/identity/users', permissionKey: 'UserManagement:user:view' },
       { title: '任职管理', path: '/identity/positions', permissionKey: 'PositionManagement:position:view' },
+      { title: '上游数据管理', path: '/identity/upstream', permissionKey: 'UpstreamManagement:source:view' },
     ],
   },
   {

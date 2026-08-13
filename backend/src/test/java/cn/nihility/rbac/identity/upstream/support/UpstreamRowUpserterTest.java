@@ -1,0 +1,395 @@
+package cn.nihility.rbac.identity.upstream.support;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.identity.upstream.constant.UpstreamDataType;
+import cn.nihility.rbac.identity.upstream.constant.UpstreamOrgPseudoFieldCode;
+import cn.nihility.rbac.identity.upstream.constant.UpstreamPositionPseudoFieldCode;
+import cn.nihility.rbac.org.constant.OrgStatus;
+import cn.nihility.rbac.org.dto.OrgCreateRequest;
+import cn.nihility.rbac.org.dto.OrgUpdateRequest;
+import cn.nihility.rbac.org.entity.OrgEntity;
+import cn.nihility.rbac.org.mapper.OrgMapper;
+import cn.nihility.rbac.org.service.OrgService;
+import cn.nihility.rbac.user.constant.UserStatus;
+import cn.nihility.rbac.user.dto.PositionCreateRequest;
+import cn.nihility.rbac.user.dto.PositionUpdateRequest;
+import cn.nihility.rbac.user.dto.UserCreateRequest;
+import cn.nihility.rbac.user.dto.UserUpdateRequest;
+import cn.nihility.rbac.user.entity.UserEntity;
+import cn.nihility.rbac.user.entity.UserPositionEntity;
+import cn.nihility.rbac.user.mapper.UserMapper;
+import cn.nihility.rbac.user.mapper.UserPositionMapper;
+import cn.nihility.rbac.user.service.PositionService;
+import cn.nihility.rbac.user.service.UserService;
+import java.util.Map;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+/**
+ * {@link UpstreamRowUpserter} 的单元测试，覆盖组织/用户/任职各自的新增/更新/多条匹配
+ * 失败场景，以及组织"上级组织编码"伪字段（{@link UpstreamOrgPseudoFieldCode#PARENT_CODE}）
+ * 缺省/为 "0"/匹配到已有组织/匹配不到已有组织四种场景（tasks.md 10.1）。
+ */
+@ExtendWith(MockitoExtension.class)
+class UpstreamRowUpserterTest {
+
+    /** 被测组件的组织数据访问依赖，使用 Mockito 打桩。 */
+    @Mock
+    private OrgMapper orgMapper;
+
+    /** 被测组件的组织业务逻辑依赖，使用 Mockito 打桩。 */
+    @Mock
+    private OrgService orgService;
+
+    /** 被测组件的用户数据访问依赖，使用 Mockito 打桩。 */
+    @Mock
+    private UserMapper userMapper;
+
+    /** 被测组件的用户业务逻辑依赖，使用 Mockito 打桩。 */
+    @Mock
+    private UserService userService;
+
+    /** 被测组件的任职数据访问依赖，使用 Mockito 打桩。 */
+    @Mock
+    private UserPositionMapper userPositionMapper;
+
+    /** 被测组件的任职业务逻辑依赖，使用 Mockito 打桩。 */
+    @Mock
+    private PositionService positionService;
+
+    /** 被测组件实例。 */
+    private UpstreamRowUpserter upstreamRowUpserter;
+
+    /**
+     * 每个用例执行前重新构造被测组件。
+     */
+    @BeforeEach
+    void setUp() {
+        upstreamRowUpserter = new UpstreamRowUpserter(orgMapper, orgService, userMapper, userService,
+                userPositionMapper, positionService);
+    }
+
+    /**
+     * 组织编码在未删除的组织中不存在匹配记录时，应走新增流程，调用组织模块既有的
+     * create 方法；原始行未携带"上级组织编码"伪字段（{@link UpstreamOrgPseudoFieldCode#PARENT_CODE}）
+     * 时，应视为顶级组织，{@code parentId} 落地为 0，不判定该行失败。
+     */
+    @Test
+    void upsertRow_shouldCreateOrg_whenNoMatch() {
+        when(orgMapper.selectList(any())).thenReturn(java.util.List.of());
+        Map<String, Object> row = Map.of("code", "ORG001", "name", "测试组织");
+
+        upstreamRowUpserter.upsertRow(UpstreamDataType.ORG, row, row);
+
+        ArgumentCaptor<OrgCreateRequest> captor = ArgumentCaptor.forClass(OrgCreateRequest.class);
+        verify(orgService).create(captor.capture());
+        assertThat(captor.getValue().getCode()).isEqualTo("ORG001");
+        assertThat(captor.getValue().getName()).isEqualTo("测试组织");
+        assertThat(captor.getValue().getParentId()).isEqualTo(0L);
+    }
+
+    /**
+     * "上级组织编码"伪字段字面值为 {@code "0"} 时，同样视为顶级组织，{@code parentId}
+     * 落地为 0。
+     */
+    @Test
+    void upsertRow_shouldCreateOrg_whenParentCodeIsZero() {
+        when(orgMapper.selectList(any())).thenReturn(java.util.List.of());
+        Map<String, Object> transformedRow = Map.of("code", "ORG001", "name", "测试组织");
+        Map<String, Object> rawRow = Map.of("code", "ORG001", "name", "测试组织",
+                UpstreamOrgPseudoFieldCode.PARENT_CODE, "0");
+
+        upstreamRowUpserter.upsertRow(UpstreamDataType.ORG, transformedRow, rawRow);
+
+        ArgumentCaptor<OrgCreateRequest> captor = ArgumentCaptor.forClass(OrgCreateRequest.class);
+        verify(orgService).create(captor.capture());
+        assertThat(captor.getValue().getParentId()).isEqualTo(0L);
+    }
+
+    /**
+     * "上级组织编码"伪字段取值能唯一匹配到一条已有的未删除组织时，{@code parentId}
+     * 取自匹配结果，而不是默认值 0。
+     */
+    @Test
+    void upsertRow_shouldCreateOrg_whenParentCodeMatched() {
+        OrgEntity parent = OrgEntity.builder().id(9L).code("ROOT").status(OrgStatus.ENABLED).build();
+        when(orgMapper.selectList(any()))
+                .thenReturn(java.util.List.of())
+                .thenReturn(java.util.List.of(parent));
+        Map<String, Object> transformedRow = Map.of("code", "ORG001", "name", "测试组织");
+        Map<String, Object> rawRow = Map.of("code", "ORG001", "name", "测试组织",
+                UpstreamOrgPseudoFieldCode.PARENT_CODE, "ROOT");
+
+        upstreamRowUpserter.upsertRow(UpstreamDataType.ORG, transformedRow, rawRow);
+
+        ArgumentCaptor<OrgCreateRequest> captor = ArgumentCaptor.forClass(OrgCreateRequest.class);
+        verify(orgService).create(captor.capture());
+        assertThat(captor.getValue().getParentId()).isEqualTo(9L);
+    }
+
+    /**
+     * "上级组织编码"伪字段取值在未删除的组织中不存在匹配记录时，应判定该行失败，
+     * 明确提示是上级组织编码无法匹配，不调用 create/update。
+     */
+    @Test
+    void upsertRow_shouldFailOrg_whenParentCodeNotFound() {
+        when(orgMapper.selectList(any()))
+                .thenReturn(java.util.List.of())
+                .thenReturn(java.util.List.of());
+        Map<String, Object> transformedRow = Map.of("code", "ORG001", "name", "测试组织");
+        Map<String, Object> rawRow = Map.of("code", "ORG001", "name", "测试组织",
+                UpstreamOrgPseudoFieldCode.PARENT_CODE, "NOT_EXIST");
+
+        assertThatThrownBy(() -> upstreamRowUpserter.upsertRow(UpstreamDataType.ORG, transformedRow, rawRow))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("上级组织编码")
+                .hasMessageContaining("无法匹配");
+    }
+
+    /**
+     * 组织编码匹配到一条已存在的未删除组织时，应走更新流程，调用组织模块既有的
+     * update 方法。
+     */
+    @Test
+    void upsertRow_shouldUpdateOrg_whenOneMatch() {
+        OrgEntity existing = OrgEntity.builder().id(5L).code("ORG001").status(OrgStatus.ENABLED).build();
+        when(orgMapper.selectList(any())).thenReturn(java.util.List.of(existing));
+        Map<String, Object> row = Map.of("code", "ORG001", "name", "测试组织（更新）");
+
+        upstreamRowUpserter.upsertRow(UpstreamDataType.ORG, row, row);
+
+        ArgumentCaptor<OrgUpdateRequest> captor = ArgumentCaptor.forClass(OrgUpdateRequest.class);
+        verify(orgService).update(eq(5L), captor.capture());
+        assertThat(captor.getValue().getName()).isEqualTo("测试组织（更新）");
+    }
+
+    /**
+     * 组织编码匹配到多条已存在的未删除组织时，应判定该行失败，不调用 create/update。
+     */
+    @Test
+    void upsertRow_shouldFailOrg_whenMultipleMatch() {
+        OrgEntity match1 = OrgEntity.builder().id(5L).code("ORG001").status(OrgStatus.ENABLED).build();
+        OrgEntity match2 = OrgEntity.builder().id(6L).code("ORG001").status(OrgStatus.ENABLED).build();
+        when(orgMapper.selectList(any())).thenReturn(java.util.List.of(match1, match2));
+        Map<String, Object> row = Map.of("code", "ORG001", "name", "测试组织");
+
+        assertThatThrownBy(() -> upstreamRowUpserter.upsertRow(UpstreamDataType.ORG, row, row))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("多条");
+    }
+
+    /**
+     * 用户编号在未删除的用户中不存在匹配记录时，应走新增流程。
+     */
+    @Test
+    void upsertRow_shouldCreateUser_whenNoMatch() {
+        when(userMapper.selectList(any())).thenReturn(java.util.List.of());
+        Map<String, Object> row = Map.of("code", "U001", "name", "张三");
+
+        upstreamRowUpserter.upsertRow(UpstreamDataType.USER, row, row);
+
+        ArgumentCaptor<UserCreateRequest> captor = ArgumentCaptor.forClass(UserCreateRequest.class);
+        verify(userService).create(captor.capture());
+        assertThat(captor.getValue().getCode()).isEqualTo("U001");
+        assertThat(captor.getValue().getName()).isEqualTo("张三");
+    }
+
+    /**
+     * 用户编号匹配到一条已存在的未删除用户时，应走更新流程。
+     */
+    @Test
+    void upsertRow_shouldUpdateUser_whenOneMatch() {
+        UserEntity existing = UserEntity.builder().id(9L).code("U001").status(UserStatus.ENABLED).build();
+        when(userMapper.selectList(any())).thenReturn(java.util.List.of(existing));
+        Map<String, Object> row = Map.of("code", "U001", "name", "张三（更新）");
+
+        upstreamRowUpserter.upsertRow(UpstreamDataType.USER, row, row);
+
+        ArgumentCaptor<UserUpdateRequest> captor = ArgumentCaptor.forClass(UserUpdateRequest.class);
+        verify(userService).update(eq(9L), captor.capture());
+        assertThat(captor.getValue().getName()).isEqualTo("张三（更新）");
+    }
+
+    /**
+     * 用户编号匹配到多条已存在的未删除用户时，应判定该行失败。
+     */
+    @Test
+    void upsertRow_shouldFailUser_whenMultipleMatch() {
+        UserEntity match1 = UserEntity.builder().id(1L).code("U001").status(UserStatus.ENABLED).build();
+        UserEntity match2 = UserEntity.builder().id(2L).code("U001").status(UserStatus.ENABLED).build();
+        when(userMapper.selectList(any())).thenReturn(java.util.List.of(match1, match2));
+        Map<String, Object> row = Map.of("code", "U001", "name", "张三");
+
+        assertThatThrownBy(() -> upstreamRowUpserter.upsertRow(UpstreamDataType.USER, row, row))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("多条");
+    }
+
+    /**
+     * 任职人员标识（按用户编号匹配）、组织编码均匹配成功且复合键未命中已有记录时，
+     * 应走新增流程，{@code userId}/{@code orgId} 取自解析结果。
+     */
+    @Test
+    void upsertRow_shouldCreatePosition_whenNoMatch() {
+        UserEntity user = UserEntity.builder().id(1L).code("U001").status(UserStatus.ENABLED).build();
+        OrgEntity org = OrgEntity.builder().id(2L).code("ORG001").status(OrgStatus.ENABLED).build();
+        when(userMapper.selectList(any())).thenReturn(java.util.List.of(user));
+        when(orgMapper.selectList(any())).thenReturn(java.util.List.of(org));
+        when(userPositionMapper.selectList(any())).thenReturn(java.util.List.of());
+        Map<String, Object> transformedRow = Map.of("positionType", "primary");
+        Map<String, Object> rawRow = Map.of(
+                UpstreamPositionPseudoFieldCode.USER_IDENTIFIER, "U001",
+                UpstreamPositionPseudoFieldCode.ORG_CODE, "ORG001");
+
+        upstreamRowUpserter.upsertRow(UpstreamDataType.POSITION, transformedRow, rawRow);
+
+        ArgumentCaptor<PositionCreateRequest> captor = ArgumentCaptor.forClass(PositionCreateRequest.class);
+        verify(positionService).create(captor.capture());
+        assertThat(captor.getValue().getUserId()).isEqualTo(1L);
+        assertThat(captor.getValue().getOrgId()).isEqualTo(2L);
+        assertThat(captor.getValue().getPositionType()).isEqualTo("primary");
+    }
+
+    /**
+     * 复合键（userId+orgId+positionType）命中一条已有任职记录时，应走更新流程。
+     */
+    @Test
+    void upsertRow_shouldUpdatePosition_whenOneMatch() {
+        UserEntity user = UserEntity.builder().id(1L).code("U001").status(UserStatus.ENABLED).build();
+        OrgEntity org = OrgEntity.builder().id(2L).code("ORG001").status(OrgStatus.ENABLED).build();
+        UserPositionEntity existing = UserPositionEntity.builder().id(9L).userId(1L).orgId(2L)
+                .positionType("primary").build();
+        when(userMapper.selectList(any())).thenReturn(java.util.List.of(user));
+        when(orgMapper.selectList(any())).thenReturn(java.util.List.of(org));
+        when(userPositionMapper.selectList(any())).thenReturn(java.util.List.of(existing));
+        Map<String, Object> transformedRow = Map.of("positionType", "primary");
+        Map<String, Object> rawRow = Map.of(
+                UpstreamPositionPseudoFieldCode.USER_IDENTIFIER, "U001",
+                UpstreamPositionPseudoFieldCode.ORG_CODE, "ORG001");
+
+        upstreamRowUpserter.upsertRow(UpstreamDataType.POSITION, transformedRow, rawRow);
+
+        ArgumentCaptor<PositionUpdateRequest> captor = ArgumentCaptor.forClass(PositionUpdateRequest.class);
+        verify(positionService).update(eq(9L), captor.capture());
+        assertThat(captor.getValue().getOrgId()).isEqualTo(2L);
+        assertThat(captor.getValue().getPositionType()).isEqualTo("primary");
+    }
+
+    /**
+     * 人员标识取值不等于任何用户编号，但等于唯一一个未删除用户的手机号时，应按该
+     * 手机号匹配到该用户并继续走新增流程。
+     */
+    @Test
+    void upsertRow_shouldMatchUserByMobile_whenCodeNotMatched() {
+        UserEntity user = UserEntity.builder().id(1L).code("U999").mobile("13800000000")
+                .status(UserStatus.ENABLED).build();
+        OrgEntity org = OrgEntity.builder().id(2L).code("ORG001").status(OrgStatus.ENABLED).build();
+        when(userMapper.selectList(any())).thenReturn(java.util.List.of(user));
+        when(orgMapper.selectList(any())).thenReturn(java.util.List.of(org));
+        when(userPositionMapper.selectList(any())).thenReturn(java.util.List.of());
+        Map<String, Object> transformedRow = Map.of("positionType", "primary");
+        Map<String, Object> rawRow = Map.of(
+                UpstreamPositionPseudoFieldCode.USER_IDENTIFIER, "13800000000",
+                UpstreamPositionPseudoFieldCode.ORG_CODE, "ORG001");
+
+        upstreamRowUpserter.upsertRow(UpstreamDataType.POSITION, transformedRow, rawRow);
+
+        ArgumentCaptor<PositionCreateRequest> captor = ArgumentCaptor.forClass(PositionCreateRequest.class);
+        verify(positionService).create(captor.capture());
+        assertThat(captor.getValue().getUserId()).isEqualTo(1L);
+    }
+
+    /**
+     * 人员标识在未删除的用户中不存在匹配记录（code/mobile/idCard 均不命中）时，应判定
+     * 该行失败，不触及组织匹配与任职记录查询。
+     */
+    @Test
+    void upsertRow_shouldFailPosition_whenUserIdentifierNotFound() {
+        when(userMapper.selectList(any())).thenReturn(java.util.List.of());
+        Map<String, Object> transformedRow = Map.of("positionType", "primary");
+        Map<String, Object> rawRow = Map.of(
+                UpstreamPositionPseudoFieldCode.USER_IDENTIFIER, "NOT_EXIST",
+                UpstreamPositionPseudoFieldCode.ORG_CODE, "ORG001");
+
+        assertThatThrownBy(() -> upstreamRowUpserter.upsertRow(UpstreamDataType.POSITION, transformedRow, rawRow))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("人员标识")
+                .hasMessageContaining("无法匹配");
+    }
+
+    /**
+     * 人员标识匹配到多个不同未删除用户（如手机号被重复使用）时，应判定该行失败，
+     * 不触及组织匹配与任职记录查询。
+     */
+    @Test
+    void upsertRow_shouldFailPosition_whenUserIdentifierMatchesMultiple() {
+        UserEntity match1 = UserEntity.builder().id(1L).code("U001").mobile("13800000000")
+                .status(UserStatus.ENABLED).build();
+        UserEntity match2 = UserEntity.builder().id(2L).code("U002").mobile("13800000000")
+                .status(UserStatus.ENABLED).build();
+        when(userMapper.selectList(any())).thenReturn(java.util.List.of(match1, match2));
+        Map<String, Object> transformedRow = Map.of("positionType", "primary");
+        Map<String, Object> rawRow = Map.of(
+                UpstreamPositionPseudoFieldCode.USER_IDENTIFIER, "13800000000",
+                UpstreamPositionPseudoFieldCode.ORG_CODE, "ORG001");
+
+        assertThatThrownBy(() -> upstreamRowUpserter.upsertRow(UpstreamDataType.POSITION, transformedRow, rawRow))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("多条");
+    }
+
+    /**
+     * 人员标识匹配成功但组织编码在未删除的组织中不存在匹配记录时，应判定该行失败，
+     * 明确提示是组织编码无法匹配。
+     */
+    @Test
+    void upsertRow_shouldFailPosition_whenOrgCodeNotFound() {
+        UserEntity user = UserEntity.builder().id(1L).code("U001").status(UserStatus.ENABLED).build();
+        when(userMapper.selectList(any())).thenReturn(java.util.List.of(user));
+        when(orgMapper.selectList(any())).thenReturn(java.util.List.of());
+        Map<String, Object> transformedRow = Map.of("positionType", "primary");
+        Map<String, Object> rawRow = Map.of(
+                UpstreamPositionPseudoFieldCode.USER_IDENTIFIER, "U001",
+                UpstreamPositionPseudoFieldCode.ORG_CODE, "ORG001");
+
+        assertThatThrownBy(() -> upstreamRowUpserter.upsertRow(UpstreamDataType.POSITION, transformedRow, rawRow))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("组织编码")
+                .hasMessageContaining("无法匹配");
+    }
+
+    /**
+     * 复合键（userId+orgId+positionType）匹配到多条已存在任职记录时，应判定该行失败。
+     */
+    @Test
+    void upsertRow_shouldFailPosition_whenMultiplePositionMatch() {
+        UserEntity user = UserEntity.builder().id(1L).code("U001").status(UserStatus.ENABLED).build();
+        OrgEntity org = OrgEntity.builder().id(2L).code("ORG001").status(OrgStatus.ENABLED).build();
+        UserPositionEntity match1 = UserPositionEntity.builder().id(9L).userId(1L).orgId(2L)
+                .positionType("primary").build();
+        UserPositionEntity match2 = UserPositionEntity.builder().id(10L).userId(1L).orgId(2L)
+                .positionType("primary").build();
+        when(userMapper.selectList(any())).thenReturn(java.util.List.of(user));
+        when(orgMapper.selectList(any())).thenReturn(java.util.List.of(org));
+        when(userPositionMapper.selectList(any())).thenReturn(java.util.List.of(match1, match2));
+        Map<String, Object> transformedRow = Map.of("positionType", "primary");
+        Map<String, Object> rawRow = Map.of(
+                UpstreamPositionPseudoFieldCode.USER_IDENTIFIER, "U001",
+                UpstreamPositionPseudoFieldCode.ORG_CODE, "ORG001");
+
+        assertThatThrownBy(() -> upstreamRowUpserter.upsertRow(UpstreamDataType.POSITION, transformedRow, rawRow))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("多条");
+    }
+}

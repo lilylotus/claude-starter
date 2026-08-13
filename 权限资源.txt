@@ -56,6 +56,21 @@ PositionManagement（任职管理，/identity/positions）
 - PositionManagement:position:importTemplate 下载任职导入模板
 - PositionManagement:position:import         批量导入任职记录
 
+UpstreamManagement（上游数据管理，/identity/upstream）
+- UpstreamManagement:source:view       上游数据管理页面访问
+- UpstreamManagement:source:add        新增上游数据源
+- UpstreamManagement:source:edit       编辑上游数据源基础信息（名称、同步方式），含独立
+  配置页"基础信息" tab 的保存
+- UpstreamManagement:source:delete     删除上游数据源（级联删除数据域配置、字段映射、
+  同步执行记录）
+- UpstreamManagement:source:enable     启用上游数据源
+- UpstreamManagement:source:disable    停用上游数据源
+- UpstreamManagement:source:config     进入数据源独立配置页（/identity/upstream/:id/config）
+- UpstreamManagement:source:config:edit  配置页内连接配置、调度配置、数据范围（数据域启用
+  开关+取数来源、字段映射）的全部保存动作，合并一个权限点
+- UpstreamManagement:source:manualSync   配置页"立即同步一次"按钮（有副作用、可能对上游
+  系统产生访问压力，单独控权）
+
 
 应用管理
 --------

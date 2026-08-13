@@ -25,6 +25,7 @@ const implementedComponents: Record<string, () => Promise<unknown>> = {
   '/identity/orgs': () => import('@/views/identity/org/OrgManagementView.vue'),
   '/identity/users': () => import('@/views/identity/user/UserManagementView.vue'),
   '/identity/positions': () => import('@/views/identity/position/PositionManagementView.vue'),
+  '/identity/upstream': () => import('@/views/identity/upstream/UpstreamSourceListView.vue'),
   '/application/list': () => import('@/views/application/app/AppManagementView.vue'),
   '/permission/roles': () => import('@/views/permission/role/RoleManagementView.vue'),
   '/permission/points': () => import('@/views/permission/permission/PermissionManagementView.vue'),
@@ -84,6 +85,12 @@ const detailRoutes = [
     name: 'application-list-config',
     component: () => import('@/views/application/app/AppConfigView.vue'),
     meta: { title: '应用配置', requiresAuth: true, permissionKey: 'AppManagement:app:config' },
+  },
+  {
+    path: 'identity/upstream/:id/config',
+    name: 'identity-upstream-config',
+    component: () => import('@/views/identity/upstream/UpstreamSourceConfigView.vue'),
+    meta: { title: '上游数据源配置', requiresAuth: true, permissionKey: 'UpstreamManagement:source:config' },
   },
   {
     path: 'permission/roles/:id',
