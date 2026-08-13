@@ -158,7 +158,6 @@ class RoleServiceImplTest {
         assertThat(publishedEvent.getBizId()).isEqualTo(10L);
         assertThat(publishedEvent.getOperationType())
                 .isEqualTo(cn.nihility.rbac.operationlog.constant.OperationType.CREATE);
-        assertThat(publishedEvent.getSnapshot()).containsEntry("code", "role001");
     }
 
     /**

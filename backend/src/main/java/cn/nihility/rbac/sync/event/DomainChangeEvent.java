@@ -1,7 +1,6 @@
 package cn.nihility.rbac.sync.event;
 
 import java.time.LocalDateTime;
-import java.util.Map;
 import lombok.Builder;
 import lombok.Getter;
 
@@ -27,12 +26,6 @@ public class DomainChangeEvent {
      * 的 CREATE/UPDATE/ENABLE/DISABLE/DELETE 五个常量。
      */
     private final int operationType;
-
-    /**
-     * 实体当前字段快照（DELETE 为删除前快照），key 为实体属性名（camelCase），与
-     * {@code tab_metadata_field.field_code} 对齐，供拉取接口的字段映射转换阶段使用。
-     */
-    private final Map<String, Object> snapshot;
 
     /** 操作人（当前登录用户 id 文本），用于变更记录审计字段。 */
     private final String operator;

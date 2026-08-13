@@ -101,7 +101,6 @@ class SyncPullServiceImplTest {
                 .dataType(SyncDomain.ORG)
                 .bizId(88L)
                 .operationType(1)
-                .dataSnapshot("{\"code\":\"ORG001\"}")
                 .createTime(LocalDateTime.now())
                 .build();
         when(appDataChangeLogService.selectLatestByBizIds(1L, SyncDomain.ORG, List.of(88L)))

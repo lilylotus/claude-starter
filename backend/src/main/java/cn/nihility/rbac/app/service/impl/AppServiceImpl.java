@@ -27,7 +27,6 @@ import cn.nihility.rbac.org.entity.OrgEntity;
 import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.sync.event.DomainChangeEvent;
 import cn.nihility.rbac.sync.event.DomainEventPublisher;
-import cn.nihility.rbac.sync.event.DomainSnapshotSupport;
 import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import cn.nihility.rbac.user.service.UserDisplayService;
@@ -180,7 +179,6 @@ public class AppServiceImpl implements AppService {
                 .dataType(SyncDomain.APP)
                 .bizId(entity.getId())
                 .operationType(OperationType.CREATE)
-                .snapshot(DomainSnapshotSupport.snapshot(entity))
                 .operator(entity.getCreateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());
@@ -210,7 +208,6 @@ public class AppServiceImpl implements AppService {
                 .dataType(SyncDomain.APP)
                 .bizId(id)
                 .operationType(OperationType.UPDATE)
-                .snapshot(DomainSnapshotSupport.snapshot(entity))
                 .operator(entity.getUpdateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());
@@ -241,7 +238,6 @@ public class AppServiceImpl implements AppService {
     public void delete(Long id) {
         AppEntity entity = getExistingEntityInScope(id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
-        Map<String, Object> beforeEventSnapshot = DomainSnapshotSupport.snapshot(entity);
 
         entity.setStatus(AppStatus.DELETED);
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
@@ -253,7 +249,6 @@ public class AppServiceImpl implements AppService {
                 .dataType(SyncDomain.APP)
                 .bizId(id)
                 .operationType(OperationType.DELETE)
-                .snapshot(beforeEventSnapshot)
                 .operator(entity.getUpdateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());
@@ -281,7 +276,6 @@ public class AppServiceImpl implements AppService {
                 .dataType(SyncDomain.APP)
                 .bizId(id)
                 .operationType(status == AppStatus.ENABLED ? OperationType.ENABLE : OperationType.DISABLE)
-                .snapshot(DomainSnapshotSupport.snapshot(entity))
                 .operator(entity.getUpdateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());

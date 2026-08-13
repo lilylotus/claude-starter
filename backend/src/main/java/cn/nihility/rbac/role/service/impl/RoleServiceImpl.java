@@ -21,7 +21,6 @@ import cn.nihility.rbac.role.mapstruct.RoleConvert;
 import cn.nihility.rbac.role.service.RoleService;
 import cn.nihility.rbac.sync.event.DomainChangeEvent;
 import cn.nihility.rbac.sync.event.DomainEventPublisher;
-import cn.nihility.rbac.sync.event.DomainSnapshotSupport;
 import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -119,7 +118,6 @@ public class RoleServiceImpl implements RoleService {
                 .dataType(SyncDomain.ROLE)
                 .bizId(entity.getId())
                 .operationType(OperationType.CREATE)
-                .snapshot(DomainSnapshotSupport.snapshot(entity))
                 .operator(entity.getCreateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());
@@ -150,7 +148,6 @@ public class RoleServiceImpl implements RoleService {
                 .dataType(SyncDomain.ROLE)
                 .bizId(id)
                 .operationType(OperationType.UPDATE)
-                .snapshot(DomainSnapshotSupport.snapshot(entity))
                 .operator(entity.getUpdateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());
@@ -181,7 +178,6 @@ public class RoleServiceImpl implements RoleService {
     public void delete(Long id) {
         RoleEntity entity = getExistingEntity(id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
-        Map<String, Object> beforeEventSnapshot = DomainSnapshotSupport.snapshot(entity);
 
         entity.setStatus(RoleStatus.DELETED);
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
@@ -193,7 +189,6 @@ public class RoleServiceImpl implements RoleService {
                 .dataType(SyncDomain.ROLE)
                 .bizId(id)
                 .operationType(OperationType.DELETE)
-                .snapshot(beforeEventSnapshot)
                 .operator(entity.getUpdateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());
@@ -233,7 +228,6 @@ public class RoleServiceImpl implements RoleService {
                 .dataType(SyncDomain.ROLE)
                 .bizId(id)
                 .operationType(status == RoleStatus.ENABLED ? OperationType.ENABLE : OperationType.DISABLE)
-                .snapshot(DomainSnapshotSupport.snapshot(entity))
                 .operator(entity.getUpdateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());

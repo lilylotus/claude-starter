@@ -12,7 +12,7 @@
 <mapper namespace="cn.nihility.rbac.sync.changelog.mapper.AppDataChangeLogMapper">
 
     <select id="selectLatestByBizIds" resultType="cn.nihility.rbac.sync.changelog.entity.AppDataChangeLogEntity">
-        SELECT l.id, l.app_ref_id, l.data_type, l.biz_id, l.operation_type, l.data_snapshot,
+        SELECT l.id, l.app_ref_id, l.data_type, l.biz_id, l.operation_type,
         l.create_by, l.create_time, l.update_by, l.update_time
         FROM tab_app_data_change_log l
         INNER JOIN (
@@ -31,7 +31,7 @@
     </select>
 
     <select id="selectBySequence" resultType="cn.nihility.rbac.sync.changelog.entity.AppDataChangeLogEntity">
-        SELECT id, app_ref_id, data_type, biz_id, operation_type, data_snapshot,
+        SELECT id, app_ref_id, data_type, biz_id, operation_type,
         create_by, create_time, update_by, update_time
         FROM tab_app_data_change_log
         WHERE app_ref_id = #{appRefId}

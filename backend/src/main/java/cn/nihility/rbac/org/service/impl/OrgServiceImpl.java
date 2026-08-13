@@ -25,7 +25,6 @@ import cn.nihility.rbac.org.mapstruct.OrgConvert;
 import cn.nihility.rbac.org.service.OrgService;
 import cn.nihility.rbac.sync.event.DomainChangeEvent;
 import cn.nihility.rbac.sync.event.DomainEventPublisher;
-import cn.nihility.rbac.sync.event.DomainSnapshotSupport;
 import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -210,7 +209,6 @@ public class OrgServiceImpl implements OrgService {
                 .dataType(SyncDomain.ORG)
                 .bizId(entity.getId())
                 .operationType(OperationType.CREATE)
-                .snapshot(DomainSnapshotSupport.snapshot(entity))
                 .operator(entity.getCreateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());
@@ -265,7 +263,6 @@ public class OrgServiceImpl implements OrgService {
                 .dataType(SyncDomain.ORG)
                 .bizId(id)
                 .operationType(OperationType.UPDATE)
-                .snapshot(DomainSnapshotSupport.snapshot(entity))
                 .operator(entity.getUpdateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());
@@ -319,7 +316,6 @@ public class OrgServiceImpl implements OrgService {
         }
 
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
-        Map<String, Object> beforeEventSnapshot = DomainSnapshotSupport.snapshot(entity);
         entity.setStatus(OrgStatus.DELETED);
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
@@ -330,7 +326,6 @@ public class OrgServiceImpl implements OrgService {
                 .dataType(SyncDomain.ORG)
                 .bizId(id)
                 .operationType(OperationType.DELETE)
-                .snapshot(beforeEventSnapshot)
                 .operator(entity.getUpdateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());
@@ -358,7 +353,6 @@ public class OrgServiceImpl implements OrgService {
                 .dataType(SyncDomain.ORG)
                 .bizId(id)
                 .operationType(status == OrgStatus.ENABLED ? OperationType.ENABLE : OperationType.DISABLE)
-                .snapshot(DomainSnapshotSupport.snapshot(entity))
                 .operator(entity.getUpdateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());

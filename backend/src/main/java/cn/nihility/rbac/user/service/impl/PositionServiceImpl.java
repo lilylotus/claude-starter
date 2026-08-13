@@ -11,7 +11,6 @@ import cn.nihility.rbac.operationlog.constant.OperationType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.sync.event.DomainChangeEvent;
 import cn.nihility.rbac.sync.event.DomainEventPublisher;
-import cn.nihility.rbac.sync.event.DomainSnapshotSupport;
 import cn.nihility.rbac.user.constant.PositionStatus;
 import cn.nihility.rbac.user.dto.PositionCreateRequest;
 import cn.nihility.rbac.user.dto.PositionUpdateRequest;
@@ -151,7 +150,6 @@ public class PositionServiceImpl implements PositionService {
                 .dataType(SyncDomain.POSITION)
                 .bizId(entity.getId())
                 .operationType(OperationType.CREATE)
-                .snapshot(DomainSnapshotSupport.snapshot(entity))
                 .operator(entity.getCreateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());
@@ -181,7 +179,6 @@ public class PositionServiceImpl implements PositionService {
                 .dataType(SyncDomain.POSITION)
                 .bizId(id)
                 .operationType(OperationType.UPDATE)
-                .snapshot(DomainSnapshotSupport.snapshot(entity))
                 .operator(entity.getUpdateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());
@@ -212,7 +209,6 @@ public class PositionServiceImpl implements PositionService {
     public void delete(Long id) {
         UserPositionEntity entity = getExistingEntityInScope(id);
         Map<String, Object> beforeSnapshot = positionLogSnapshotSupport.snapshot(entity);
-        Map<String, Object> beforeEventSnapshot = DomainSnapshotSupport.snapshot(entity);
 
         entity.setStatus(PositionStatus.DELETED);
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
@@ -225,7 +221,6 @@ public class PositionServiceImpl implements PositionService {
                 .dataType(SyncDomain.POSITION)
                 .bizId(id)
                 .operationType(OperationType.DELETE)
-                .snapshot(beforeEventSnapshot)
                 .operator(entity.getUpdateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());
@@ -254,7 +249,6 @@ public class PositionServiceImpl implements PositionService {
                 .dataType(SyncDomain.POSITION)
                 .bizId(id)
                 .operationType(status == PositionStatus.ENABLED ? OperationType.ENABLE : OperationType.DISABLE)
-                .snapshot(DomainSnapshotSupport.snapshot(entity))
                 .operator(entity.getUpdateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());

@@ -12,7 +12,6 @@ import cn.nihility.rbac.sync.event.DomainChangeEvent;
 import cn.nihility.rbac.sync.notify.service.AppNotifyService;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -95,7 +94,6 @@ class DomainChangeEventProcessorTest {
                 .dataType(SyncDomain.ORG)
                 .bizId(1L)
                 .operationType(OperationType.CREATE)
-                .snapshot(Map.of("code", "ORG001"))
                 .operator("1")
                 .occurredAt(LocalDateTime.now())
                 .build();

@@ -20,7 +20,6 @@ import cn.nihility.rbac.user.entity.UserPositionEntity;
 import cn.nihility.rbac.user.mapper.UserPositionMapper;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -92,7 +91,6 @@ class AppDataChangeLogServiceImplTest {
         assertThat(captor.getAllValues()).allSatisfy(entity -> {
             assertThat(entity.getDataType()).isEqualTo(SyncDomain.APP);
             assertThat(entity.getBizId()).isEqualTo(88L);
-            assertThat(entity.getDataSnapshot()).contains("APP001");
         });
     }
 
@@ -210,7 +208,6 @@ class AppDataChangeLogServiceImplTest {
                 .dataType(dataType)
                 .bizId(bizId)
                 .operationType(OperationType.CREATE)
-                .snapshot(Map.of("code", "APP001"))
                 .operator("1")
                 .occurredAt(LocalDateTime.now())
                 .build();

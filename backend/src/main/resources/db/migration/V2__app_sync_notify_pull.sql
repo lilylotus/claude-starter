@@ -19,13 +19,12 @@ FROM `tab_app`;
 
 -- 应用数据变更记录表：id 自增列全局单调递增，直接对外充当序列号，不额外维护计数器；
 -- 只追加不更新不删除。列名已核对 MySQL/PostgreSQL/Oracle/SQL Server 保留字：
--- data_type/biz_id/operation_type/data_snapshot 均非保留字。
+-- data_type/biz_id/operation_type 均非保留字。
 CREATE TABLE IF NOT EXISTS `tab_app_data_change_log` (
     `id`             BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id，全局单调递增，直接作为对外的序列号（sequence）',
     `data_type`      VARCHAR(20) NOT NULL COMMENT '数据类型：ORG/USER/POSITION/APP/ROLE',
     `biz_id`         BIGINT      NOT NULL COMMENT '变更对象主键 id',
     `operation_type` TINYINT     NOT NULL COMMENT '操作类型：1=新增，2=编辑，3=启用，4=停用，5=删除',
-    `data_snapshot`  TEXT        NULL COMMENT '变更后（删除操作为变更前）实体字段快照，JSON 对象字符串',
     `create_by`      VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
     `create_time`    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `update_by`      VARCHAR(64)          DEFAULT NULL COMMENT '更新人',

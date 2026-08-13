@@ -42,9 +42,6 @@ public class AppDataChangeLogEntity {
     /** 操作类型码值，复用 {@code OperationType} 的 1/2/3/4/5。 */
     private Integer operationType;
 
-    /** 变更后（DELETE 为变更前）实体字段快照，JSON 对象字符串。 */
-    private String dataSnapshot;
-
     /** 创建人。 */
     private String createBy;
 

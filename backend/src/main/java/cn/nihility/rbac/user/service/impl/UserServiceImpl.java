@@ -21,7 +21,6 @@ import cn.nihility.rbac.org.entity.OrgEntity;
 import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.sync.event.DomainChangeEvent;
 import cn.nihility.rbac.sync.event.DomainEventPublisher;
-import cn.nihility.rbac.sync.event.DomainSnapshotSupport;
 import cn.nihility.rbac.user.constant.PositionStatus;
 import cn.nihility.rbac.user.constant.UserStatus;
 import cn.nihility.rbac.user.dto.UserCreateRequest;
@@ -208,7 +207,6 @@ public class UserServiceImpl implements UserService {
                 .dataType(SyncDomain.USER)
                 .bizId(entity.getId())
                 .operationType(OperationType.CREATE)
-                .snapshot(DomainSnapshotSupport.snapshot(entity))
                 .operator(entity.getCreateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());
@@ -241,7 +239,6 @@ public class UserServiceImpl implements UserService {
                 .dataType(SyncDomain.USER)
                 .bizId(id)
                 .operationType(OperationType.UPDATE)
-                .snapshot(DomainSnapshotSupport.snapshot(entity))
                 .operator(entity.getUpdateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());
@@ -272,7 +269,6 @@ public class UserServiceImpl implements UserService {
     public void delete(Long id) {
         UserEntity entity = getExistingEntity(id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
-        Map<String, Object> beforeEventSnapshot = DomainSnapshotSupport.snapshot(entity);
 
         entity.setStatus(UserStatus.DELETED);
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
@@ -284,7 +280,6 @@ public class UserServiceImpl implements UserService {
                 .dataType(SyncDomain.USER)
                 .bizId(id)
                 .operationType(OperationType.DELETE)
-                .snapshot(beforeEventSnapshot)
                 .operator(entity.getUpdateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());
@@ -321,7 +316,6 @@ public class UserServiceImpl implements UserService {
                 .dataType(SyncDomain.USER)
                 .bizId(id)
                 .operationType(status == UserStatus.ENABLED ? OperationType.ENABLE : OperationType.DISABLE)
-                .snapshot(DomainSnapshotSupport.snapshot(entity))
                 .operator(entity.getUpdateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());

@@ -280,8 +280,8 @@ class OrgServiceImplTest {
                 .recordDelete(org.mockito.ArgumentMatchers.eq("org"), org.mockito.ArgumentMatchers.eq(1L),
                         org.mockito.ArgumentMatchers.eq("总公司"), any(Map.class));
 
-        // 紧邻 operationLogRecorder.recordDelete 之后应发布一次组织删除的同步事件，快照取
-        // 删除前的字段状态（app-sync-notify-pull-api change design.md Decision 5）。
+        // 紧邻 operationLogRecorder.recordDelete 之后应发布一次组织删除的同步事件
+        // （app-sync-notify-pull-api change design.md Decision 5）。
         org.mockito.ArgumentCaptor<cn.nihility.rbac.sync.event.DomainChangeEvent> eventCaptor =
                 org.mockito.ArgumentCaptor.forClass(cn.nihility.rbac.sync.event.DomainChangeEvent.class);
         verify(domainEventPublisher).publish(eventCaptor.capture());
@@ -290,7 +290,6 @@ class OrgServiceImplTest {
         assertThat(publishedEvent.getBizId()).isEqualTo(1L);
         assertThat(publishedEvent.getOperationType())
                 .isEqualTo(cn.nihility.rbac.operationlog.constant.OperationType.DELETE);
-        assertThat(publishedEvent.getSnapshot()).containsEntry("name", "总公司");
     }
 
     /**

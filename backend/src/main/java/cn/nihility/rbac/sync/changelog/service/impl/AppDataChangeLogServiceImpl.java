@@ -1,7 +1,6 @@
 package cn.nihility.rbac.sync.changelog.service.impl;
 
 import cn.nihility.rbac.app.sync.constant.SyncDomain;
-import cn.nihility.rbac.common.util.JacksonUtils;
 import cn.nihility.rbac.sync.changelog.entity.AppDataChangeLogEntity;
 import cn.nihility.rbac.sync.changelog.mapper.AppDataChangeLogMapper;
 import cn.nihility.rbac.sync.changelog.service.AppDataChangeLogService;
@@ -59,7 +58,6 @@ public class AppDataChangeLogServiceImpl implements AppDataChangeLogService {
                     .dataType(event.getDataType())
                     .bizId(event.getBizId())
                     .operationType(event.getOperationType())
-                    .dataSnapshot(JacksonUtils.toJson(event.getSnapshot()))
                     .createBy(event.getOperator())
                     .createTime(now)
                     .updateBy(event.getOperator())
