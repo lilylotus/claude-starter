@@ -19,9 +19,9 @@
 `tab_app_data_change_log` 表由 `V2` 建表，项目尚处开发阶段、脚本未在生产环境执行过。仓库已有先例（`910fd1b`）把多个未发布的 flyway 变更合并整理为一份连贯脚本，而不是层层叠加 alter。本次同样直接修改 `V2` 里的建表语句删除 `data_snapshot` 列定义及相关注释，保持脚本自身可读、一次性描述最终表结构。
 - **备选方案**：新增 `V4__drop_app_data_change_log_snapshot.sql` 执行 `ALTER TABLE ... DROP COLUMN`。若该表已经在某个已上线环境跑过 `V2`，必须用这种方式；但当前仓库/项目状态确认为未发布，故不采用，避免徒增一份很快就要被下一次整理合并掉的迁移脚本。
 
-### Decision 2：级联删除 `DomainChangeEvent.snapshot` 与 `DomainSnapshotSupport`，而不是保留
-`DomainSnapshotSupport.snapshot(entity)` 目前唯一的下游消费者就是 `AppDataChangeLogServiceImpl.record()` 里的 `.dataSnapshot(...)`。去掉该列之后，`DomainChangeEvent.snapshot` 字段及其在五个 ServiceImpl 里的构造代码不再被任何人读取，属于纯粹的死代码，予以整体删除而不是保留占位，避免误导后续开发者以为这条数据仍在被使用。
-- **备选方案**：保留字段/工具类以备将来某天需要事件快照。未采纳——YAGNI，且当前代码库对未使用代码没有例外保留的先例；真需要时可以基于 `DomainSnapshotSupport.snapshot(entity)` 这个纯函数很容易重新引入。
+### Decision 2：删除 `DomainChangeEvent.snapshot` 及其构造调用，但保留 `DomainSnapshotSupport` 工具类
+**实施时发现原判断有误，已更正**：`DomainSnapshotSupport.snapshot(entity)` 并非只被 `AppDataChangeLogServiceImpl.record()` 消费——更早的 `fix-app-sync-pull-live-data` change 已经让 `sync/transform/BizSnapshotResolver.resolve()` 直接复用这个纯函数把业务表现查结果转成 `Map<String, Object>`，供拉取接口的 `data` 字段使用（`BizSnapshotResolver` 类头注释亦提到这点）。因此只删除 `DomainChangeEvent.snapshot` 字段和五个 ServiceImpl 里 `.snapshot(DomainSnapshotSupport.snapshot(entity))` 的构造调用（这部分确实除 `record()` 外无人读取，属于死代码）；`DomainSnapshotSupport` 类本身继续保留，作为 `BizSnapshotResolver` 依赖的共享工具类，不删除。
+- **备选方案**：整体删除 `DomainSnapshotSupport`。已否决——会导致 `BizSnapshotResolver` 编译失败，且违反 proposal.md 中「`BizSnapshotResolver`...均不改动」的不变量承诺。
 
 ### Decision 3：spec 更新范围
 `app-sync-notify-pull` 能力里「组织/用户/任职/应用/角色数据变更产生同步事件」需求原文把"变更后的字段快照"列为同步事件必须携带的内容之一，且有一条专门验证删除场景快照的 scenario。这两处需要随实现同步修改/删除，其余需求（拉取接口返回现查数据、字段映射转换等）本来就已经和"事件是否携带快照"无关，不需要改动。
