@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // 应用配置独立页面：管理该应用对外的 AppId/AccessKey/SecretKey 凭证、签名算法、
 // 数据同步范围开关。风格参照 AppDetailView.vue（独立路由、独立拉取数据、左上角"返回"按钮），
-// 区别在于这里是可编辑的配置页而不是只读详情页；三个分区用 el-tabs 切换展示，
-// 参照 FormFieldListView.vue 的外层 tabs 用法。
+// 区别在于这里是可编辑的配置页而不是只读详情页；"基础信息"/"同步配置"两个分区用 el-tabs
+// 切换展示，参照 FormFieldListView.vue 的外层 tabs 用法。
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, CopyDocument, Delete, Plus } from '@element-plus/icons-vue'
@@ -38,17 +38,18 @@ const loading = ref(false)
 const loadError = ref('')
 const config = ref<AppConfigVO | null>(null)
 
-// 三个分区（基础信息/接口配置/同步配置）用 el-tabs 切换展示，而不是纵向堆叠
-const activeTab = ref<'basic' | 'signature' | 'sync'>('basic')
+// 两个分区（基础信息/同步配置）用 el-tabs 切换展示，而不是纵向堆叠；原“接口配置”
+// tab（只有签名算法一项）已合并进“同步配置”tab 的“基础同步配置”表单
+const activeTab = ref<'basic' | 'sync'>('basic')
 
-// 接口配置卡片：签名算法的本地可编辑副本，与 config.signAlgorithm 分离，
-// 未点“保存”前不影响已加载的展示态
+// 签名算法的本地可编辑副本，与 config.signAlgorithm 分离，未点“保存”前不影响已加载的
+// 展示态；模板位置在“同步配置”tab 的“基础同步配置”表单里，紧跟“签名校验”开关之后，
+// 仅当该开关启用时才展示（见 openspec/changes/app-config-page-ux-refine）
 const signAlgorithmForm = ref<SignAlgorithm>('SHA256')
-const savingSignAlgorithm = ref(false)
 
-// 同步配置卡片：基础同步配置项（同步方式、通知回调地址、是否需要签名/验签校验）的本地可
-// 编辑副本；数据范围（组织/用户/任职/应用/角色/字典六个数据域各自的启用开关+分页大小+
-// 字段映射）改由下方独立的"数据范围"区块管理，不再是这个表单的一部分（见
+// 同步配置卡片：基础同步配置项（同步方式、通知回调地址、是否需要签名/验签校验、签名算法）
+// 的本地可编辑副本；数据范围（组织/用户/任职/应用/角色/字典六个数据域各自的启用开关+分页
+// 大小+字段映射）改由下方独立的“数据范围”区块管理，不再是这个表单的一部分（见
 // openspec/changes/app-sync-field-mapping、app-sync-notify-pull-api）。
 // notifyParams 不直接用 Record 编辑（模板里动态 key 不便双向绑定），拆成一个 { key, value }
 // 行数组，保存前再收敛回 Record<string, string>
@@ -58,7 +59,8 @@ const syncForm = ref({
   needSign: false,
 })
 const notifyParamRows = ref<{ key: string; value: string }[]>([])
-const savingSync = ref(false)
+// 签名算法与基础同步配置合并为一次保存点击（两次既有接口调用），共用一个 loading
+const savingBasicSync = ref(false)
 
 function addNotifyParamRow() {
   notifyParamRows.value.push({ key: '', value: '' })
@@ -163,19 +165,6 @@ function closeSecretReveal() {
   revealedSecretKey.value = ''
 }
 
-// ---- 接口配置：签名算法 ----
-
-async function saveSignAlgorithm() {
-  savingSignAlgorithm.value = true
-  try {
-    const data = await appApi.updateAppSignAlgorithm(appId.value, { signAlgorithm: signAlgorithmForm.value })
-    applyConfig(data)
-    ElMessage.success('保存成功')
-  } finally {
-    savingSignAlgorithm.value = false
-  }
-}
-
 // ---- 同步配置 ----
 
 // 同步方式为“通知”时，接口地址必填且必须是 http/https 开头的合法 URL；这里做一次前端快速
@@ -195,22 +184,28 @@ function validateNotifyUrl(): string {
   return ''
 }
 
-async function saveSyncConfig() {
+// 基础同步配置 + 签名算法合并保存：先做前端校验，通过后并发提交两个既有接口（接口契约
+// 不变，语义独立——一个改签名算法，一个改同步方式/通知配置/签名校验开关），成功后用任一
+// 响应刷新展示态；失败不吞异常，交由全局响应拦截器统一提示
+async function saveBasicSyncConfig() {
   const validationError = validateNotifyUrl()
   if (validationError) {
     ElMessage.error(validationError)
     return
   }
-  savingSync.value = true
+  savingBasicSync.value = true
   try {
-    const data = await appApi.updateAppSyncConfig(appId.value, {
-      ...syncForm.value,
-      notifyParams: notifyParamRowsToRecord(),
-    })
+    const [data] = await Promise.all([
+      appApi.updateAppSignAlgorithm(appId.value, { signAlgorithm: signAlgorithmForm.value }),
+      appApi.updateAppSyncConfig(appId.value, {
+        ...syncForm.value,
+        notifyParams: notifyParamRowsToRecord(),
+      }),
+    ])
     applyConfig(data)
     ElMessage.success('保存成功')
   } finally {
-    savingSync.value = false
+    savingBasicSync.value = false
   }
 }
 
@@ -219,8 +214,21 @@ async function saveSyncConfig() {
 // 支持字段级同步映射的数据域（组织/用户/任职/应用/角色），字典不展示字段映射表格
 const fieldMappingSupportedDomains = SYNC_DOMAIN_FIELD_MAPPING_DOMAINS
 
-// 当前激活的数据域子 tab
+// 当前激活的数据域子 tab（左侧一级 tab）
 const syncDomainTab = ref<SyncDomain>('ORG')
+
+// 每个数据域面板内“是否启用/同步范围/字段映射”二级 tab 的激活状态，按数据域独立记忆，
+// 不做跨数据域联动（切到某数据域时二级 tab 一律回到默认值“是否启用”），避免切到不支持
+// “同步范围”/“字段映射”的数据域时选中值悬空
+type DomainSubTabName = 'enable' | 'orgScope' | 'fieldMapping'
+const domainSubTab = reactive<Record<SyncDomain, DomainSubTabName>>({
+  ORG: 'enable',
+  USER: 'enable',
+  POSITION: 'enable',
+  APP: 'enable',
+  ROLE: 'enable',
+  DICT: 'enable',
+})
 
 // 6 个数据域的启用开关+拉取分页大小，一次性拉取缓存在本地，切换子 tab 不重新请求；
 // 编辑态直接绑定这份缓存本身（这个区块和同步配置其余区块一样是"编辑完点保存"节奏，
@@ -434,8 +442,9 @@ function handleAddField(metadataFieldId: number | null) {
     metadataFieldId: field.id,
     fieldName: field.fieldName,
     fieldCode: field.fieldCode,
-    appFieldName: '',
-    appFieldCode: '',
+    // 应用字段名称/编码默认预填为源字段的名称/编码，多数场景下两者相同，用户仍可编辑覆盖
+    appFieldName: field.fieldName,
+    appFieldCode: field.fieldCode,
     transformType: 'NO_TRANSFORM',
     transformValue: '',
   })
@@ -529,20 +538,6 @@ async function saveFieldMappings() {
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="接口配置" name="signature">
-        <el-form label-width="90px">
-          <el-form-item label="签名算法">
-            <el-radio-group v-model="signAlgorithmForm">
-              <el-radio value="SHA256">SHA-256</el-radio>
-              <el-radio value="SM3">国密 SM3</el-radio>
-            </el-radio-group>
-          </el-form-item>
-          <el-form-item v-if="hasPermission('AppManagement:app:config:editSignAlgorithm')">
-            <el-button type="primary" :loading="savingSignAlgorithm" @click="saveSignAlgorithm">保存</el-button>
-          </el-form-item>
-        </el-form>
-      </el-tab-pane>
-
       <el-tab-pane label="同步配置" name="sync">
         <el-form label-width="110px">
           <h4 class="app-config__sync-group-title">基础同步配置</h4>
@@ -570,12 +565,18 @@ async function saveFieldMappings() {
               </div>
             </el-form-item>
           </template>
-          <el-form-item label="需要签名/验签校验">
+          <el-form-item label="签名校验">
             <el-switch v-model="syncForm.needSign" />
+          </el-form-item>
+          <el-form-item v-if="syncForm.needSign" label="签名算法">
+            <el-radio-group v-model="signAlgorithmForm">
+              <el-radio value="SHA256">SHA-256</el-radio>
+              <el-radio value="SM3">国密 SM3</el-radio>
+            </el-radio-group>
           </el-form-item>
 
           <el-form-item v-if="hasPermission('AppManagement:app:config:editSync')">
-            <el-button type="primary" :loading="savingSync" @click="saveSyncConfig">保存</el-button>
+            <el-button type="primary" :loading="savingBasicSync" @click="saveBasicSyncConfig">保存</el-button>
           </el-form-item>
         </el-form>
 
@@ -593,160 +594,173 @@ async function saveFieldMappings() {
             :name="option.value"
           >
             <div v-loading="domainConfigLoading" class="app-config__domain-panel">
-              <el-form label-width="110px">
-                <el-form-item label="是否启用">
-                  <el-switch v-model="domainConfigs[option.value].syncEnabled" />
-                </el-form-item>
-                <el-form-item label="拉取分页大小">
-                  <el-input-number v-model="domainConfigs[option.value].pageSize" :min="1" />
-                </el-form-item>
-                <el-form-item v-if="hasPermission('AppManagement:app:config:editSync')">
-                  <el-button
-                    type="primary"
-                    :loading="savingDomainConfig"
-                    @click="saveDomainConfig(option.value)"
-                  >
-                    保存
-                  </el-button>
-                </el-form-item>
-              </el-form>
-
-              <template v-if="orgScopeSupportedDomains.includes(option.value)">
-                <h5 class="app-config__org-scope-title">同步范围</h5>
-                <div v-loading="orgScopeLoading" class="app-config__org-scope">
-                  <el-radio-group v-model="orgScopeState[option.value].mode">
-                    <el-radio value="ALL">全部数据</el-radio>
-                    <el-radio value="SCOPED">指定组织范围</el-radio>
-                  </el-radio-group>
-
-                  <div v-if="orgScopeState[option.value].mode === 'SCOPED'" class="app-config__org-scope-section">
-                    <div class="app-config__org-scope-section__header">
-                      <el-button link type="primary" @click="addOrgScopeRow(option.value)">+ 添加组织</el-button>
-                    </div>
-
-                    <p v-if="orgScopeState[option.value].rows.length === 0" class="app-config__org-scope-empty">
-                      暂无指定组织，请添加至少一个组织
-                    </p>
-
-                    <div v-else class="app-config__org-scope-list">
-                      <div
-                        v-for="(scope, index) in orgScopeState[option.value].rows"
-                        :key="index"
-                        class="app-config__org-scope-row"
+              <el-tabs v-model="domainSubTab[option.value]" class="app-config__domain-sub-tabs">
+                <el-tab-pane label="是否启用" name="enable">
+                  <el-form label-width="110px">
+                    <el-form-item label="是否启用">
+                      <el-switch v-model="domainConfigs[option.value].syncEnabled" />
+                    </el-form-item>
+                    <el-form-item label="拉取分页大小">
+                      <el-input-number v-model="domainConfigs[option.value].pageSize" :min="1" />
+                    </el-form-item>
+                    <el-form-item v-if="hasPermission('AppManagement:app:config:editSync')">
+                      <el-button
+                        type="primary"
+                        :loading="savingDomainConfig"
+                        @click="saveDomainConfig(option.value)"
                       >
-                        <div class="app-config__org-scope-row__fields">
-                          <el-tree-select
-                            v-model="scope.orgId"
-                            :data="orgTree"
-                            :props="{ label: 'name', children: 'children' }"
-                            node-key="id"
-                            check-strictly
-                            placeholder="请选择组织"
-                            style="width: 100%"
-                          />
-                          <el-checkbox v-model="scope.includeChildren">含子组织</el-checkbox>
-                        </div>
-                        <el-button
-                          link
-                          type="danger"
-                          class="app-config__org-scope-row__remove"
-                          @click="removeOrgScopeRow(option.value, index)"
+                        保存
+                      </el-button>
+                    </el-form-item>
+                  </el-form>
+                </el-tab-pane>
+
+                <el-tab-pane
+                  v-if="orgScopeSupportedDomains.includes(option.value)"
+                  label="同步范围"
+                  name="orgScope"
+                >
+                  <div v-loading="orgScopeLoading" class="app-config__org-scope">
+                    <el-radio-group v-model="orgScopeState[option.value].mode">
+                      <el-radio value="ALL">全部数据</el-radio>
+                      <el-radio value="SCOPED">指定组织范围</el-radio>
+                    </el-radio-group>
+
+                    <div v-if="orgScopeState[option.value].mode === 'SCOPED'" class="app-config__org-scope-section">
+                      <div class="app-config__org-scope-section__header">
+                        <el-button link type="primary" @click="addOrgScopeRow(option.value)">+ 添加组织</el-button>
+                      </div>
+
+                      <p v-if="orgScopeState[option.value].rows.length === 0" class="app-config__org-scope-empty">
+                        暂无指定组织，请添加至少一个组织
+                      </p>
+
+                      <div v-else class="app-config__org-scope-list">
+                        <div
+                          v-for="(scope, index) in orgScopeState[option.value].rows"
+                          :key="index"
+                          class="app-config__org-scope-row"
                         >
-                          删除
-                        </el-button>
+                          <div class="app-config__org-scope-row__fields">
+                            <el-tree-select
+                              v-model="scope.orgId"
+                              :data="orgTree"
+                              :props="{ label: 'name', children: 'children' }"
+                              node-key="id"
+                              check-strictly
+                              placeholder="请选择组织"
+                              style="width: 100%"
+                            />
+                            <el-checkbox v-model="scope.includeChildren">含子组织</el-checkbox>
+                          </div>
+                          <el-button
+                            link
+                            type="danger"
+                            class="app-config__org-scope-row__remove"
+                            @click="removeOrgScopeRow(option.value, index)"
+                          >
+                            删除
+                          </el-button>
+                        </div>
                       </div>
                     </div>
+
+                    <div v-if="hasPermission('AppManagement:app:config:editSync')" class="app-config__org-scope-save">
+                      <el-button type="primary" :loading="savingOrgScope" @click="saveOrgScope(option.value)">
+                        保存同步范围
+                      </el-button>
+                    </div>
+                  </div>
+                </el-tab-pane>
+
+                <el-tab-pane
+                  v-if="fieldMappingSupportedDomains.includes(option.value)"
+                  label="字段映射"
+                  name="fieldMapping"
+                >
+                  <div class="app-config__field-mapping-toolbar">
+                    <el-select
+                      v-model="pendingFieldId"
+                      placeholder="选择字段新增映射"
+                      filterable
+                      clearable
+                      class="app-config__field-mapping-select"
+                      @change="handleAddField"
+                    >
+                      <el-option
+                        v-for="field in addableMetadataFieldOptions"
+                        :key="field.id"
+                        :label="`${field.fieldName}（${field.fieldCode}）`"
+                        :value="field.id"
+                      />
+                    </el-select>
                   </div>
 
-                  <div v-if="hasPermission('AppManagement:app:config:editSync')" class="app-config__org-scope-save">
-                    <el-button type="primary" :loading="savingOrgScope" @click="saveOrgScope(option.value)">
-                      保存同步范围
+                  <el-table
+                    v-loading="fieldMappingLoading"
+                    :data="currentFieldMappingRows"
+                    border
+                    size="small"
+                    class="app-config__field-mapping-table"
+                  >
+                    <el-table-column label="字段名称" prop="fieldName" width="130" />
+                    <el-table-column label="字段编码" prop="fieldCode" width="130" />
+                    <el-table-column label="应用字段名称" min-width="140">
+                      <template #default="{ row }">
+                        <el-input v-model="row.appFieldName" placeholder="请输入应用侧字段名称" />
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="应用字段编码" min-width="140">
+                      <template #default="{ row }">
+                        <el-input v-model="row.appFieldCode" placeholder="请输入应用侧字段编码" />
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="转换方式" width="130">
+                      <template #default="{ row }">
+                        <el-select v-model="row.transformType">
+                          <el-option
+                            v-for="item in TRANSFORM_TYPE_OPTIONS"
+                            :key="item.value"
+                            :label="item.label"
+                            :value="item.value"
+                          />
+                        </el-select>
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="转换取值" min-width="220">
+                      <template #default="{ row }">
+                        <el-input
+                          v-if="row.transformType === 'FIXED_VALUE'"
+                          v-model="row.transformValue"
+                          placeholder="请输入固定值"
+                        />
+                        <el-input
+                          v-else-if="row.transformType === 'SCRIPT'"
+                          v-model="row.transformValue"
+                          type="textarea"
+                          :rows="3"
+                          placeholder="请输入 JavaScript 转换脚本"
+                        />
+                        <span v-else class="app-config__field-mapping-disabled">-</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="操作" width="70" fixed="right">
+                      <template #default="{ $index }">
+                        <el-button link :icon="Delete" type="danger" @click="removeFieldMappingRow($index)" />
+                      </template>
+                    </el-table-column>
+                  </el-table>
+
+                  <div
+                    v-if="hasPermission('AppManagement:app:config:editSync')"
+                    class="app-config__field-mapping-save"
+                  >
+                    <el-button type="primary" :loading="savingFieldMapping" @click="saveFieldMappings">
+                      保存字段映射
                     </el-button>
                   </div>
-                </div>
-              </template>
-
-              <template v-if="fieldMappingSupportedDomains.includes(option.value)">
-                <div class="app-config__field-mapping-toolbar">
-                  <span class="app-config__field-mapping-title">字段映射</span>
-                  <el-select
-                    v-model="pendingFieldId"
-                    placeholder="选择字段新增映射"
-                    filterable
-                    clearable
-                    class="app-config__field-mapping-select"
-                    @change="handleAddField"
-                  >
-                    <el-option
-                      v-for="field in addableMetadataFieldOptions"
-                      :key="field.id"
-                      :label="`${field.fieldName}（${field.fieldCode}）`"
-                      :value="field.id"
-                    />
-                  </el-select>
-                </div>
-
-                <el-table
-                  v-loading="fieldMappingLoading"
-                  :data="currentFieldMappingRows"
-                  border
-                  size="small"
-                  class="app-config__field-mapping-table"
-                >
-                  <el-table-column label="字段名称" prop="fieldName" width="130" />
-                  <el-table-column label="字段编码" prop="fieldCode" width="130" />
-                  <el-table-column label="应用字段名称" min-width="140">
-                    <template #default="{ row }">
-                      <el-input v-model="row.appFieldName" placeholder="请输入应用侧字段名称" />
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="应用字段编码" min-width="140">
-                    <template #default="{ row }">
-                      <el-input v-model="row.appFieldCode" placeholder="请输入应用侧字段编码" />
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="转换方式" width="130">
-                    <template #default="{ row }">
-                      <el-select v-model="row.transformType">
-                        <el-option
-                          v-for="item in TRANSFORM_TYPE_OPTIONS"
-                          :key="item.value"
-                          :label="item.label"
-                          :value="item.value"
-                        />
-                      </el-select>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="转换取值" min-width="220">
-                    <template #default="{ row }">
-                      <el-input
-                        v-if="row.transformType === 'FIXED_VALUE'"
-                        v-model="row.transformValue"
-                        placeholder="请输入固定值"
-                      />
-                      <el-input
-                        v-else-if="row.transformType === 'SCRIPT'"
-                        v-model="row.transformValue"
-                        type="textarea"
-                        :rows="3"
-                        placeholder="请输入 JavaScript 转换脚本"
-                      />
-                      <span v-else class="app-config__field-mapping-disabled">-</span>
-                    </template>
-                  </el-table-column>
-                  <el-table-column label="操作" width="70" fixed="right">
-                    <template #default="{ $index }">
-                      <el-button link :icon="Delete" type="danger" @click="removeFieldMappingRow($index)" />
-                    </template>
-                  </el-table-column>
-                </el-table>
-
-                <div v-if="hasPermission('AppManagement:app:config:editSync')" class="app-config__field-mapping-save">
-                  <el-button type="primary" :loading="savingFieldMapping" @click="saveFieldMappings">
-                    保存字段映射
-                  </el-button>
-                </div>
-              </template>
+                </el-tab-pane>
+              </el-tabs>
             </div>
           </el-tab-pane>
         </el-tabs>
@@ -906,15 +920,19 @@ async function saveFieldMappings() {
   min-height: 120px;
 }
 
+// 数据域面板内“是否启用/同步范围/字段映射”二级 tabs：顶部横排，和外层左侧纵向的数据域
+// tab 区分开，靠一条实线分隔线收紧和一级 tab 内容区的间距
+.app-config__domain-sub-tabs {
+  margin-top: 4px;
+
+  :deep(.el-tabs__header) {
+    margin-bottom: 12px;
+  }
+}
+
 // 同步范围：单选“全部数据/指定组织范围” + 指定时的组织行列表，视觉上直接复用
 // AdminManagementView.vue“管辖组织范围”子表单的链式连接语言（虚线+圆点），
 // 与本页“字段映射”区块并列作为同一个数据域 tab 内的独立保存分区
-.app-config__org-scope-title {
-  font-size: 13px;
-  color: var(--color-text-secondary);
-  margin: 4px 0 12px;
-}
-
 .app-config__org-scope {
   margin-bottom: 8px;
 }
@@ -971,7 +989,7 @@ async function saveFieldMappings() {
   flex: 1;
   min-width: 0;
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 260px) auto;
   align-items: center;
   column-gap: 12px;
 }
@@ -987,13 +1005,8 @@ async function saveFieldMappings() {
 .app-config__field-mapping-toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: flex-end;
   margin: 4px 0 12px;
-}
-
-.app-config__field-mapping-title {
-  font-size: 13px;
-  color: var(--color-text-secondary);
 }
 
 .app-config__field-mapping-select {
