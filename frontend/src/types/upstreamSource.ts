@@ -72,11 +72,6 @@ export const UPSTREAM_SYNC_STATUS_TAG_TYPE: Record<UpstreamSyncStatus, 'success'
   FAILED: 'danger',
 }
 
-// ORG 数据域的"上级组织编码"固定伪字段编码，不经过字段映射表配置，取数结果如包含该列，
-// 按组织 code 匹配得到上级组织；取不到/为空/字面 "0" 均视为顶级组织，与后端
-// UpstreamOrgPseudoFieldCode.PARENT_CODE 对齐
-export const UPSTREAM_ORG_PARENT_CODE_FIELD = '__parentCode'
-
 // POSITION 数据域的两个固定伪字段编码，不经过字段映射表配置，取数结果须包含这两列，
 // 用于确定任职记录归属的所属人员/所属组织，与后端 UpstreamPositionPseudoFieldCode 对齐
 export const UPSTREAM_POSITION_USER_IDENTIFIER_FIELD = '__userIdentifier'

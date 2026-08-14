@@ -2,7 +2,6 @@ package cn.nihility.rbac.identity.upstream.support;
 
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.identity.upstream.constant.UpstreamDataType;
-import cn.nihility.rbac.identity.upstream.constant.UpstreamOrgPseudoFieldCode;
 import cn.nihility.rbac.identity.upstream.constant.UpstreamPositionPseudoFieldCode;
 import cn.nihility.rbac.org.constant.OrgStatus;
 import cn.nihility.rbac.org.dto.OrgCreateRequest;
@@ -56,15 +55,15 @@ import org.springframework.util.StringUtils;
  * 内部完成）。
  *
  * <p><b>实现阶段发现的 design.md 遗漏（已同步补充说明，详见
- * {@link UpstreamPositionPseudoFieldCode}/{@link UpstreamOrgPseudoFieldCode}）</b>：
- * POSITION 数据域落库需要"所属人员标识""所属组织编码"两个值解析 {@code userId}/
- * {@code orgId}，ORG 数据域落库需要"上级组织编码"解析 {@code parentId}，但这些都不是
- * 对应 bizType 下的元数据字段（外键/层级关系不是可开放配置的展示字段），无法通过常规的
- * 字段映射目标传递。本类为 ORG/POSITION 数据域直接从取数阶段拉取到的原始行（转换前）
- * 按固定编码 {@link UpstreamOrgPseudoFieldCode#PARENT_CODE}/
+ * {@link UpstreamPositionPseudoFieldCode}）</b>：POSITION 数据域落库需要"所属人员标识"
+ * "所属组织编码"两个值解析 {@code userId}/{@code orgId}，两者都不是 POSITION bizType
+ * 下的元数据字段（外键关系不是可开放配置的展示字段），无法通过常规的字段映射目标传递。
+ * 本类为 POSITION 数据域直接从取数阶段拉取到的原始行（转换前）按固定编码
  * {@link UpstreamPositionPseudoFieldCode#USER_IDENTIFIER}/
- * {@link UpstreamPositionPseudoFieldCode#ORG_CODE} 读取这些值，其余字段仍走字段映射
- * 转换后的行数据。
+ * {@link UpstreamPositionPseudoFieldCode#ORG_CODE} 读取这两个值，其余字段（含 ORG 数据域
+ * 的"上级组织编码" {@code parentCode}）仍走字段映射转换后的行数据
+ * （upstream-org-parent-code-field-mapping change：{@code parentCode} 是 ORG bizType 下
+ * 已存在的常规元数据字段，不再需要固定伪字段编码这条特殊路径）。
  */
 @Component
 @RequiredArgsConstructor
@@ -95,11 +94,11 @@ public class UpstreamRowUpserter {
      * 明细，不影响其余行的处理（design.md Decision 4）。
      *
      * @param dataType             数据域：ORG/USER/POSITION
-     * @param transformedRow       经字段映射转换后的一行数据，key 为系统字段编码
-     * @param rawRow               取数阶段拉取到的原始行（转换前），key 为上游字段编码；
-     *                             ORG 数据域用其解析 {@link UpstreamOrgPseudoFieldCode#PARENT_CODE}，
+     * @param transformedRow       经字段映射转换后的一行数据，key 为系统字段编码；ORG 数据域
+     *                             通过其中的 {@code parentCode} 键解析上级组织
+     * @param rawRow               取数阶段拉取到的原始行（转换前），key 为上游字段编码，
      *                             POSITION 数据域用其解析 {@link UpstreamPositionPseudoFieldCode}
-     *                             约定的两个固定编码，USER 数据域不使用
+     *                             约定的两个固定编码，ORG/USER 数据域不使用
      * @param primaryKeyFieldCodes 该数据域字段映射中标记为"主键标识"的系统字段编码列表
      *                             （一个或多个，联合、AND 语义），由调用方
      *                             （{@code UpstreamSyncExecutor}）保证非空
@@ -108,7 +107,7 @@ public class UpstreamRowUpserter {
     public void upsertRow(String dataType, Map<String, Object> transformedRow, Map<String, Object> rawRow,
             List<String> primaryKeyFieldCodes) {
         switch (dataType) {
-            case UpstreamDataType.ORG -> upsertOrg(transformedRow, rawRow, primaryKeyFieldCodes);
+            case UpstreamDataType.ORG -> upsertOrg(transformedRow, primaryKeyFieldCodes);
             case UpstreamDataType.USER -> upsertUser(transformedRow, primaryKeyFieldCodes);
             case UpstreamDataType.POSITION -> upsertPosition(transformedRow, rawRow, primaryKeyFieldCodes);
             default -> throw new BusinessException("不支持的数据域：" + dataType);
@@ -119,17 +118,18 @@ public class UpstreamRowUpserter {
      * 处理一行组织数据：按字段映射标记为"主键标识"的系统字段（一个或多个，联合、AND
      * 语义，见 {@link #appendPrimaryKeyConditions}）匹配已有记录，替换掉写死按
      * {@code code} 匹配的旧逻辑（upstream-field-mapping-primary-key change）；"上级组织
-     * 编码"（{@link UpstreamOrgPseudoFieldCode#PARENT_CODE}）解析 {@code parentId}：
-     * 取不到该编码、取值为空或字面为 {@code "0"} 均视为顶级组织（{@code parentId=0}，
-     * 不判定失败——上游同步没有 Excel 模板"固定必填列"那样的前置保障，管理员可能就是
-     * 只想同步一批平级组织）；其余取值按 {@code tab_org.code} 匹配已有组织，匹配不到时
-     * 该行判定失败。
+     * 编码"改为像其余系统字段一样通过字段映射配置到系统字段 {@code parentCode}（ORG
+     * bizType 下已存在的常规元数据字段）解析 {@code parentId}：转换后行里取不到该键、
+     * 取值为空均视为顶级组织（{@code parentId=0}，不判定失败——上游同步没有 Excel 模板
+     * "固定必填列"那样的前置保障，管理员可能就是只想同步一批平级组织，或者干脆没有在
+     * 字段映射里配置 {@code parentCode}）；其余取值按 {@code tab_org.code} 匹配已有组织，
+     * 匹配不到时该行判定失败（upstream-org-parent-code-field-mapping change：不再依赖
+     * 固定伪字段编码 {@code __parentCode} 从原始行读取）。
      *
-     * @param row                  转换后的一行数据
-     * @param rawRow               取数阶段拉取到的原始行（转换前），解析上级组织编码
+     * @param row                  转换后的一行数据，同时用于解析 {@code parentCode}
      * @param primaryKeyFieldCodes 标记为主键标识的系统字段编码列表
      */
-    private void upsertOrg(Map<String, Object> row, Map<String, Object> rawRow, List<String> primaryKeyFieldCodes) {
+    private void upsertOrg(Map<String, Object> row, List<String> primaryKeyFieldCodes) {
         QueryWrapper<OrgEntity> wrapper = new QueryWrapper<>();
         appendPrimaryKeyConditions(wrapper, row, primaryKeyFieldCodes);
         wrapper.ne("status", OrgStatus.DELETED);
@@ -137,7 +137,7 @@ public class UpstreamRowUpserter {
         if (matches.size() > 1) {
             throw new BusinessException("按主键字段匹配到多条已存在的组织记录，无法确定更新目标");
         }
-        Long parentId = resolveParentId(rawRow);
+        Long parentId = resolveParentId(row);
         if (matches.isEmpty()) {
             OrgCreateRequest request = new OrgCreateRequest();
             bindProperties(request, row);
@@ -152,17 +152,16 @@ public class UpstreamRowUpserter {
     }
 
     /**
-     * 解析"上级组织编码"伪字段得到 {@code parentId}：取不到该编码、取值为空或字面为
-     * {@code "0"} 均视为顶级组织；其余取值按 {@code tab_org.code} 匹配已有组织，匹配
-     * 不到时该行判定失败（{@link UpstreamOrgPseudoFieldCode}）。
+     * 从转换后行的系统字段 {@code parentCode} 解析 {@code parentId}：取不到该键或取值为空
+     * 均视为顶级组织；非空取值按 {@code tab_org.code} 匹配已有组织，匹配不到时该行判定
+     * 失败（upstream-org-parent-code-field-mapping change）。
      *
-     * @param rawRow 取数阶段拉取到的原始行（转换前）
+     * @param row 转换后的一行数据，key 为系统字段编码
      * @return 解析得到的上级组织 id，顶级组织为 0
      */
-    private Long resolveParentId(Map<String, Object> rawRow) {
-        Map<String, Object> source = rawRow != null ? rawRow : Map.of();
-        String parentCode = toText(source.get(UpstreamOrgPseudoFieldCode.PARENT_CODE));
-        if (!StringUtils.hasText(parentCode) || "0".equals(parentCode)) {
+    private Long resolveParentId(Map<String, Object> row) {
+        String parentCode = toText(row.get("parentCode"));
+        if (!StringUtils.hasText(parentCode)) {
             return 0L;
         }
         OrgEntity parent = findSingleActive(orgMapper.selectList(new LambdaQueryWrapper<OrgEntity>()
@@ -315,8 +314,9 @@ public class UpstreamRowUpserter {
      *
      * <p>本方法只负责把"系统字段编码 → 值"逐一映射到同名可写属性上，不处理外键/层级类
      * 属性（{@code parentId}/{@code userId}/{@code orgId}）——这些属性由各自的调用方
-     * （{@link #upsertOrg}/{@link #upsertPosition}）在调用本方法之后单独 {@code set}，
-     * 解析来源见 {@link UpstreamOrgPseudoFieldCode}/{@link UpstreamPositionPseudoFieldCode}。
+     * （{@link #upsertOrg}/{@link #upsertPosition}）在调用本方法之后单独 {@code set}：
+     * {@code parentId} 解析来源见 {@link #resolveParentId}，{@code userId}/{@code orgId}
+     * 解析来源见 {@link UpstreamPositionPseudoFieldCode}。
      *
      * @param target 待填充的 CreateRequest/UpdateRequest 实例
      * @param row    本行数据，key 为系统字段编码

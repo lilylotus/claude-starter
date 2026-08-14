@@ -12,7 +12,6 @@ import {
   UPSTREAM_API_METHOD_OPTIONS,
   UPSTREAM_DATA_TYPE_OPTIONS,
   UPSTREAM_INTERVAL_UNIT_OPTIONS,
-  UPSTREAM_ORG_PARENT_CODE_FIELD,
   UPSTREAM_POSITION_ORG_CODE_FIELD,
   UPSTREAM_POSITION_USER_IDENTIFIER_FIELD,
   UPSTREAM_SCHEDULE_TYPE_OPTIONS,
@@ -587,14 +586,6 @@ onMounted(() => {
             <div v-loading="domainConfigLoading" class="upstream-config__domain-panel">
               <el-tabs v-model="domainSubTab[option.value]" class="upstream-config__domain-sub-tabs">
                 <el-tab-pane label="是否启用" name="enable">
-                  <el-alert
-                    v-if="option.value === 'ORG'"
-                    class="upstream-config__pseudo-field-alert"
-                    type="info"
-                    :closable="false"
-                    show-icon
-                    :title="`上级组织编码可选：取数结果如包含固定编码列「${UPSTREAM_ORG_PARENT_CODE_FIELD}」，按其取值匹配组织编码得到上级组织；不提供、取值为空或为 0 均视为顶级组织；该列不在下方字段映射中配置`"
-                  />
                   <el-alert
                     v-if="option.value === 'POSITION'"
                     class="upstream-config__pseudo-field-alert"

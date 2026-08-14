@@ -9,7 +9,6 @@ import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.identity.upstream.constant.UpstreamDataType;
-import cn.nihility.rbac.identity.upstream.constant.UpstreamOrgPseudoFieldCode;
 import cn.nihility.rbac.identity.upstream.constant.UpstreamPositionPseudoFieldCode;
 import cn.nihility.rbac.org.constant.OrgStatus;
 import cn.nihility.rbac.org.dto.OrgCreateRequest;
@@ -40,9 +39,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 /**
  * {@link UpstreamRowUpserter} 的单元测试，覆盖组织/用户/任职各自按调用方传入的主键标识
  * 字段（{@code primaryKeyFieldCodes}）动态匹配的新增/更新/联合主键/主键取值为空/多条
- * 匹配失败场景，以及组织"上级组织编码"伪字段（{@link UpstreamOrgPseudoFieldCode#PARENT_CODE}）
- * 缺省/为 "0"/匹配到已有组织/匹配不到已有组织四种场景（upstream-field-mapping-primary-key
- * change tasks.md 6.1）。
+ * 匹配失败场景（upstream-field-mapping-primary-key change tasks.md 6.1），以及组织
+ * "上级组织编码"通过字段映射转换后行的系统字段 {@code parentCode} 解析：未配置/取值为空/
+ * 匹配到已有组织/匹配不到已有组织四种场景（upstream-org-parent-code-field-mapping
+ * change tasks.md 3.1/3.2）。
  */
 @ExtendWith(MockitoExtension.class)
 class UpstreamRowUpserterTest {
@@ -85,7 +85,7 @@ class UpstreamRowUpserterTest {
 
     /**
      * 组织编码在未删除的组织中不存在匹配记录时，应走新增流程，调用组织模块既有的
-     * create 方法；原始行未携带"上级组织编码"伪字段（{@link UpstreamOrgPseudoFieldCode#PARENT_CODE}）
+     * create 方法；转换后行未携带系统字段 {@code parentCode}（即字段映射未配置该字段）
      * 时，应视为顶级组织，{@code parentId} 落地为 0，不判定该行失败。
      */
     @Test
@@ -103,17 +103,18 @@ class UpstreamRowUpserterTest {
     }
 
     /**
-     * "上级组织编码"伪字段字面值为 {@code "0"} 时，同样视为顶级组织，{@code parentId}
-     * 落地为 0。
+     * 字段映射配置了 {@code parentCode} 但转换后取值为空白字符串时，同样视为顶级组织，
+     * {@code parentId} 落地为 0，不判定该行失败。
      */
     @Test
-    void upsertRow_shouldCreateOrg_whenParentCodeIsZero() {
+    void upsertRow_shouldCreateOrg_whenParentCodeBlank() {
         when(orgMapper.selectList(any())).thenReturn(java.util.List.of());
-        Map<String, Object> transformedRow = Map.of("code", "ORG001", "name", "测试组织");
-        Map<String, Object> rawRow = Map.of("code", "ORG001", "name", "测试组织",
-                UpstreamOrgPseudoFieldCode.PARENT_CODE, "0");
+        Map<String, Object> row = new java.util.HashMap<>();
+        row.put("code", "ORG001");
+        row.put("name", "测试组织");
+        row.put("parentCode", "  ");
 
-        upstreamRowUpserter.upsertRow(UpstreamDataType.ORG, transformedRow, rawRow, List.of("code"));
+        upstreamRowUpserter.upsertRow(UpstreamDataType.ORG, row, row, List.of("code"));
 
         ArgumentCaptor<OrgCreateRequest> captor = ArgumentCaptor.forClass(OrgCreateRequest.class);
         verify(orgService).create(captor.capture());
@@ -121,8 +122,8 @@ class UpstreamRowUpserterTest {
     }
 
     /**
-     * "上级组织编码"伪字段取值能唯一匹配到一条已有的未删除组织时，{@code parentId}
-     * 取自匹配结果，而不是默认值 0。
+     * 字段映射转换后行的 {@code parentCode} 取值能唯一匹配到一条已有的未删除组织时，
+     * {@code parentId} 取自匹配结果，而不是默认值 0。
      */
     @Test
     void upsertRow_shouldCreateOrg_whenParentCodeMatched() {
@@ -130,11 +131,9 @@ class UpstreamRowUpserterTest {
         when(orgMapper.selectList(any()))
                 .thenReturn(java.util.List.of())
                 .thenReturn(java.util.List.of(parent));
-        Map<String, Object> transformedRow = Map.of("code", "ORG001", "name", "测试组织");
-        Map<String, Object> rawRow = Map.of("code", "ORG001", "name", "测试组织",
-                UpstreamOrgPseudoFieldCode.PARENT_CODE, "ROOT");
+        Map<String, Object> row = Map.of("code", "ORG001", "name", "测试组织", "parentCode", "ROOT");
 
-        upstreamRowUpserter.upsertRow(UpstreamDataType.ORG, transformedRow, rawRow, List.of("code"));
+        upstreamRowUpserter.upsertRow(UpstreamDataType.ORG, row, row, List.of("code"));
 
         ArgumentCaptor<OrgCreateRequest> captor = ArgumentCaptor.forClass(OrgCreateRequest.class);
         verify(orgService).create(captor.capture());
@@ -142,20 +141,17 @@ class UpstreamRowUpserterTest {
     }
 
     /**
-     * "上级组织编码"伪字段取值在未删除的组织中不存在匹配记录时，应判定该行失败，
-     * 明确提示是上级组织编码无法匹配，不调用 create/update。
+     * 字段映射转换后行的 {@code parentCode} 取值在未删除的组织中不存在匹配记录时，应
+     * 判定该行失败，明确提示是上级组织编码无法匹配，不调用 create/update。
      */
     @Test
     void upsertRow_shouldFailOrg_whenParentCodeNotFound() {
         when(orgMapper.selectList(any()))
                 .thenReturn(java.util.List.of())
                 .thenReturn(java.util.List.of());
-        Map<String, Object> transformedRow = Map.of("code", "ORG001", "name", "测试组织");
-        Map<String, Object> rawRow = Map.of("code", "ORG001", "name", "测试组织",
-                UpstreamOrgPseudoFieldCode.PARENT_CODE, "NOT_EXIST");
+        Map<String, Object> row = Map.of("code", "ORG001", "name", "测试组织", "parentCode", "NOT_EXIST");
 
-        assertThatThrownBy(() -> upstreamRowUpserter.upsertRow(UpstreamDataType.ORG, transformedRow, rawRow,
-                List.of("code")))
+        assertThatThrownBy(() -> upstreamRowUpserter.upsertRow(UpstreamDataType.ORG, row, row, List.of("code")))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("上级组织编码")
                 .hasMessageContaining("无法匹配");
