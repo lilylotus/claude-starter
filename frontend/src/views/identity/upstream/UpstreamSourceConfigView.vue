@@ -281,6 +281,7 @@ interface FieldMappingRow {
   fieldCode: string
   upstreamFieldName: string
   upstreamFieldCode: string
+  isPrimaryKey: boolean
   transformType: TransformType
   transformValue: string
 }
@@ -309,6 +310,7 @@ function toFieldMappingRow(vo: UpstreamFieldMappingVO): FieldMappingRow {
     fieldCode: vo.fieldCode,
     upstreamFieldName: vo.upstreamFieldName,
     upstreamFieldCode: vo.upstreamFieldCode,
+    isPrimaryKey: vo.isPrimaryKey,
     transformType: vo.transformType,
     transformValue: vo.transformValue ?? '',
   }
@@ -347,6 +349,8 @@ function handleAddField(metadataFieldId: number | null) {
     // 预填反而会误导管理员以为不用改（design.md Decision 5）
     upstreamFieldName: '',
     upstreamFieldCode: '',
+    // 新增行默认不勾选主键标识，需管理员手动确认
+    isPrimaryKey: false,
     transformType: 'NO_TRANSFORM',
     transformValue: '',
   })
@@ -368,6 +372,9 @@ function validateFieldMappingRows(rows: FieldMappingRow[]): string {
       return '转换方式为转换脚本时，脚本内容不能为空'
     }
   }
+  if (rows.length > 0 && !rows.some((row) => row.isPrimaryKey)) {
+    return '请至少标记一个字段作为主键标识，用于判断新增或更新'
+  }
   return ''
 }
 
@@ -385,6 +392,7 @@ async function saveFieldMappings() {
       upstreamFieldName: row.upstreamFieldName.trim(),
       upstreamFieldCode: row.upstreamFieldCode.trim(),
       metadataFieldId: row.metadataFieldId,
+      isPrimaryKey: row.isPrimaryKey,
       transformType: row.transformType,
       transformValue: row.transformType === 'NO_TRANSFORM' ? null : row.transformValue,
     }))
@@ -667,6 +675,11 @@ onMounted(() => {
                     </el-table-column>
                     <el-table-column label="系统字段名称" prop="fieldName" width="130" />
                     <el-table-column label="系统字段编码" prop="fieldCode" width="130" />
+                    <el-table-column label="主键标识" width="90" align="center">
+                      <template #default="{ row }">
+                        <el-checkbox v-model="row.isPrimaryKey" />
+                      </template>
+                    </el-table-column>
                     <el-table-column label="转换方式" width="130">
                       <template #default="{ row }">
                         <el-select v-model="row.transformType">

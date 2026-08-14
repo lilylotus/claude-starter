@@ -165,6 +165,7 @@ export interface UpstreamFieldMappingVO {
   metadataFieldId: number
   fieldName: string
   fieldCode: string
+  isPrimaryKey: boolean
   transformType: import('@/types/app').TransformType
   transformValue: string | null
 }
@@ -174,6 +175,7 @@ export interface UpstreamFieldMappingSaveRequest {
   upstreamFieldName: string
   upstreamFieldCode: string
   metadataFieldId: number
+  isPrimaryKey: boolean
   transformType: import('@/types/app').TransformType
   transformValue: string | null
 }

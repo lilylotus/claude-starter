@@ -82,7 +82,7 @@ class UpstreamFieldMappingServiceImplTest {
      */
     @Test
     void replace_shouldNotRejectForPrimaryKey_whenListEmpty() {
-        assertThatThrownBy(() -> upstreamFieldMappingService.replace(1L, UpstreamDataType.ORG, List.of()))
-                .isNull();
+        assertThatCode(() -> upstreamFieldMappingService.replace(1L, UpstreamDataType.ORG, List.of()))
+                .doesNotThrowAnyException();
     }
 }
