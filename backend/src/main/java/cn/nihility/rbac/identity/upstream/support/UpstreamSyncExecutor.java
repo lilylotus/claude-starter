@@ -1,6 +1,7 @@
 package cn.nihility.rbac.identity.upstream.support;
 
 import cn.nihility.rbac.app.config.AppSecretProperties;
+import cn.nihility.rbac.auth.context.CurrentUserContext;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.common.util.JacksonUtils;
 import cn.nihility.rbac.common.util.Sm4JdkUtils;
@@ -48,6 +49,20 @@ public class UpstreamSyncExecutor {
      * 触发，统一标注为系统写入，不依赖当前线程是否处于已认证的登录会话上下文。 */
     private static final String SYSTEM_OPERATOR = "SYSTEM";
 
+    /** 保留哨兵用户 id，代表"系统/后台同步"这一操作人（fix-upstream-sync-scheduled-operator-context
+     * change design.md Decision 1）：{@code tab_admin}/{@code tab_user} 用
+     * {@code IdType.AUTO} 自增主键，从 1 开始，0 永远不会是真实用户 id；且
+     * {@code tab_admin_org_scope} 里查不到 id=0 的任何管辖范围行，
+     * {@code OrgScopeServiceImpl#resolveAllowedOrgIds} 会将其解释为"不受限"，不会误伤
+     * 组织范围校验。定时轮询触发同步的线程不在任何 HTTP 请求上下文中，
+     * {@link CurrentUserContext} 恒为空，{@code OrgService}/{@code UserService}/
+     * {@code PositionService} 的 create/update 却会调用
+     * {@code CurrentOperatorService#resolveUserId} 填充 {@code createBy}/{@code updateBy}，
+     * 脱离登录上下文时按其既有设计直接抛异常——本引擎在调用它们之前，把当前线程临时标记为
+     * 这个保留哨兵 id，使其行为与"已登录"等价，而不改动 {@code CurrentOperatorService}
+     * 本身"不做静默兜底"的既有契约。 */
+    private static final Long SYSTEM_USER_ID = 0L;
+
     /** 上游数据源数据访问接口。 */
     private final UpstreamSourceMapper upstreamSourceMapper;
 
@@ -76,25 +91,43 @@ public class UpstreamSyncExecutor {
     private final AppSecretProperties appSecretProperties;
 
     /**
-     * 执行一次数据源同步：按组织→用户→任职固定顺序处理已启用的数据域。
+     * 执行一次数据源同步：按组织→用户→任职固定顺序处理已启用的数据域。方法体最外层把
+     * {@link CurrentUserContext} 临时标记为保留哨兵用户 id {@link #SYSTEM_USER_ID}
+     * （不区分定时/手动触发，统一处理，见 fix-upstream-sync-scheduled-operator-context
+     * change design.md Decision 3），使下游 {@code OrgService}/{@code UserService}/
+     * {@code PositionService} 的 create/update 在定时轮询这类无 HTTP 请求上下文的后台
+     * 线程上也能正常解析出一个"操作人"；处理结束后（无论成功/异常）恢复进入前的原值——
+     * 已认证 HTTP 请求线程（手动触发）恢复为真实登录用户，避免影响调用方后续逻辑；
+     * 后台调度线程（定时触发）恢复为空，避免线程池复用时把该标记残留给下一次不相关的
+     * 调度（design.md Decision 2）。
      *
      * @param sourceId    上游数据源 id
      * @param triggerType 触发方式：SCHEDULE/MANUAL
      */
     public void syncSource(Long sourceId, String triggerType) {
-        UpstreamSourceEntity source = upstreamSourceMapper.selectById(sourceId);
-        if (source == null) {
-            throw new BusinessException("上游数据源不存在");
-        }
-        for (String dataType : UpstreamDataType.SYNC_ORDER) {
-            UpstreamDomainConfigEntity domainConfig = upstreamDomainConfigMapper.selectOne(
-                    new LambdaQueryWrapper<UpstreamDomainConfigEntity>()
-                            .eq(UpstreamDomainConfigEntity::getSourceId, sourceId)
-                            .eq(UpstreamDomainConfigEntity::getDataType, dataType));
-            if (domainConfig == null || !Boolean.TRUE.equals(domainConfig.getEnabled())) {
-                continue;
+        Long previousUserId = CurrentUserContext.getUserId();
+        CurrentUserContext.setUserId(SYSTEM_USER_ID);
+        try {
+            UpstreamSourceEntity source = upstreamSourceMapper.selectById(sourceId);
+            if (source == null) {
+                throw new BusinessException("上游数据源不存在");
             }
-            syncDomain(source, domainConfig, triggerType);
+            for (String dataType : UpstreamDataType.SYNC_ORDER) {
+                UpstreamDomainConfigEntity domainConfig = upstreamDomainConfigMapper.selectOne(
+                        new LambdaQueryWrapper<UpstreamDomainConfigEntity>()
+                                .eq(UpstreamDomainConfigEntity::getSourceId, sourceId)
+                                .eq(UpstreamDomainConfigEntity::getDataType, dataType));
+                if (domainConfig == null || !Boolean.TRUE.equals(domainConfig.getEnabled())) {
+                    continue;
+                }
+                syncDomain(source, domainConfig, triggerType);
+            }
+        } finally {
+            if (previousUserId != null) {
+                CurrentUserContext.setUserId(previousUserId);
+            } else {
+                CurrentUserContext.clear();
+            }
         }
     }
 

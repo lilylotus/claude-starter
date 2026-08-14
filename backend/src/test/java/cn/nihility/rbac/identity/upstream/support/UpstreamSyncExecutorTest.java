@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.app.config.AppSecretProperties;
+import cn.nihility.rbac.auth.context.CurrentUserContext;
 import cn.nihility.rbac.identity.upstream.constant.UpstreamDataType;
 import cn.nihility.rbac.identity.upstream.constant.UpstreamSyncStatus;
 import cn.nihility.rbac.identity.upstream.dto.UpstreamFieldMappingRow;
@@ -19,6 +20,8 @@ import cn.nihility.rbac.identity.upstream.mapper.UpstreamFieldMappingMapper;
 import cn.nihility.rbac.identity.upstream.mapper.UpstreamSourceMapper;
 import cn.nihility.rbac.identity.upstream.mapper.UpstreamSyncRecordMapper;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -84,6 +87,16 @@ class UpstreamSyncExecutorTest {
     }
 
     /**
+     * {@link CurrentUserContext} 是静态 {@code ThreadLocal}，测试用例之间共享同一个执行
+     * 线程，每个用例结束后必须清空，避免污染同一 JVM 内其余测试类的断言
+     * （fix-upstream-sync-scheduled-operator-context change）。
+     */
+    @AfterEach
+    void tearDown() {
+        CurrentUserContext.clear();
+    }
+
+    /**
      * 已启用数据域当前的字段映射中没有任何字段标记为"主键标识"时，应在处理任何一行
      * 数据之前就判定本次同步失败，直接写入一条 {@code FAILED}、{@code totalCount=0} 的
      * 执行记录，不发起取数请求（design.md Decision 4），也不会调用字段映射转换/单行
@@ -118,5 +131,51 @@ class UpstreamSyncExecutorTest {
         verifyNoInteractions(upstreamHttpFetcher, upstreamJdbcFetcher, upstreamFieldMappingTransformer,
                 upstreamRowUpserter);
         verify(upstreamDomainConfigMapper, never()).updateById(any(UpstreamDomainConfigEntity.class));
+    }
+
+    /**
+     * 模拟定时轮询后台线程（调用前 {@link CurrentUserContext} 未被设置）触发同步：执行
+     * 期间 {@link CurrentUserContext#getUserId()} 应被临时置为保留哨兵用户 id，执行完成后
+     * 应恢复为空，不残留给同一线程池后续复用（fix-upstream-sync-scheduled-operator-context
+     * change tasks.md 2.1）。
+     */
+    @Test
+    void syncSource_shouldSetSentinelDuringExecution_andClearAfterward_whenNoPriorContext() {
+        CurrentUserContext.clear();
+        UpstreamSourceEntity source = UpstreamSourceEntity.builder().id(1L).build();
+        AtomicReference<Long> userIdDuringExecution = new AtomicReference<>();
+        when(upstreamSourceMapper.selectById(1L)).thenAnswer(invocation -> {
+            userIdDuringExecution.set(CurrentUserContext.getUserId());
+            return source;
+        });
+        when(upstreamDomainConfigMapper.selectOne(any())).thenReturn(null);
+
+        upstreamSyncExecutor.syncSource(1L, "SCHEDULE");
+
+        assertThat(userIdDuringExecution.get()).isEqualTo(0L);
+        assertThat(CurrentUserContext.getUserId()).isNull();
+    }
+
+    /**
+     * 模拟管理员手动触发同步（调用前 {@link CurrentUserContext} 已由已认证 HTTP 请求线程
+     * 设置为真实登录用户 id）：执行期间应临时替换为保留哨兵用户 id，执行完成后应恢复为
+     * 调用前的真实用户 id，而不是被清空或残留哨兵值
+     * （fix-upstream-sync-scheduled-operator-context change tasks.md 2.2）。
+     */
+    @Test
+    void syncSource_shouldRestorePreviousUserId_whenCalledFromAuthenticatedThread() {
+        CurrentUserContext.setUserId(42L);
+        UpstreamSourceEntity source = UpstreamSourceEntity.builder().id(1L).build();
+        AtomicReference<Long> userIdDuringExecution = new AtomicReference<>();
+        when(upstreamSourceMapper.selectById(1L)).thenAnswer(invocation -> {
+            userIdDuringExecution.set(CurrentUserContext.getUserId());
+            return source;
+        });
+        when(upstreamDomainConfigMapper.selectOne(any())).thenReturn(null);
+
+        upstreamSyncExecutor.syncSource(1L, "MANUAL");
+
+        assertThat(userIdDuringExecution.get()).isEqualTo(0L);
+        assertThat(CurrentUserContext.getUserId()).isEqualTo(42L);
     }
 }
