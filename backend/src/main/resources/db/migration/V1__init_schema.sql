@@ -1,18 +1,19 @@
 -- ----------------------------------------------------------------------------
 -- RBAC 权限管理系统 - 数据库基线脚本（Flyway 迁移版本 V1）
--- 本文件由原 V1~V11 共 11 个迁移文件合并而来（第三次基线合并），代表这些迁移按
--- 顺序执行完毕后的最终数据库状态（全部 22 张表的建表语句 + 全部种子数据），不再
--- 保留中间过程中的 ALTER/UPDATE 步骤。整体按"先建表、后插入有依赖关系的种子数据"
--- 的顺序线性组织。
+-- 本文件由原 V1~V7 共 7 个迁移文件合并而来（第四次基线合并，上一次是 V1~V11 合并为
+-- 本文件的第三次基线合并），代表这些迁移按顺序执行完毕后的最终数据库状态（全部 30
+-- 张表的建表语句 + 全部种子数据），不再保留中间过程中的 ALTER/UPDATE/TRUNCATE 步骤
+-- 与已被后续存量数据回填但对全新数据库无意义的 INSERT...SELECT。整体按"先建表、后
+-- 插入有依赖关系的种子数据"的顺序线性组织。
 -- 数据库需提前手动创建，例如：
 --   CREATE DATABASE rbac_demo DEFAULT CHARACTER SET utf8mb4;
--- 注意：本地开发库如果已经跑过旧的 V1~V11，需要先清空该库（或删除
+-- 注意：本地开发库如果已经跑过旧的 V1~V7，需要先清空该库（或删除
 -- flyway_schema_history 表）后重新执行本文件，否则 Flyway 会因为找不到对应版本号
 -- 的历史文件而报错。
 -- ----------------------------------------------------------------------------
 
 -- ============================================================================
--- 第一部分：建表语句（共 22 张表）
+-- 第一部分：建表语句（共 30 张表）
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -229,6 +230,7 @@ CREATE TABLE IF NOT EXISTS `tab_app_config` (
     `access_key`     VARCHAR(64)  NOT NULL COMMENT '对外接口 AccessKey，系统生成，全局唯一，32 位随机十六进制，不带前缀',
     `secret_key`     VARCHAR(255) NOT NULL COMMENT '对外接口 SecretKey，落库前经 SM4 对称加密（Base64），不存明文，仅重置接口单次返回明文',
     `sign_algorithm` VARCHAR(16)  NOT NULL DEFAULT 'SHA256' COMMENT '接口签名算法：SHA256 或 SM3',
+    `need_sign`      TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '是否需要签名/验签校验',
     `sync_mode`      VARCHAR(16)  NOT NULL DEFAULT 'PULL' COMMENT '同步方式：NOTIFY=通知（本系统主动回调外部接口），PULL=拉取（外部系统主动调用本系统接口）',
     `notify_url`     VARCHAR(255)          DEFAULT NULL COMMENT '通知回调接口地址（http/https），sync_mode=NOTIFY 时必填',
     `notify_params`  TEXT                  DEFAULT NULL COMMENT '通知请求自定义参数，JSON 对象（key-value 均为字符串），sync_mode=PULL 时通常为空',
@@ -287,6 +289,73 @@ CREATE TABLE IF NOT EXISTS `tab_app_sync_field_mapping` (
     UNIQUE KEY `uk_tab_app_sync_field_mapping` (`app_ref_id`, `sync_domain`, `metadata_field_id`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
   COMMENT = '应用同步字段映射表，组织/用户/应用/角色四个数据域各自的字段级同步映射配置';
+
+-- ----------------------------------------------------------------------------
+-- 应用数据同步通知/拉取模块
+-- ----------------------------------------------------------------------------
+
+-- 应用数据变更记录表：按目标应用各自记录（id 自增列全局单调递增，直接作为对外序列号，
+-- 不额外维护计数器；sequence 属于 SQL 保留字/对象类型，不作为列名）；只追加不更新不
+-- 删除。列名已核对 MySQL/PostgreSQL/Oracle/SQL Server 保留字：app_ref_id/data_type/
+-- biz_id/operation_type 均非保留字。
+CREATE TABLE IF NOT EXISTS `tab_app_data_change_log` (
+    `id`             BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id，全局单调递增，直接作为对外的序列号（sequence）',
+    `app_ref_id`     BIGINT      NOT NULL COMMENT '目标应用 id（tab_app.id）',
+    `data_type`      VARCHAR(20) NOT NULL COMMENT '数据类型：ORG/USER/POSITION/APP/ROLE',
+    `biz_id`         BIGINT      NOT NULL COMMENT '变更对象主键 id',
+    `operation_type` TINYINT     NOT NULL COMMENT '操作类型：1=新增，2=编辑，3=启用，4=停用，5=删除',
+    `create_by`      VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`      VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_tab_app_data_change_log_type_biz` (`data_type`, `biz_id`),
+    KEY `idx_tab_app_data_change_log_app_type` (`app_ref_id`, `data_type`, `id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+  COMMENT = '应用数据变更记录表，按目标应用各自记录，id 自增列本身即对外序列号，只追加不更新不删除';
+
+-- 应用通知发送记录表：仅用于问题排查/展示，不驱动自动重试。列名已核对
+-- MySQL/PostgreSQL/Oracle/SQL Server 保留字：change_log_id/app_ref_id/notify_status/
+-- http_status/error_msg 均非保留字。
+CREATE TABLE IF NOT EXISTS `tab_app_notify_record` (
+    `id`            BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `change_log_id` BIGINT       NOT NULL COMMENT '关联 tab_app_data_change_log.id',
+    `app_ref_id`    BIGINT       NOT NULL COMMENT '关联 tab_app.id',
+    `notify_status` TINYINT      NOT NULL COMMENT '通知状态：1=成功，2=失败',
+    `http_status`   INT          NULL COMMENT '外部接口返回的 HTTP 状态码，失败且未收到响应时为空',
+    `error_msg`     VARCHAR(500) NULL COMMENT '失败原因摘要',
+    `create_by`     VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
+    `create_time`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`     VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
+    `update_time`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_tab_app_notify_record_change_log_id` (`change_log_id`),
+    KEY `idx_tab_app_notify_record_app_ref_id` (`app_ref_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+  COMMENT = '应用通知发送记录表，仅用于问题排查/展示，不驱动自动重试';
+
+-- ----------------------------------------------------------------------------
+-- 应用同步组织范围模块
+-- ----------------------------------------------------------------------------
+
+-- 应用同步组织范围配置表：按 (app_ref_id, sync_domain) 直接关联，不额外增加模式开关列，
+-- 零行=全部数据，>=1 行=指定组织范围。列名已核对 MySQL/PostgreSQL/Oracle/SQL Server
+-- 保留字：app_ref_id/sync_domain/org_id/include_children 均非保留字。
+CREATE TABLE IF NOT EXISTS `tab_app_sync_org_scope` (
+    `id`               BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `app_ref_id`       BIGINT      NOT NULL COMMENT '所属应用 id，关联 tab_app.id',
+    `sync_domain`      VARCHAR(16) NOT NULL COMMENT '数据域：ORG/USER/POSITION',
+    `org_id`           BIGINT      NOT NULL COMMENT '组织 id，关联 tab_org.id',
+    `include_children` TINYINT(1)  NOT NULL DEFAULT 0 COMMENT '是否包含递归子组织：0=否，1=是',
+    `create_by`        VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`        VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_app_sync_org_scope` (`app_ref_id`, `sync_domain`, `org_id`),
+    KEY `idx_tab_app_sync_org_scope_app_domain` (`app_ref_id`, `sync_domain`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+  COMMENT = '应用同步组织范围配置表，零行=全部数据，>=1 行=指定组织范围';
 
 -- ----------------------------------------------------------------------------
 -- 角色管理模块
@@ -565,6 +634,127 @@ CREATE TABLE IF NOT EXISTS `tab_import_field_config`
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_general_ci
   COMMENT = 'Excel 导入字段配置表';
+
+-- ----------------------------------------------------------------------------
+-- 身份管理 - 上游数据管理模块
+-- ----------------------------------------------------------------------------
+
+-- 上游数据源配置表：一套连接信息（接口自定义请求头 / 数据库 JDBC 连接）+ 一套调度
+-- 配置。接口模式的请求头取值、数据库模式的密码均为 SM4 加密文本，复用
+-- AppSecretProperties 的同一把主密钥。
+CREATE TABLE IF NOT EXISTS `tab_upstream_source`
+(
+    `id`                 BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `name`               VARCHAR(128) NOT NULL COMMENT '数据源名称',
+    `sync_type`          VARCHAR(16)  NOT NULL COMMENT '同步方式：API=接口，DB_TABLE=数据库表',
+    `enabled`            TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '是否启用，创建时默认 0（未启用）',
+    `schedule_type`      VARCHAR(16)  NOT NULL DEFAULT 'INTERVAL' COMMENT '调度方式：INTERVAL=按间隔，FIXED_TIME=按每日固定时间点',
+    `interval_unit`      VARCHAR(16)  NULL COMMENT '间隔单位：MINUTE/HOUR，schedule_type=INTERVAL 时使用',
+    `interval_value`     INT          NULL COMMENT '间隔取值（正整数），schedule_type=INTERVAL 时使用',
+    `fixed_time`         VARCHAR(5)   NULL COMMENT '每日固定时间点，HH:mm 文本，schedule_type=FIXED_TIME 时使用',
+    `last_trigger_time`  DATETIME     NULL COMMENT '上次定时触发时间，供轮询任务判断是否到点，手动触发不更新该列',
+    `api_auth_headers`   TEXT         NULL COMMENT '接口模式自定义请求头，JSON 文本（{key: SM4密文}），syncType=API 时使用',
+    `db_jdbc_url`        VARCHAR(500) NULL COMMENT '数据库模式 JDBC 连接地址，仅支持 jdbc:mysql:// 前缀，syncType=DB_TABLE 时使用',
+    `db_username`        VARCHAR(128) NULL COMMENT '数据库模式连接用户名，syncType=DB_TABLE 时使用',
+    `db_password`        VARCHAR(500) NULL COMMENT '数据库模式连接密码，SM4 加密文本，syncType=DB_TABLE 时使用',
+    `create_by`          VARCHAR(64)  NULL COMMENT '创建人',
+    `create_time`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`          VARCHAR(64)  NULL COMMENT '更新人',
+    `update_time`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_tab_upstream_source_enabled` (`enabled`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+  COMMENT = '上游数据源配置表';
+
+-- 数据域配置：每个数据源固定 3 行（ORG/USER/POSITION），各自独立启用开关与取数来源
+-- （接口模式的请求 URL+方式，或数据库模式的只读查询 SQL）。
+CREATE TABLE IF NOT EXISTS `tab_upstream_domain_config`
+(
+    `id`              BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `source_id`       BIGINT       NOT NULL COMMENT '所属上游数据源 id，关联 tab_upstream_source.id',
+    `data_type`       VARCHAR(16)  NOT NULL COMMENT '数据域：ORG/USER/POSITION',
+    `enabled`         TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '是否启用该数据域',
+    `api_url`         VARCHAR(500) NULL COMMENT '接口模式该数据域的请求地址，syncType=API 时使用',
+    `api_method`      VARCHAR(8)   NULL COMMENT '接口模式请求方式：GET/POST，syncType=API 时使用',
+    `db_sql`          TEXT         NULL COMMENT '数据库模式该数据域的只读查询 SQL（列别名对应上游字段编码），syncType=DB_TABLE 时使用',
+    `last_sync_time`  DATETIME     NULL COMMENT '该数据域上次同步完成时间，仅展示用途，不驱动增量逻辑',
+    `create_by`       VARCHAR(64)  NULL COMMENT '创建人',
+    `create_time`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`       VARCHAR(64)  NULL COMMENT '更新人',
+    `update_time`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_upstream_domain_config` (`source_id`, `data_type`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+  COMMENT = '上游数据源数据域配置表';
+
+-- 字段映射：管理员手工填写"上游字段名称/编码"作为源，选择本系统元数据字段作为目标
+-- （方向与 tab_app_sync_field_mapping 相反）。只存 metadata_field_id 外键，不落快照，
+-- 查询时实时 JOIN tab_metadata_field 读取。is_primary_key 标记该字段是否作为落库匹配
+-- 的主键标识字段之一，同一数据域可多选组成联合主键（AND 语义）。
+CREATE TABLE IF NOT EXISTS `tab_upstream_field_mapping`
+(
+    `id`                   BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `source_id`            BIGINT       NOT NULL COMMENT '所属上游数据源 id，关联 tab_upstream_source.id',
+    `data_type`            VARCHAR(16)  NOT NULL COMMENT '数据域：ORG/USER/POSITION',
+    `upstream_field_name`  VARCHAR(128) NOT NULL COMMENT '上游字段名称，管理员手工填写',
+    `upstream_field_code`  VARCHAR(128) NOT NULL COMMENT '上游字段编码，管理员手工填写，同一数据源同一数据域内不允许重复',
+    `metadata_field_id`    BIGINT       NOT NULL COMMENT '目标元数据字段 id，关联 tab_metadata_field.id',
+    `is_primary_key`       TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '是否作为落库匹配的主键标识字段之一，同一数据域可多选组成联合主键',
+    `transform_type`       VARCHAR(16)  NOT NULL COMMENT '转换方式：NO_TRANSFORM/FIXED_VALUE/SCRIPT',
+    `transform_value`      VARCHAR(5000) NULL COMMENT '转换取值：固定值的具体值，或脚本源码',
+    `create_by`            VARCHAR(64)  NULL COMMENT '创建人',
+    `create_time`          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`            VARCHAR(64)  NULL COMMENT '更新人',
+    `update_time`          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_tab_upstream_field_mapping_source_type` (`source_id`, `data_type`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+  COMMENT = '上游数据源字段映射表';
+
+-- 同步执行记录：粒度对齐"数据源+数据域"，一次同步触发会为其下已启用的每个数据域各写
+-- 一条。仅用于展示排查，不驱动任何自动重试。
+CREATE TABLE IF NOT EXISTS `tab_upstream_sync_record`
+(
+    `id`              BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `source_id`       BIGINT       NOT NULL COMMENT '所属上游数据源 id，关联 tab_upstream_source.id',
+    `data_type`       VARCHAR(16)  NOT NULL COMMENT '数据域：ORG/USER/POSITION',
+    `trigger_type`    VARCHAR(16)  NOT NULL COMMENT '触发方式：SCHEDULE=定时触发，MANUAL=手动触发',
+    `start_time`      DATETIME     NOT NULL COMMENT '本次同步开始时间',
+    `end_time`        DATETIME     NULL COMMENT '本次同步结束时间',
+    `status`          VARCHAR(16)  NOT NULL COMMENT '执行状态：SUCCESS=全部成功，PARTIAL=部分失败，FAILED=全部失败或执行异常',
+    `total_count`     INT          NOT NULL DEFAULT 0 COMMENT '处理总行数',
+    `success_count`   INT          NOT NULL DEFAULT 0 COMMENT '成功行数',
+    `fail_count`      INT          NOT NULL DEFAULT 0 COMMENT '失败行数',
+    `fail_summary`    VARCHAR(500) NULL COMMENT '失败摘要文本，截断到合理长度，非完整堆栈',
+    `create_by`       VARCHAR(64)  NULL COMMENT '创建人',
+    `create_time`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`       VARCHAR(64)  NULL COMMENT '更新人',
+    `update_time`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_tab_upstream_sync_record_source` (`source_id`, `id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+  COMMENT = '上游数据源同步执行记录表';
+
+-- 上游数据同步执行记录明细表：记录每次执行记录下每一行处理的原始上游数据与结果，
+-- 成功/失败均记录。source_id 冗余自所属执行记录，供按数据源级联删除，不需要联表。
+CREATE TABLE IF NOT EXISTS `tab_upstream_sync_record_detail`
+(
+    `id`             BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `sync_record_id` BIGINT       NOT NULL COMMENT '所属同步执行记录 id，关联 tab_upstream_sync_record.id',
+    `source_id`      BIGINT       NOT NULL COMMENT '所属上游数据源 id，冗余自所属执行记录，供按数据源级联删除，不需要联表',
+    `row_no`         INT          NOT NULL COMMENT '本次执行内该行的序号，从 1 开始',
+    `row_data`       TEXT         NOT NULL COMMENT '该行的原始上游数据（取数阶段的原始行，JSON 文本）',
+    `status`         VARCHAR(16)  NOT NULL COMMENT '该行处理状态：SUCCESS=成功，FAILED=失败',
+    `fail_reason`    VARCHAR(500) NULL COMMENT '失败原因，仅 status=FAILED 时有值',
+    `create_by`      VARCHAR(64)  NULL COMMENT '创建人',
+    `create_time`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`      VARCHAR(64)  NULL COMMENT '更新人',
+    `update_time`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_tab_upstream_sync_record_detail_record` (`sync_record_id`, `id`),
+    KEY `idx_tab_upstream_sync_record_detail_source` (`source_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+  COMMENT = '上游数据同步执行记录明细表，记录每行处理的原始数据与结果，成功/失败均记录';
 
 -- ============================================================================
 -- 第二部分：种子数据（按依赖关系顺序插入）
@@ -889,13 +1079,42 @@ VALUES ('新增表单字段', 'FormFieldManagement:formField:add', @form_field_i
        ('删除表单字段', 'FormFieldManagement:formField:delete', @form_field_id, 2, 10, NULL, 2000, @admin_user_id_text, NOW(),
         @admin_user_id_text, NOW());
 
+-- 上游数据管理（挂在 identity 一级分组下，排在表单管理之后新增）
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('上游数据管理', 'UpstreamManagement:source:view', @identity_id, 1, 0, '上游数据管理页面访问', 2000,
+        @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+SET @upstream_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'UpstreamManagement:source:view');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('新增上游数据源', 'UpstreamManagement:source:add', @upstream_id, 2, 80, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('编辑上游数据源基础信息', 'UpstreamManagement:source:edit', @upstream_id, 2, 70,
+        '编辑名称、同步方式，含独立配置页"基础信息" tab 的保存', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('删除上游数据源', 'UpstreamManagement:source:delete', @upstream_id, 2, 60,
+        '级联删除数据域配置、字段映射、同步执行记录', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('启用上游数据源', 'UpstreamManagement:source:enable', @upstream_id, 2, 50, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('停用上游数据源', 'UpstreamManagement:source:disable', @upstream_id, 2, 40, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('进入数据源配置页', 'UpstreamManagement:source:config', @upstream_id, 2, 30,
+        '进入 /identity/upstream/:id/config 独立配置页', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('修改数据源配置', 'UpstreamManagement:source:config:edit', @upstream_id, 2, 20,
+        '配置页内连接配置、调度配置、数据范围（数据域启用+取数来源、字段映射）的全部保存动作', 2000,
+        @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('立即同步一次', 'UpstreamManagement:source:manualSync', @upstream_id, 2, 10,
+        '手动触发一次同步，不等定时调度到点', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
 -- ----------------------------------------------------------------------------
--- 权限点种子数据（99 条，按 权限资源.txt 模块分段插入）
+-- 权限点种子数据（108 条，按 权限资源.txt 模块分段插入）
 -- ----------------------------------------------------------------------------
 -- 组织/用户/任职/应用/角色/权限点/管理员/菜单/字典/元数据配置/表单管理/操作日志
 -- 共 94 条源自 权限资源.txt（一次性脚本 gen_permission_seed.py 解析生成），登录日志
--- 1 条与应用配置（页面访问 + 重置 SecretKey + 修改签名算法 + 修改同步配置）4 条为
--- 后续新增能力追加，合计 99 条。
+-- 1 条、应用配置（页面访问 + 重置 SecretKey + 修改签名算法 + 修改同步配置）4 条、
+-- 上游数据管理（页面访问 + 新增 + 编辑基础信息 + 删除 + 启用 + 停用 + 进入配置页 +
+-- 修改数据源配置 + 立即同步一次）9 条均为后续新增能力追加，合计 108 条。
 
 -- OrgManagement（组织管理，/identity/orgs）
 INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
@@ -1049,8 +1268,22 @@ INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, 
 VALUES
     ('登录日志管理页面访问', 'LoginLogManagement:loginLog:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
 
+-- UpstreamManagement（上游数据管理，/identity/upstream）
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES
+    ('上游数据管理页面访问', 'UpstreamManagement:source:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('新增上游数据源', 'UpstreamManagement:source:add', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('编辑上游数据源基础信息', 'UpstreamManagement:source:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('删除上游数据源', 'UpstreamManagement:source:delete', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('启用上游数据源', 'UpstreamManagement:source:enable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('停用上游数据源', 'UpstreamManagement:source:disable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('进入数据源配置页', 'UpstreamManagement:source:config', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('修改数据源配置', 'UpstreamManagement:source:config:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('立即同步一次', 'UpstreamManagement:source:manualSync', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
 -- ----------------------------------------------------------------------------
--- 超级管理员角色，关联全部种子权限点
+-- 超级管理员角色，关联全部种子权限点（含上面新增的 UpstreamManagement 系列权限点，
+-- 因为本 INSERT...SELECT 在其之后执行，天然覆盖，不需要再单独补一次授权）
 -- ----------------------------------------------------------------------------
 
 INSERT INTO `tab_role` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
