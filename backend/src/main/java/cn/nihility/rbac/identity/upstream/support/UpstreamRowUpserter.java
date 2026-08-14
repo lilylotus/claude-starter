@@ -23,6 +23,7 @@ import cn.nihility.rbac.user.service.PositionService;
 import cn.nihility.rbac.user.service.UserService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import java.beans.PropertyDescriptor;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -40,7 +41,9 @@ import org.springframework.util.StringUtils;
  * 的 {@code processOrg}/{@code processUser}/{@code processPosition}/{@code bindProperties}
  * 写法：按调用方传入的主键标识字段（{@code primaryKeyFieldCodes}，由字段映射配置的
  * "主键标识"勾选项决定，upstream-field-mapping-primary-key change）动态匹配已有记录，
- * 命中零条调用既有 {@code create}、命中一条调用既有 {@code update}、命中多条判定失败，
+ * 命中零条调用既有 {@code create}、命中一条且数据有实际差异时调用既有 {@code update}
+ * （数据与记录当前值完全一致时跳过调用，见 {@link #isUnchanged}，
+ * upstream-sync-skip-noop-update change design.md Decision 1）、命中多条判定失败，
  * 复用组织/用户/任职模块既有的创建/更新校验规则（必填/格式/唯一性等），不重新实现一套
  * （design.md Decision 3）。主键字段是运行时才知道的动态集合，无法用
  * {@link LambdaQueryWrapper} 的方法引用语法表达，改用 {@link QueryWrapper} 配合
@@ -147,6 +150,9 @@ public class UpstreamRowUpserter {
             OrgUpdateRequest request = new OrgUpdateRequest();
             bindProperties(request, row);
             request.setParentId(parentId);
+            if (isUnchanged(request, matches.get(0))) {
+                return;
+            }
             orgService.update(matches.get(0).getId(), request);
         }
     }
@@ -196,6 +202,9 @@ public class UpstreamRowUpserter {
         } else {
             UserUpdateRequest request = new UserUpdateRequest();
             bindProperties(request, row);
+            if (isUnchanged(request, matches.get(0))) {
+                return;
+            }
             userService.update(matches.get(0).getId(), request);
         }
     }
@@ -260,6 +269,9 @@ public class UpstreamRowUpserter {
             PositionUpdateRequest request = new PositionUpdateRequest();
             bindProperties(request, row);
             request.setOrgId(org.getId());
+            if (isUnchanged(request, matches.get(0))) {
+                return;
+            }
             positionService.update(matches.get(0).getId(), request);
         }
     }
@@ -350,5 +362,37 @@ public class UpstreamRowUpserter {
      */
     private String toText(Object value) {
         return Objects.toString(value, null);
+    }
+
+    /**
+     * 比较一个已经构造好的 Update 请求（普通字段 + {@code parentId}/{@code orgId} 等特殊
+     * 字段均已就位）与匹配到的已有实体，判断本次同步这一行数据是否与记录当前实际值完全
+     * 一致（upstream-sync-skip-noop-update change design.md Decision 1）。遍历
+     * {@code request} 自身声明的全部属性（而不是转换后行 {@code row} 的 key），天然覆盖
+     * 这次更新实际会写入的全部字段，包括 {@code bindProperties} 之外单独 {@code set} 的
+     * {@code parentId}/{@code orgId}；{@code request}/{@code entity} 的同名属性类型本来就
+     * 一致（{@code XxxUpdateRequest} 的字段是照着 {@code XxxEntity} 对应字段的类型声明
+     * 的），不需要额外的类型转换或容忍逻辑。
+     *
+     * @param request 已经构造完整的 Update 请求
+     * @param entity  匹配到的已有实体
+     * @return 全部属性取值都相等时返回 {@code true}（本次同步应跳过更新），否则返回
+     *         {@code false}
+     */
+    private boolean isUnchanged(Object request, Object entity) {
+        BeanWrapper requestWrapper = new BeanWrapperImpl(request);
+        BeanWrapper entityWrapper = new BeanWrapperImpl(entity);
+        for (PropertyDescriptor descriptor : requestWrapper.getPropertyDescriptors()) {
+            String propertyName = descriptor.getName();
+            if ("class".equals(propertyName) || !entityWrapper.isReadableProperty(propertyName)) {
+                continue;
+            }
+            Object requestValue = requestWrapper.getPropertyValue(propertyName);
+            Object entityValue = entityWrapper.getPropertyValue(propertyName);
+            if (!Objects.equals(requestValue, entityValue)) {
+                return false;
+            }
+        }
+        return true;
     }
 }

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -39,10 +40,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 /**
  * {@link UpstreamRowUpserter} 的单元测试，覆盖组织/用户/任职各自按调用方传入的主键标识
  * 字段（{@code primaryKeyFieldCodes}）动态匹配的新增/更新/联合主键/主键取值为空/多条
- * 匹配失败场景（upstream-field-mapping-primary-key change tasks.md 6.1），以及组织
+ * 匹配失败场景（upstream-field-mapping-primary-key change tasks.md 6.1），组织
  * "上级组织编码"通过字段映射转换后行的系统字段 {@code parentCode} 解析：未配置/取值为空/
  * 匹配到已有组织/匹配不到已有组织四种场景（upstream-org-parent-code-field-mapping
- * change tasks.md 3.1/3.2）。
+ * change tasks.md 3.1/3.2），以及匹配到已有记录但数据与当前实际值完全一致时跳过更新的
+ * 场景（upstream-sync-skip-noop-update change tasks.md 2.1）。
  */
 @ExtendWith(MockitoExtension.class)
 class UpstreamRowUpserterTest {
@@ -175,6 +177,24 @@ class UpstreamRowUpserterTest {
     }
 
     /**
+     * 组织编码匹配到一条已存在的未删除组织，且本次同步数据与该记录当前实际值完全一致
+     * 时，应跳过更新（不调用 create/update），不产生无意义的写入与操作日志
+     * （upstream-sync-skip-noop-update change design.md Decision 1/2）。
+     */
+    @Test
+    void upsertRow_shouldSkipUpdate_whenOrgUnchanged() {
+        OrgEntity existing = OrgEntity.builder().id(5L).code("ORG001").name("测试组织").parentId(0L).showOrder(0)
+                .status(OrgStatus.ENABLED).build();
+        when(orgMapper.selectList(any())).thenReturn(java.util.List.of(existing));
+        Map<String, Object> row = Map.of("code", "ORG001", "name", "测试组织");
+
+        upstreamRowUpserter.upsertRow(UpstreamDataType.ORG, row, row, List.of("code"));
+
+        verify(orgService, never()).update(any(), any());
+        verify(orgService, never()).create(any());
+    }
+
+    /**
      * 组织按联合主键（两个字段：{@code code}+{@code name}）匹配不到已有记录时应走新增
      * 流程（upstream-field-mapping-primary-key change：支持联合主键场景）。
      */
@@ -267,6 +287,24 @@ class UpstreamRowUpserterTest {
         ArgumentCaptor<UserUpdateRequest> captor = ArgumentCaptor.forClass(UserUpdateRequest.class);
         verify(userService).update(eq(9L), captor.capture());
         assertThat(captor.getValue().getName()).isEqualTo("张三（更新）");
+    }
+
+    /**
+     * 用户编号匹配到一条已存在的未删除用户，且本次同步数据与该记录当前实际值完全一致
+     * （含 {@code UserUpdateRequest.gender} 默认值 {@code "unknown"}）时，应跳过更新
+     * （upstream-sync-skip-noop-update change design.md Decision 1/2）。
+     */
+    @Test
+    void upsertRow_shouldSkipUpdate_whenUserUnchanged() {
+        UserEntity existing = UserEntity.builder().id(9L).code("U001").name("张三").gender("unknown").showOrder(0)
+                .status(UserStatus.ENABLED).build();
+        when(userMapper.selectList(any())).thenReturn(java.util.List.of(existing));
+        Map<String, Object> row = Map.of("code", "U001", "name", "张三");
+
+        upstreamRowUpserter.upsertRow(UpstreamDataType.USER, row, row, List.of("code"));
+
+        verify(userService, never()).update(any(), any());
+        verify(userService, never()).create(any());
     }
 
     /**
@@ -382,6 +420,31 @@ class UpstreamRowUpserterTest {
         verify(positionService).update(eq(9L), captor.capture());
         assertThat(captor.getValue().getOrgId()).isEqualTo(2L);
         assertThat(captor.getValue().getPositionType()).isEqualTo("primary");
+    }
+
+    /**
+     * 任职匹配到一条已存在记录，且本次同步数据（含解析出的 {@code orgId}）与该记录当前
+     * 实际值完全一致时，应跳过更新（upstream-sync-skip-noop-update change design.md
+     * Decision 1/2）。
+     */
+    @Test
+    void upsertRow_shouldSkipUpdate_whenPositionUnchanged() {
+        UserEntity user = UserEntity.builder().id(1L).code("U001").status(UserStatus.ENABLED).build();
+        OrgEntity org = OrgEntity.builder().id(2L).code("ORG001").status(OrgStatus.ENABLED).build();
+        UserPositionEntity existing = UserPositionEntity.builder().id(9L).userId(1L).orgId(2L)
+                .positionType("primary").showOrder(0).build();
+        when(userMapper.selectList(any())).thenReturn(java.util.List.of(user));
+        when(orgMapper.selectList(any())).thenReturn(java.util.List.of(org));
+        when(userPositionMapper.selectList(any())).thenReturn(java.util.List.of(existing));
+        Map<String, Object> transformedRow = Map.of("positionType", "primary");
+        Map<String, Object> rawRow = Map.of(
+                UpstreamPositionPseudoFieldCode.USER_IDENTIFIER, "U001",
+                UpstreamPositionPseudoFieldCode.ORG_CODE, "ORG001");
+
+        upstreamRowUpserter.upsertRow(UpstreamDataType.POSITION, transformedRow, rawRow, List.of("positionType"));
+
+        verify(positionService, never()).update(any(), any());
+        verify(positionService, never()).create(any());
     }
 
     /**

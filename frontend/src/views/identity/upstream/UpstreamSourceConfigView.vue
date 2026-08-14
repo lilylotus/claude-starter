@@ -7,6 +7,7 @@ import { ArrowLeft, Delete, Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import * as upstreamSourceApi from '@/api/upstreamSource'
 import * as metadataFieldApi from '@/api/metadataField'
+import { PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '@/constants/pagination'
 import { TRANSFORM_TYPE_OPTIONS, type TransformType } from '@/types/app'
 import {
   UPSTREAM_API_METHOD_OPTIONS,
@@ -15,6 +16,8 @@ import {
   UPSTREAM_POSITION_ORG_CODE_FIELD,
   UPSTREAM_POSITION_USER_IDENTIFIER_FIELD,
   UPSTREAM_SCHEDULE_TYPE_OPTIONS,
+  UPSTREAM_SYNC_RECORD_DETAIL_STATUS_LABELS,
+  UPSTREAM_SYNC_RECORD_DETAIL_STATUS_TAG_TYPE,
   UPSTREAM_SYNC_STATUS_TAG_TYPE,
   UPSTREAM_SYNC_TYPE_OPTIONS,
   UPSTREAM_TRIGGER_TYPE_LABELS,
@@ -25,6 +28,7 @@ import {
   type UpstreamIntervalUnit,
   type UpstreamScheduleType,
   type UpstreamSourceVO,
+  type UpstreamSyncRecordDetailVO,
   type UpstreamSyncRecordVO,
   type UpstreamSyncType,
 } from '@/types/upstreamSource'
@@ -204,12 +208,13 @@ interface DomainForm {
   apiUrl: string
   apiMethod: UpstreamApiMethod
   dbSql: string
+  lastSyncTime: string | null
 }
 
 const domainConfigs = reactive<Record<UpstreamDataType, DomainForm>>({
-  ORG: { enabled: false, apiUrl: '', apiMethod: 'GET', dbSql: '' },
-  USER: { enabled: false, apiUrl: '', apiMethod: 'GET', dbSql: '' },
-  POSITION: { enabled: false, apiUrl: '', apiMethod: 'GET', dbSql: '' },
+  ORG: { enabled: false, apiUrl: '', apiMethod: 'GET', dbSql: '', lastSyncTime: null },
+  USER: { enabled: false, apiUrl: '', apiMethod: 'GET', dbSql: '', lastSyncTime: null },
+  POSITION: { enabled: false, apiUrl: '', apiMethod: 'GET', dbSql: '', lastSyncTime: null },
 })
 const domainConfigLoading = ref(false)
 const savingDomainConfig = ref(false)
@@ -224,6 +229,7 @@ async function fetchDomainConfigs() {
         apiUrl: row.apiUrl ?? '',
         apiMethod: (row.apiMethod || 'GET') as UpstreamApiMethod,
         dbSql: row.dbSql ?? '',
+        lastSyncTime: row.lastSyncTime,
       }
     }
   } finally {
@@ -264,6 +270,7 @@ async function saveDomainConfig(dataType: UpstreamDataType) {
       apiUrl: data.apiUrl ?? '',
       apiMethod: (data.apiMethod || 'GET') as UpstreamApiMethod,
       dbSql: data.dbSql ?? '',
+      lastSyncTime: data.lastSyncTime,
     }
     ElMessage.success('保存成功')
   } finally {
@@ -407,18 +414,83 @@ async function saveFieldMappings() {
 
 const syncRecords = ref<UpstreamSyncRecordVO[]>([])
 const syncRecordsLoading = ref(false)
+const syncRecordsPage = ref(1)
+const syncRecordsPageSize = ref(DEFAULT_PAGE_SIZE)
+const syncRecordsTotal = ref(0)
 
 async function fetchSyncRecords() {
   syncRecordsLoading.value = true
   try {
-    syncRecords.value = await upstreamSourceApi.listUpstreamSyncRecords(sourceId.value)
+    const data = await upstreamSourceApi.listUpstreamSyncRecords(
+      sourceId.value,
+      syncRecordsPage.value,
+      syncRecordsPageSize.value,
+    )
+    syncRecords.value = data.records
+    syncRecordsTotal.value = data.total
   } finally {
     syncRecordsLoading.value = false
   }
 }
 
+function handleSyncRecordsPageChange(page: number) {
+  syncRecordsPage.value = page
+  fetchSyncRecords()
+}
+
+function handleSyncRecordsPageSizeChange(pageSize: number) {
+  syncRecordsPageSize.value = pageSize
+  syncRecordsPage.value = 1
+  fetchSyncRecords()
+}
+
 function dataTypeLabel(dataType: UpstreamDataType) {
   return UPSTREAM_DATA_TYPE_OPTIONS.find((item) => item.value === dataType)?.label ?? dataType
+}
+
+// ---- 同步记录：行明细对话框 ----
+
+const detailDialogVisible = ref(false)
+const detailDialogLoading = ref(false)
+const detailDialogRecordId = ref<number | null>(null)
+const syncRecordDetails = ref<UpstreamSyncRecordDetailVO[]>([])
+const detailPage = ref(1)
+const detailPageSize = ref(DEFAULT_PAGE_SIZE)
+const detailTotal = ref(0)
+
+async function fetchSyncRecordDetails() {
+  if (detailDialogRecordId.value === null) return
+  detailDialogLoading.value = true
+  try {
+    const data = await upstreamSourceApi.listUpstreamSyncRecordDetails(
+      sourceId.value,
+      detailDialogRecordId.value,
+      detailPage.value,
+      detailPageSize.value,
+    )
+    syncRecordDetails.value = data.records
+    detailTotal.value = data.total
+  } finally {
+    detailDialogLoading.value = false
+  }
+}
+
+function handleViewDetails(record: UpstreamSyncRecordVO) {
+  detailDialogRecordId.value = record.id
+  detailPage.value = 1
+  detailDialogVisible.value = true
+  fetchSyncRecordDetails()
+}
+
+function handleDetailPageChange(page: number) {
+  detailPage.value = page
+  fetchSyncRecordDetails()
+}
+
+function handleDetailPageSizeChange(pageSize: number) {
+  detailPageSize.value = pageSize
+  detailPage.value = 1
+  fetchSyncRecordDetails()
 }
 
 // ---- 加载入口 ----
@@ -598,6 +670,11 @@ onMounted(() => {
                     <el-form-item label="是否启用">
                       <el-switch v-model="domainConfigs[option.value].enabled" />
                     </el-form-item>
+                    <el-form-item label="上次同步时间">
+                      <span class="upstream-config__last-sync-time">
+                        {{ domainConfigs[option.value].lastSyncTime ?? '暂无同步记录' }}
+                      </span>
+                    </el-form-item>
                     <template v-if="basicForm.syncType === 'API'">
                       <el-form-item label="请求地址">
                         <el-input v-model="domainConfigs[option.value].apiUrl" placeholder="请输入该数据域的请求地址" />
@@ -749,9 +826,61 @@ onMounted(() => {
           <el-table-column label="失败摘要" min-width="220">
             <template #default="{ row }">{{ (row as UpstreamSyncRecordVO).failSummary ?? '-' }}</template>
           </el-table-column>
+          <el-table-column label="操作" width="100" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="handleViewDetails(row as UpstreamSyncRecordVO)">
+                查看明细
+              </el-button>
+            </template>
+          </el-table-column>
         </el-table>
+
+        <el-pagination
+          class="upstream-config__sync-records-pagination"
+          background
+          layout="sizes, prev, pager, next, total"
+          :page-sizes="[...PAGE_SIZE_OPTIONS]"
+          :current-page="syncRecordsPage"
+          :page-size="syncRecordsPageSize"
+          :total="syncRecordsTotal"
+          @current-change="handleSyncRecordsPageChange"
+          @size-change="handleSyncRecordsPageSizeChange"
+        />
       </el-tab-pane>
     </el-tabs>
+
+    <el-dialog v-model="detailDialogVisible" title="同步执行记录明细" width="720px">
+      <el-table v-loading="detailDialogLoading" :data="syncRecordDetails" empty-text="暂无行明细">
+        <el-table-column prop="rowNo" label="序号" width="70" />
+        <el-table-column label="原始数据" min-width="320">
+          <template #default="{ row }">
+            <pre class="upstream-config__detail-row-data">{{ (row as UpstreamSyncRecordDetailVO).rowData }}</pre>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="90">
+          <template #default="{ row }">
+            <el-tag :type="UPSTREAM_SYNC_RECORD_DETAIL_STATUS_TAG_TYPE[(row as UpstreamSyncRecordDetailVO).status]">
+              {{ UPSTREAM_SYNC_RECORD_DETAIL_STATUS_LABELS[(row as UpstreamSyncRecordDetailVO).status] }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="失败原因" min-width="200">
+          <template #default="{ row }">{{ (row as UpstreamSyncRecordDetailVO).failReason ?? '-' }}</template>
+        </el-table-column>
+      </el-table>
+
+      <el-pagination
+        class="upstream-config__detail-pagination"
+        background
+        layout="sizes, prev, pager, next, total"
+        :page-sizes="[...PAGE_SIZE_OPTIONS]"
+        :current-page="detailPage"
+        :page-size="detailPageSize"
+        :total="detailTotal"
+        @current-change="handleDetailPageChange"
+        @size-change="handleDetailPageSizeChange"
+      />
+    </el-dialog>
   </div>
 </template>
 
@@ -862,6 +991,30 @@ onMounted(() => {
 }
 
 .upstream-config__field-mapping-save {
+  margin-top: 12px;
+}
+
+.upstream-config__last-sync-time {
+  color: var(--color-text-secondary);
+}
+
+.upstream-config__sync-records-pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.upstream-config__detail-row-data {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.upstream-config__detail-pagination {
+  display: flex;
+  justify-content: flex-end;
   margin-top: 12px;
 }
 </style>

@@ -17,10 +17,12 @@ import cn.nihility.rbac.identity.upstream.dto.UpstreamSourceVO;
 import cn.nihility.rbac.identity.upstream.entity.UpstreamDomainConfigEntity;
 import cn.nihility.rbac.identity.upstream.entity.UpstreamFieldMappingEntity;
 import cn.nihility.rbac.identity.upstream.entity.UpstreamSourceEntity;
+import cn.nihility.rbac.identity.upstream.entity.UpstreamSyncRecordDetailEntity;
 import cn.nihility.rbac.identity.upstream.entity.UpstreamSyncRecordEntity;
 import cn.nihility.rbac.identity.upstream.mapper.UpstreamDomainConfigMapper;
 import cn.nihility.rbac.identity.upstream.mapper.UpstreamFieldMappingMapper;
 import cn.nihility.rbac.identity.upstream.mapper.UpstreamSourceMapper;
+import cn.nihility.rbac.identity.upstream.mapper.UpstreamSyncRecordDetailMapper;
 import cn.nihility.rbac.identity.upstream.mapper.UpstreamSyncRecordMapper;
 import cn.nihility.rbac.identity.upstream.mapstruct.UpstreamSourceConvert;
 import cn.nihility.rbac.identity.upstream.service.UpstreamDomainConfigService;
@@ -58,6 +60,9 @@ public class UpstreamSourceServiceImpl implements UpstreamSourceService {
 
     /** 上游数据同步执行记录数据访问接口，仅用于级联删除。 */
     private final UpstreamSyncRecordMapper upstreamSyncRecordMapper;
+
+    /** 上游数据同步执行记录明细数据访问接口，仅用于级联删除。 */
+    private final UpstreamSyncRecordDetailMapper upstreamSyncRecordDetailMapper;
 
     /** 上游数据源数据域配置业务逻辑接口，创建数据源时同一事务内生成默认数据域配置。 */
     private final UpstreamDomainConfigService upstreamDomainConfigService;
@@ -199,6 +204,8 @@ public class UpstreamSourceServiceImpl implements UpstreamSourceService {
                 .eq(UpstreamDomainConfigEntity::getSourceId, id));
         upstreamSyncRecordMapper.delete(new LambdaQueryWrapper<UpstreamSyncRecordEntity>()
                 .eq(UpstreamSyncRecordEntity::getSourceId, id));
+        upstreamSyncRecordDetailMapper.delete(new LambdaQueryWrapper<UpstreamSyncRecordDetailEntity>()
+                .eq(UpstreamSyncRecordDetailEntity::getSourceId, id));
         upstreamSourceMapper.deleteById(id);
     }
 

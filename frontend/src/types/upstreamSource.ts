@@ -175,7 +175,8 @@ export interface UpstreamFieldMappingSaveRequest {
   transformValue: string | null
 }
 
-// 上游数据同步执行记录视图对象，来自 GET /api/identity/upstream-sources/{id}/sync-records，按时间倒序
+// 上游数据同步执行记录视图对象，来自 GET /api/identity/upstream-sources/{id}/sync-records（分页），按时间倒序；
+// 取数结果为空的数据域不产生记录，见 UpstreamDomainConfigVO.lastSyncTime 兜底展示"上次同步时间"
 export interface UpstreamSyncRecordVO {
   id: number
   sourceId: number
@@ -188,4 +189,35 @@ export interface UpstreamSyncRecordVO {
   successCount: number
   failCount: number
   failSummary: string | null
+}
+
+// 上游数据同步执行记录行明细状态：成功/失败，与后端 UpstreamSyncRecordDetailStatus 对齐
+export type UpstreamSyncRecordDetailStatus = 'SUCCESS' | 'FAILED'
+
+export const UPSTREAM_SYNC_RECORD_DETAIL_STATUS_LABELS: Record<UpstreamSyncRecordDetailStatus, string> = {
+  SUCCESS: '成功',
+  FAILED: '失败',
+}
+
+export const UPSTREAM_SYNC_RECORD_DETAIL_STATUS_TAG_TYPE: Record<UpstreamSyncRecordDetailStatus, 'success' | 'danger'> = {
+  SUCCESS: 'success',
+  FAILED: 'danger',
+}
+
+// 上游数据同步执行记录行明细视图对象，来自 GET .../sync-records/{recordId}/details（分页），
+// 无论该行处理成功还是失败均有一条记录，rowData 是该行的原始上游数据（JSON 文本）
+export interface UpstreamSyncRecordDetailVO {
+  id: number
+  rowNo: number
+  rowData: string
+  status: UpstreamSyncRecordDetailStatus
+  failReason: string | null
+}
+
+// 通用分页响应结构，字段命名和后端 cn.nihility.rbac.common.PageResult 对齐
+export interface PageResult<T> {
+  records: T[]
+  total: number
+  page: number
+  pageSize: number
 }

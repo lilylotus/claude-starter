@@ -1,5 +1,6 @@
 package cn.nihility.rbac.identity.upstream.controller;
 
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.result.Result;
 import cn.nihility.rbac.identity.upstream.dto.UpstreamConnectionConfigRequest;
 import cn.nihility.rbac.identity.upstream.dto.UpstreamDomainConfigUpdateRequest;
@@ -10,6 +11,7 @@ import cn.nihility.rbac.identity.upstream.dto.UpstreamScheduleConfigRequest;
 import cn.nihility.rbac.identity.upstream.dto.UpstreamSourceCreateRequest;
 import cn.nihility.rbac.identity.upstream.dto.UpstreamSourceUpdateRequest;
 import cn.nihility.rbac.identity.upstream.dto.UpstreamSourceVO;
+import cn.nihility.rbac.identity.upstream.dto.UpstreamSyncRecordDetailVO;
 import cn.nihility.rbac.identity.upstream.dto.UpstreamSyncRecordVO;
 import cn.nihility.rbac.identity.upstream.service.UpstreamDomainConfigService;
 import cn.nihility.rbac.identity.upstream.service.UpstreamFieldMappingService;
@@ -27,6 +29,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -239,14 +242,36 @@ public class UpstreamSourceController {
     }
 
     /**
-     * 查询上游数据源的同步执行记录列表，按时间倒序返回。
+     * 分页查询上游数据源的同步执行记录列表，按时间倒序返回。
      *
-     * @param id 上游数据源 id
-     * @return 同步执行记录列表
+     * @param id       上游数据源 id
+     * @param page     页码，默认第 1 页
+     * @param pageSize 每页条数，默认 10 条
+     * @return 同步执行记录分页结果
      */
-    @Operation(summary = "查询同步执行记录", description = "按时间倒序返回该数据源全部数据域的同步执行记录")
+    @Operation(summary = "分页查询同步执行记录", description = "按时间倒序分页返回该数据源全部数据域的同步执行记录")
     @GetMapping("/api/identity/upstream-sources/{id}/sync-records")
-    public List<UpstreamSyncRecordVO> listSyncRecords(@PathVariable Long id) {
-        return upstreamSyncRecordService.listBySource(id);
+    public PageResult<UpstreamSyncRecordVO> listSyncRecords(@PathVariable Long id,
+            @RequestParam(required = false, defaultValue = "1") Integer page,
+            @RequestParam(required = false, defaultValue = "10") Integer pageSize) {
+        return upstreamSyncRecordService.listBySource(id, page, pageSize);
+    }
+
+    /**
+     * 分页查询某条同步执行记录的行明细，按行序号升序返回。
+     *
+     * @param id       上游数据源 id
+     * @param recordId 同步执行记录 id
+     * @param page     页码，默认第 1 页
+     * @param pageSize 每页条数，默认 10 条
+     * @return 行明细分页结果
+     */
+    @Operation(summary = "分页查询同步执行记录行明细", description = "按行序号升序分页返回该条执行记录处理过的每一行原始数据与处理结果")
+    @GetMapping("/api/identity/upstream-sources/{id}/sync-records/{recordId}/details")
+    public PageResult<UpstreamSyncRecordDetailVO> listSyncRecordDetails(@PathVariable Long id,
+            @PathVariable Long recordId,
+            @RequestParam(required = false, defaultValue = "1") Integer page,
+            @RequestParam(required = false, defaultValue = "10") Integer pageSize) {
+        return upstreamSyncRecordService.listDetailsByRecord(id, recordId, page, pageSize);
     }
 }

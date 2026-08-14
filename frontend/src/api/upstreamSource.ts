@@ -1,5 +1,6 @@
 import request from './request'
 import type {
+  PageResult,
   UpstreamConnectionConfigRequest,
   UpstreamDataType,
   UpstreamDomainConfigUpdateRequest,
@@ -10,6 +11,7 @@ import type {
   UpstreamSourceCreateRequest,
   UpstreamSourceUpdateRequest,
   UpstreamSourceVO,
+  UpstreamSyncRecordDetailVO,
   UpstreamSyncRecordVO,
 } from '@/types/upstreamSource'
 
@@ -107,7 +109,23 @@ export function replaceUpstreamFieldMappings(
   return request.put(`/identity/upstream-sources/${id}/domains/${dataType}/field-mappings`, data)
 }
 
-// 查询数据源的同步执行记录列表，按时间倒序返回
-export function listUpstreamSyncRecords(id: number): Promise<UpstreamSyncRecordVO[]> {
-  return request.get(`/identity/upstream-sources/${id}/sync-records`)
+// 分页查询数据源的同步执行记录列表，按时间倒序返回；取数结果为空的数据域不产生记录
+export function listUpstreamSyncRecords(
+  id: number,
+  page: number,
+  pageSize: number,
+): Promise<PageResult<UpstreamSyncRecordVO>> {
+  return request.get(`/identity/upstream-sources/${id}/sync-records`, { params: { page, pageSize } })
+}
+
+// 分页查询某条同步执行记录的行明细，按行序号升序返回，无论该行成功还是失败均包含在内
+export function listUpstreamSyncRecordDetails(
+  id: number,
+  recordId: number,
+  page: number,
+  pageSize: number,
+): Promise<PageResult<UpstreamSyncRecordDetailVO>> {
+  return request.get(`/identity/upstream-sources/${id}/sync-records/${recordId}/details`, {
+    params: { page, pageSize },
+  })
 }

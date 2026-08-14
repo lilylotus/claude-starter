@@ -6,15 +6,18 @@ import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.common.util.JacksonUtils;
 import cn.nihility.rbac.common.util.Sm4JdkUtils;
 import cn.nihility.rbac.identity.upstream.constant.UpstreamDataType;
+import cn.nihility.rbac.identity.upstream.constant.UpstreamSyncRecordDetailStatus;
 import cn.nihility.rbac.identity.upstream.constant.UpstreamSyncStatus;
 import cn.nihility.rbac.identity.upstream.constant.UpstreamSyncType;
 import cn.nihility.rbac.identity.upstream.dto.UpstreamFieldMappingRow;
 import cn.nihility.rbac.identity.upstream.entity.UpstreamDomainConfigEntity;
 import cn.nihility.rbac.identity.upstream.entity.UpstreamSourceEntity;
+import cn.nihility.rbac.identity.upstream.entity.UpstreamSyncRecordDetailEntity;
 import cn.nihility.rbac.identity.upstream.entity.UpstreamSyncRecordEntity;
 import cn.nihility.rbac.identity.upstream.mapper.UpstreamDomainConfigMapper;
 import cn.nihility.rbac.identity.upstream.mapper.UpstreamFieldMappingMapper;
 import cn.nihility.rbac.identity.upstream.mapper.UpstreamSourceMapper;
+import cn.nihility.rbac.identity.upstream.mapper.UpstreamSyncRecordDetailMapper;
 import cn.nihility.rbac.identity.upstream.mapper.UpstreamSyncRecordMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.time.LocalDateTime;
@@ -31,8 +34,10 @@ import org.springframework.util.StringUtils;
 /**
  * 上游数据同步执行引擎（design.md Decision 3）：按 {@link UpstreamDataType#SYNC_ORDER}
  * （组织→用户→任职）固定顺序处理数据源下已启用的数据域，每个数据域"取数→字段映射转换→
- * 逐行落库→汇总写入一条同步记录"。轮询 tick 与"立即同步一次"手动触发共用同一个入口，
- * 只是 {@code triggerType} 不同（design.md Decision 2）。
+ * 逐行落库→汇总写入一条同步记录（含每行明细）"。轮询 tick 与"立即同步一次"手动触发
+ * 共用同一个入口，只是 {@code triggerType} 不同（design.md Decision 2）。取数成功但本轮
+ * 结果为空时不写执行记录，避免高频轮询产生大量"空跑"记录（upstream-sync-record-improvements
+ * change design.md Decision 1）。
  */
 @Slf4j
 @Component
@@ -74,6 +79,9 @@ public class UpstreamSyncExecutor {
 
     /** 上游数据同步执行记录数据访问接口。 */
     private final UpstreamSyncRecordMapper upstreamSyncRecordMapper;
+
+    /** 上游数据同步执行记录明细数据访问接口。 */
+    private final UpstreamSyncRecordDetailMapper upstreamSyncRecordDetailMapper;
 
     /** 接口方式取数组件。 */
     private final UpstreamHttpFetcher upstreamHttpFetcher;
@@ -137,7 +145,9 @@ public class UpstreamSyncExecutor {
      * 默认零主键字段的历史配置，避免用空匹配条件误伤本地数据）；配置了主键字段时才
      * 取数→字段映射转换→逐行落库→汇总写入一条同步记录。取数阶段异常直接记一条
      * {@code FAILED} 记录，不影响其余数据域继续处理（design.md Decision 5 Scenario：
-     * 取数阶段异常记录为 FAILED）。
+     * 取数阶段异常记录为 FAILED）。取数成功但本轮结果为空时，只更新"上次同步时间"、
+     * 不写执行记录，避免高频轮询场景下产生大量无信息量的"空跑"记录
+     * （upstream-sync-record-improvements change design.md Decision 1）。
      *
      * @param source       上游数据源
      * @param domainConfig 数据域配置
@@ -156,7 +166,8 @@ public class UpstreamSyncExecutor {
             log.warn("上游数据源[{}]数据域[{}]未配置主键字段，跳过本次同步", source.getId(), domainConfig.getDataType());
             saveSyncRecord(source.getId(), domainConfig.getDataType(), triggerType, startTime, LocalDateTime.now(),
                     UpstreamSyncStatus.FAILED, 0, 0, 0,
-                    "该数据域尚未在字段映射中标记主键字段，无法判断新增/更新，请先在字段映射里标记至少一个主键字段后再同步");
+                    "该数据域尚未在字段映射中标记主键字段，无法判断新增/更新，请先在字段映射里标记至少一个主键字段后再同步",
+                    List.of());
             return;
         }
 
@@ -166,30 +177,51 @@ public class UpstreamSyncExecutor {
         } catch (Exception e) {
             log.warn("上游数据源[{}]数据域[{}]取数失败", source.getId(), domainConfig.getDataType(), e);
             saveSyncRecord(source.getId(), domainConfig.getDataType(), triggerType, startTime, LocalDateTime.now(),
-                    UpstreamSyncStatus.FAILED, 0, 0, 0, truncate("取数失败：" + e.getMessage()));
+                    UpstreamSyncStatus.FAILED, 0, 0, 0, truncate("取数失败：" + e.getMessage()), List.of());
+            return;
+        }
+
+        if (rawRows.isEmpty()) {
+            domainConfig.setLastSyncTime(LocalDateTime.now());
+            upstreamDomainConfigMapper.updateById(domainConfig);
             return;
         }
 
         int total = rawRows.size();
         int success = 0;
         List<String> failMessages = new ArrayList<>();
+        List<UpstreamSyncRecordDetailEntity> details = new ArrayList<>(total);
+        int rowNo = 1;
         for (Map<String, Object> rawRow : rawRows) {
+            String rowData = JacksonUtils.toJson(rawRow);
             try {
                 Map<String, Object> transformedRow = upstreamFieldMappingTransformer.transform(mappings, rawRow);
                 upstreamRowUpserter.upsertRow(domainConfig.getDataType(), transformedRow, rawRow,
                         primaryKeyFieldCodes);
                 success++;
+                details.add(UpstreamSyncRecordDetailEntity.builder()
+                        .rowNo(rowNo)
+                        .rowData(rowData)
+                        .status(UpstreamSyncRecordDetailStatus.SUCCESS)
+                        .build());
             } catch (Exception e) {
                 String message = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
                 if (failMessages.size() < FAIL_SUMMARY_MAX_ITEMS) {
                     failMessages.add(message);
                 }
+                details.add(UpstreamSyncRecordDetailEntity.builder()
+                        .rowNo(rowNo)
+                        .rowData(rowData)
+                        .status(UpstreamSyncRecordDetailStatus.FAILED)
+                        .failReason(message)
+                        .build());
             }
+            rowNo++;
         }
         int fail = total - success;
         String status = resolveStatus(total, success);
         saveSyncRecord(source.getId(), domainConfig.getDataType(), triggerType, startTime, LocalDateTime.now(),
-                status, total, success, fail, truncate(String.join("；", failMessages)));
+                status, total, success, fail, truncate(String.join("；", failMessages)), details);
 
         domainConfig.setLastSyncTime(LocalDateTime.now());
         upstreamDomainConfigMapper.updateById(domainConfig);
@@ -254,7 +286,12 @@ public class UpstreamSyncExecutor {
     }
 
     /**
-     * 写入一条同步执行记录。
+     * 写入一条同步执行记录，随后把该次执行收集到的行明细逐行写入明细表（沿用
+     * {@code UpstreamFieldMappingServiceImpl.replace} 已有的逐行 {@code insert} 风格，
+     * 不引入批量插入框架，见 upstream-sync-record-improvements change design.md
+     * Decision 3）。明细实体只在调用方收集时填充了 {@code rowNo}/{@code rowData}/
+     * {@code status}/{@code failReason}，{@code syncRecordId}/{@code sourceId}/审计字段
+     * 由本方法统一补全。
      *
      * @param sourceId    上游数据源 id
      * @param dataType    数据域
@@ -266,9 +303,11 @@ public class UpstreamSyncExecutor {
      * @param success     成功行数
      * @param fail        失败行数
      * @param failSummary 失败摘要
+     * @param details     本次执行的行明细列表，取数前置校验/取数异常两类场景传空列表
      */
     private void saveSyncRecord(Long sourceId, String dataType, String triggerType, LocalDateTime startTime,
-            LocalDateTime endTime, String status, int total, int success, int fail, String failSummary) {
+            LocalDateTime endTime, String status, int total, int success, int fail, String failSummary,
+            List<UpstreamSyncRecordDetailEntity> details) {
         LocalDateTime now = LocalDateTime.now();
         UpstreamSyncRecordEntity record = UpstreamSyncRecordEntity.builder()
                 .sourceId(sourceId)
@@ -287,6 +326,16 @@ public class UpstreamSyncExecutor {
                 .updateTime(now)
                 .build();
         upstreamSyncRecordMapper.insert(record);
+
+        for (UpstreamSyncRecordDetailEntity detail : details) {
+            detail.setSyncRecordId(record.getId());
+            detail.setSourceId(sourceId);
+            detail.setCreateBy(SYSTEM_OPERATOR);
+            detail.setCreateTime(now);
+            detail.setUpdateBy(SYSTEM_OPERATOR);
+            detail.setUpdateTime(now);
+            upstreamSyncRecordDetailMapper.insert(detail);
+        }
     }
 
     /**
