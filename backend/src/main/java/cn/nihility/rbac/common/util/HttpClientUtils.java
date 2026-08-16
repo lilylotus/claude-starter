@@ -1,7 +1,9 @@
 package cn.nihility.rbac.common.util;
 
 import cn.nihility.rbac.common.config.HttpClientProperties;
+import com.fasterxml.jackson.core.type.TypeReference;
 import java.io.IOException;
+import java.lang.reflect.Type;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
@@ -480,8 +482,9 @@ public final class HttpClientUtils {
     }
 
     /**
-     * 统一的 HTTP 响应结果载体：状态码、响应头、响应体字节数组；JSON 反序列化交由调用方用
-     * {@link JacksonUtils} 处理，本类不做自动反序列化（职责单一）。
+     * 统一的 HTTP 响应结果载体：状态码、响应头、响应体字节数组，同时提供 {@code bodyAsObj}
+     * 系列方法把响应体按 JSON 直接反序列化为调用方指定的对象类型（内部委托
+     * {@link JacksonUtils}），调用方无需再额外手动调用一次 {@link JacksonUtils} 转换。
      */
     @Getter
     @Builder
@@ -503,6 +506,40 @@ public final class HttpClientUtils {
          */
         public String bodyAsString() {
             return body != null ? new String(body, StandardCharsets.UTF_8) : "";
+        }
+
+        /**
+         * 把响应体按 JSON 反序列化为指定类型的对象。
+         *
+         * @param clazz 目标类型
+         * @param <T>   目标类型
+         * @return 反序列化后的对象
+         */
+        public <T> T bodyAsObj(Class<T> clazz) {
+            return JacksonUtils.toObj(body, clazz);
+        }
+
+        /**
+         * 把响应体按 JSON 反序列化为指定的（可带泛型的）类型，用于反序列化目标本身带泛型参数
+         * 的场景（如 {@code List<XxxDto>}）。
+         *
+         * @param typeReference 目标类型描述
+         * @param <T>           目标类型
+         * @return 反序列化后的对象
+         */
+        public <T> T bodyAsObj(TypeReference<T> typeReference) {
+            return JacksonUtils.toObj(body, typeReference);
+        }
+
+        /**
+         * 把响应体按 JSON 反序列化为指定类型的对象。
+         *
+         * @param type 目标类型
+         * @param <T>  目标类型
+         * @return 反序列化后的对象
+         */
+        public <T> T bodyAsObj(Type type) {
+            return JacksonUtils.toObj(body, type);
         }
     }
 

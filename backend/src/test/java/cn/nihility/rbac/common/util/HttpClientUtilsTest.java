@@ -51,6 +51,7 @@ class HttpClientUtilsTest {
     static void startServer() throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/echo", HttpClientUtilsTest::handleEcho);
+        server.createContext("/echo-body", HttpClientUtilsTest::handleEchoBody);
         server.createContext("/slow", HttpClientUtilsTest::handleSlow);
         server.setExecutor(null);
         server.start();
@@ -163,6 +164,20 @@ class HttpClientUtilsTest {
     }
 
     /**
+     * {@code postJson} 的响应体应能通过 {@link HttpClientUtils.HttpResult#bodyAsObj} 直接
+     * 反序列化为对象，调用方无需再手动调用一次 {@link JacksonUtils}。
+     */
+    @Test
+    void bodyAsObj_shouldDeserializeResponseBodyDirectly() {
+        Map<String, Object> body = Map.of("name", "org-a", "code", "ORG001");
+
+        HttpClientUtils.HttpResult result = HttpClientUtils.postJson(baseUrl + "/echo-body", null, body, null);
+
+        Map<String, Object> parsed = result.bodyAsObj(JacksonUtils.MAP_OBJECT_TYPE_REFERENCE);
+        assertThat(parsed).containsEntry("name", "org-a").containsEntry("code", "ORG001");
+    }
+
+    /**
      * 大小写不敏感地从 {@link #lastRequestHeaders} 中查找请求头值（{@code HttpServer}
      * 回显的请求头名称大小写与发送方不完全一致，如 {@code Content-Type} 被规范化为
      * {@code Content-type}）。
@@ -226,6 +241,20 @@ class HttpClientUtilsTest {
         exchange.sendResponseHeaders(200, response.length);
         try (OutputStream out = exchange.getResponseBody()) {
             out.write(response);
+        }
+    }
+
+    /**
+     * 处理 {@code /echo-body}：原样把请求体作为响应体返回，用于验证响应体反序列化。
+     *
+     * @param exchange HTTP 交互上下文
+     */
+    private static void handleEchoBody(HttpExchange exchange) throws IOException {
+        byte[] requestBody = exchange.getRequestBody().readAllBytes();
+        exchange.getResponseHeaders().add("Content-Type", "application/json");
+        exchange.sendResponseHeaders(200, requestBody.length);
+        try (OutputStream out = exchange.getResponseBody()) {
+            out.write(requestBody);
         }
     }
 
