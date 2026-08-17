@@ -201,3 +201,38 @@ export interface AppSyncOrgScopeSaveRequest {
   orgId: number
   includeChildren: boolean
 }
+
+// ---- 认证管理：单点登录协议配置（CAS/OAuth2.0），与后端
+// app/authconfig/constant/AuthProtocol 对齐；只做协议接入前置配置维护，不含协议运行时
+// 鉴权逻辑（见 openspec/changes/app-auth-protocol-config） ----
+
+export type AuthProtocol = 'NONE' | 'CAS' | 'OAUTH2'
+
+export const AUTH_PROTOCOL_OPTIONS: Array<{ value: AuthProtocol; label: string }> = [
+  { value: 'NONE', label: '无' },
+  { value: 'CAS', label: 'CAS' },
+  { value: 'OAUTH2', label: 'OAuth2.0' },
+]
+
+// 应用认证配置，来自 GET /api/apps/{id}/config/auth、PUT 同一地址的返回值；6 个协议接口
+// 地址由后端按该应用的 AppId 实时计算返回（路径部分，不含域名），无论 authProtocol 取值
+// 为何都会返回，方便管理员提前查看/复制
+export interface AppAuthConfigVO {
+  authProtocol: AuthProtocol
+  casServicePatterns: string[]
+  oauth2RedirectUriPatterns: string[]
+  casLoginUrl: string
+  casServiceValidateUrl: string
+  casLogoutUrl: string
+  oauthAuthorizeUrl: string
+  oauthTokenUrl: string
+  oauthUserInfoUrl: string
+}
+
+// 修改认证配置请求体，对应 PUT /api/apps/{id}/config/auth；协议类型为 CAS/OAuth2.0 时
+// 对应的匹配列表不能为空，协议类型为无时两个列表都会被后端清空（不保留旧值）
+export interface AppAuthConfigUpdateRequest {
+  authProtocol: AuthProtocol
+  casServicePatterns: string[]
+  oauth2RedirectUriPatterns: string[]
+}

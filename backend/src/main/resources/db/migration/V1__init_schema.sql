@@ -245,6 +245,25 @@ CREATE TABLE IF NOT EXISTS `tab_app_config` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
   COMMENT = '应用对外接口凭证配置表，与 tab_app 一对一，无独立 status，随所属应用整体维护';
 
+-- 应用单点登录协议配置表：与 tab_app 一对一，仅存协议类型（无/CAS/OAuth2.0）与回跳地址
+-- 匹配规则列表，不含运行时票据/令牌数据（app-auth-protocol-config change design.md
+-- Decision 1）。列名已核对 MySQL/PostgreSQL/Oracle/SQL Server 保留字：
+-- auth_protocol/cas_service_patterns/oauth2_redirect_uri_patterns 均非保留字。
+CREATE TABLE IF NOT EXISTS `tab_app_auth_config` (
+    `id`                           BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `app_id`                       BIGINT      NOT NULL COMMENT '所属应用 id，关联 tab_app.id，一对一唯一',
+    `auth_protocol`                VARCHAR(16) NOT NULL DEFAULT 'NONE' COMMENT '单点登录协议类型：NONE/CAS/OAUTH2',
+    `cas_service_patterns`         TEXT                 DEFAULT NULL COMMENT 'CAS service 参数 ANT 匹配规则列表，JSON 字符串数组，auth_protocol=NONE 时为空',
+    `oauth2_redirect_uri_patterns` TEXT                 DEFAULT NULL COMMENT 'OAuth2 redirect_uri ANT 匹配规则列表，JSON 字符串数组，auth_protocol=NONE 时为空',
+    `create_by`                    VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`                  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`                    VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`                  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_app_auth_config_app_id` (`app_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+  COMMENT = '应用单点登录协议配置表，与 tab_app 一对一，仅存协议类型与回跳地址匹配规则，不含运行时票据/令牌数据';
+
 -- 应用同步数据域配置表：每个应用固定 5 行，分别对应组织/用户/应用/角色/字典五个
 -- 数据域，每行携带"是否启用"与"每次拉取分页大小"两个属性。列名已核对
 -- MySQL/PostgreSQL/Oracle/SQL Server 保留字：app_ref_id/sync_domain/sync_enabled/
@@ -928,7 +947,7 @@ VALUES ('新增任职记录', 'PositionManagement:position:add', @position_id, 2
         @admin_user_id_text, NOW());
 
 -- 应用管理（含导入相关按钮：下载模板、批量导入；应用配置相关按钮：配置入口、重置
--- SecretKey、修改签名算法、修改同步配置——最终文案"应用配置"）
+-- SecretKey、修改签名算法、修改同步配置、修改认证管理配置——最终文案"应用配置"）
 INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
                          `create_time`, `update_by`, `update_time`)
 VALUES ('新增应用', 'AppManagement:app:add', @app_id, 2, 60, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
@@ -947,6 +966,8 @@ VALUES ('新增应用', 'AppManagement:app:add', @app_id, 2, 60, NULL, 2000, @ad
        ('修改签名算法', 'AppManagement:app:config:editSignAlgorithm', @app_id, 2, 2, NULL, 2000, @admin_user_id_text, NOW(),
         @admin_user_id_text, NOW()),
        ('修改同步配置', 'AppManagement:app:config:editSync', @app_id, 2, 1, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('修改认证管理配置', 'AppManagement:app:config:editAuth', @app_id, 2, 0, NULL, 2000, @admin_user_id_text, NOW(),
         @admin_user_id_text, NOW());
 
 -- 角色管理
@@ -1157,7 +1178,7 @@ VALUES
     ('批量导入任职记录', 'PositionManagement:position:import', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
 
 -- AppManagement（应用管理，/application/list；含应用配置能力：AppId/AccessKey/SecretKey、
--- 签名算法、同步配置）
+-- 签名算法、同步配置、认证管理配置）
 INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
 VALUES
     ('应用管理页面访问', 'AppManagement:app:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
@@ -1172,7 +1193,8 @@ VALUES
     ('应用配置页面访问', 'AppManagement:app:config', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
     ('重置 SecretKey', 'AppManagement:app:config:resetSecret', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
     ('修改签名算法', 'AppManagement:app:config:editSignAlgorithm', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
-    ('修改同步配置', 'AppManagement:app:config:editSync', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+    ('修改同步配置', 'AppManagement:app:config:editSync', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('修改认证管理配置', 'AppManagement:app:config:editAuth', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
 
 -- RoleManagement（角色管理，/permission/roles）
 INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)

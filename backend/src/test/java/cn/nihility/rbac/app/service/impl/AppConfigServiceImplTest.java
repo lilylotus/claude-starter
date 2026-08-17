@@ -8,6 +8,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import cn.nihility.rbac.app.authconfig.service.AppAuthConfigService;
 import cn.nihility.rbac.app.config.AppSecretProperties;
 import cn.nihility.rbac.app.constant.AppStatus;
 import cn.nihility.rbac.app.constant.SignAlgorithm;
@@ -83,6 +84,10 @@ class AppConfigServiceImplTest {
     @Mock
     private AppSyncConfigService appSyncConfigService;
 
+    /** 被测服务的应用单点登录协议配置业务逻辑依赖，使用 Mockito 打桩。 */
+    @Mock
+    private AppAuthConfigService appAuthConfigService;
+
     /** 被测服务实例。 */
     private AppConfigServiceImpl appConfigService;
 
@@ -94,7 +99,8 @@ class AppConfigServiceImplTest {
     @BeforeEach
     void setUp() {
         appConfigService = new AppConfigServiceImpl(appConfigMapper, appMapper, orgScopeService,
-                currentOperatorService, operationLogRecorder, appSecretProperties, appSyncConfigService);
+                currentOperatorService, operationLogRecorder, appSecretProperties, appSyncConfigService,
+                appAuthConfigService);
         lenient().when(appSecretProperties.getSm4Key()).thenReturn(SM4_KEY);
         lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.empty());
         lenient().when(orgScopeService.isOrgIdAllowed(any(), any())).thenAnswer(invocation -> orgScopeService
@@ -134,6 +140,7 @@ class AppConfigServiceImplTest {
         assertThat(captured.getUpdateTime()).isNotNull();
 
         verify(appSyncConfigService).createDefaultDomainConfigs(10L, "1");
+        verify(appAuthConfigService).createDefaultConfig(10L, "1");
     }
 
     /**

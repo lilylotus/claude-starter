@@ -1,5 +1,6 @@
 package cn.nihility.rbac.app.service.impl;
 
+import cn.nihility.rbac.app.authconfig.service.AppAuthConfigService;
 import cn.nihility.rbac.app.config.AppSecretProperties;
 import cn.nihility.rbac.app.constant.SignAlgorithm;
 import cn.nihility.rbac.app.constant.SyncMode;
@@ -69,6 +70,12 @@ public class AppConfigServiceImpl implements AppConfigService {
     private final AppSyncConfigService appSyncConfigService;
 
     /**
+     * 应用单点登录协议配置业务逻辑接口，新建应用时在同一事务内生成默认认证配置
+     * （app-auth-protocol-config change design.md Decision 2）。
+     */
+    private final AppAuthConfigService appAuthConfigService;
+
+    /**
      * {@inheritDoc}
      */
     @Override
@@ -90,6 +97,7 @@ public class AppConfigServiceImpl implements AppConfigService {
                 .build();
         appConfigMapper.insert(entity);
         appSyncConfigService.createDefaultDomainConfigs(appRefId, operator);
+        appAuthConfigService.createDefaultConfig(appRefId, operator);
     }
 
     /**

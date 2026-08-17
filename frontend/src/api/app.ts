@@ -1,5 +1,7 @@
 import request from './request'
 import type {
+  AppAuthConfigUpdateRequest,
+  AppAuthConfigVO,
   AppConfigVO,
   AppFormRequest,
   AppRow,
@@ -122,4 +124,16 @@ export function replaceAppSyncOrgScope(
   data: AppSyncOrgScopeSaveRequest[],
 ): Promise<AppSyncOrgScopeRow[]> {
   return request.put(`/apps/${id}/config/sync/domains/${domain}/org-scope`, data)
+}
+
+// ---- 认证管理：单点登录协议配置（CAS/OAuth2.0） ----
+
+// 查询应用当前的认证配置（协议类型、匹配列表、只读协议接口地址）
+export function getAppAuthConfig(id: number): Promise<AppAuthConfigVO> {
+  return request.get(`/apps/${id}/config/auth`)
+}
+
+// 修改应用的认证配置（协议类型、对应的匹配列表）
+export function updateAppAuthConfig(id: number, data: AppAuthConfigUpdateRequest): Promise<AppAuthConfigVO> {
+  return request.put(`/apps/${id}/config/auth`, data)
 }

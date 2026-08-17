@@ -86,7 +86,7 @@ AppManagement（应用管理，/application/list）
 - AppManagement:app:importTemplate   下载应用导入模板
 - AppManagement:app:import           批量导入应用
 - AppManagement:app:config                   应用配置页面访问（AppId/AccessKey/SecretKey、
-  签名算法、同步配置，/application/list/:id/config）
+  签名算法、同步配置、认证管理，/application/list/:id/config）
 - AppManagement:app:config:resetSecret       重置 SecretKey
 - AppManagement:app:config:editSignAlgorithm 修改签名算法（已废弃，前端未使用——签名算法
   编辑已合并进“基础同步配置”保存按钮，统一受 editSync 控制；权限点定义保留不删除，避免
@@ -95,6 +95,9 @@ AppManagement（应用管理，/application/list）
   开关及签名算法，组织/用户/任职/应用/角色/字典六个数据域的启用开关+拉取分页大小，组织/
   用户/任职/应用/角色五个数据域的字段级同步映射配置，以及组织/用户/任职三个数据域按应用
   配置的同步范围——全部数据或指定组织范围（可选含子孙组织））
+- AppManagement:app:config:editAuth          修改认证管理配置（单点登录协议类型：无/CAS/
+  OAuth2.0，CAS service 参数 ANT 匹配列表，OAuth2 redirect_uri ANT 匹配列表；仅做协议
+  接入前置配置维护，不含协议运行时鉴权逻辑，见 openspec/changes/app-auth-protocol-config）
 
 
 权限管理

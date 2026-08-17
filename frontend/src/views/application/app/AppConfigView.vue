@@ -11,11 +11,14 @@ import * as appApi from '@/api/app'
 import * as metadataFieldApi from '@/api/metadataField'
 import * as orgApi from '@/api/org'
 import {
+  AUTH_PROTOCOL_OPTIONS,
   SYNC_DOMAIN_FIELD_MAPPING_DOMAINS,
   SYNC_DOMAIN_OPTIONS,
   SYNC_DOMAIN_ORG_SCOPE_DOMAINS,
   TRANSFORM_TYPE_OPTIONS,
+  type AppAuthConfigVO,
   type AppConfigVO,
+  type AuthProtocol,
   type AppSyncDomainConfigVO,
   type AppSyncFieldMappingVO,
   type AppSyncOrgScopeFormItem,
@@ -38,9 +41,9 @@ const loading = ref(false)
 const loadError = ref('')
 const config = ref<AppConfigVO | null>(null)
 
-// 两个分区（基础信息/同步配置）用 el-tabs 切换展示，而不是纵向堆叠；原“接口配置”
+// 三个分区（基础信息/同步配置/认证管理）用 el-tabs 切换展示，而不是纵向堆叠；原“接口配置”
 // tab（只有签名算法一项）已合并进“同步配置”tab 的“基础同步配置”表单
-const activeTab = ref<'basic' | 'sync'>('basic')
+const activeTab = ref<'basic' | 'sync' | 'auth'>('basic')
 
 // 签名算法的本地可编辑副本，与 config.signAlgorithm 分离，未点“保存”前不影响已加载的
 // 展示态；模板位置在“同步配置”tab 的“基础同步配置”表单里，紧跟“签名校验”开关之后，
@@ -114,6 +117,7 @@ onMounted(() => {
   fetchOrgTree()
   ensureFieldMappingLoaded(syncDomainTab.value)
   ensureOrgScopeLoaded(syncDomainTab.value)
+  fetchAuthConfig()
 })
 
 function goBack() {
@@ -493,6 +497,105 @@ async function saveFieldMappings() {
     savingFieldMapping.value = false
   }
 }
+
+// ---- 认证管理：单点登录协议配置（CAS/OAuth2.0），仅做协议接入前置配置维护，不含协议
+// 运行时鉴权逻辑（见 openspec/changes/app-auth-protocol-config），前端顶部有 el-alert 提示 ----
+
+const authConfigLoading = ref(false)
+const savingAuthConfig = ref(false)
+const authProtocol = ref<AuthProtocol>('NONE')
+// service/redirect_uri 匹配规则用"单值行数组 + 增删按钮"编辑，与 notifyParamRows 的
+// key-value 两列不同，这里每行只有一个 ANT 表达式字符串
+const casPatternRows = ref<string[]>([])
+const oauth2PatternRows = ref<string[]>([])
+// 6 个只读协议接口地址（路径部分），由后端按当前应用的 AppId 计算返回
+const authUrls = reactive({
+  casLoginUrl: '',
+  casServiceValidateUrl: '',
+  casLogoutUrl: '',
+  oauthAuthorizeUrl: '',
+  oauthTokenUrl: '',
+  oauthUserInfoUrl: '',
+})
+
+// OAuth2 授权接口参数说明，纯静态文案，不依赖接口返回
+const OAUTH_AUTHORIZE_PARAMS = [
+  { name: 'response_type', required: '必选', desc: '授权类型，固定值 "code"' },
+  { name: 'client_id', required: '必选', desc: '应用 ID（AppId）' },
+  { name: 'redirect_uri', required: '可选', desc: '重定向 URI' },
+  { name: 'scope', required: '可选', desc: '申请的权限范围' },
+  { name: 'state', required: '可选', desc: '客户端当前状态，认证服务器原样返回' },
+]
+
+function applyAuthConfig(data: AppAuthConfigVO) {
+  authProtocol.value = data.authProtocol
+  casPatternRows.value = [...data.casServicePatterns]
+  oauth2PatternRows.value = [...data.oauth2RedirectUriPatterns]
+  authUrls.casLoginUrl = data.casLoginUrl
+  authUrls.casServiceValidateUrl = data.casServiceValidateUrl
+  authUrls.casLogoutUrl = data.casLogoutUrl
+  authUrls.oauthAuthorizeUrl = data.oauthAuthorizeUrl
+  authUrls.oauthTokenUrl = data.oauthTokenUrl
+  authUrls.oauthUserInfoUrl = data.oauthUserInfoUrl
+}
+
+async function fetchAuthConfig() {
+  authConfigLoading.value = true
+  try {
+    const data = await appApi.getAppAuthConfig(appId.value)
+    applyAuthConfig(data)
+  } finally {
+    authConfigLoading.value = false
+  }
+}
+
+function addCasPatternRow() {
+  casPatternRows.value.push('')
+}
+
+function removeCasPatternRow(index: number) {
+  casPatternRows.value.splice(index, 1)
+}
+
+function addOauth2PatternRow() {
+  oauth2PatternRows.value.push('')
+}
+
+function removeOauth2PatternRow(index: number) {
+  oauth2PatternRows.value.splice(index, 1)
+}
+
+// 前端做一次快速校验（协议为 CAS/OAuth2.0 时至少一条非空规则），避免明显不合法的输入还要
+// 走一次网络请求才被后端拒绝；后端仍会做同样的校验兜底
+function validateAuthConfig(): string {
+  if (authProtocol.value === 'CAS' && casPatternRows.value.every((row) => !row.trim())) {
+    return '协议类型为 CAS 时，service 匹配列表至少需要一条规则'
+  }
+  if (authProtocol.value === 'OAUTH2' && oauth2PatternRows.value.every((row) => !row.trim())) {
+    return '协议类型为 OAuth2.0 时，redirect_uri 匹配列表至少需要一条规则'
+  }
+  return ''
+}
+
+async function saveAuthConfig() {
+  const validationError = validateAuthConfig()
+  if (validationError) {
+    ElMessage.error(validationError)
+    return
+  }
+  savingAuthConfig.value = true
+  try {
+    const data = await appApi.updateAppAuthConfig(appId.value, {
+      authProtocol: authProtocol.value,
+      casServicePatterns: casPatternRows.value.map((row) => row.trim()).filter(Boolean),
+      oauth2RedirectUriPatterns: oauth2PatternRows.value.map((row) => row.trim()).filter(Boolean),
+    })
+    applyAuthConfig(data)
+    ElMessage.success('保存成功')
+  } finally {
+    savingAuthConfig.value = false
+  }
+}
 </script>
 
 <template>
@@ -765,6 +868,111 @@ async function saveFieldMappings() {
           </el-tab-pane>
         </el-tabs>
       </el-tab-pane>
+
+      <el-tab-pane label="认证管理" name="auth">
+        <div v-loading="authConfigLoading">
+          <el-alert
+            class="app-config__auth-alert"
+            type="info"
+            :closable="false"
+            show-icon
+            title="当前仅支持协议配置维护，协议运行时接口尚未开放"
+          />
+
+          <el-form label-width="150px">
+            <el-form-item label="单点登录协议">
+              <el-select v-model="authProtocol" style="width: 200px">
+                <el-option v-for="option in AUTH_PROTOCOL_OPTIONS" :key="option.value" :label="option.label" :value="option.value" />
+              </el-select>
+            </el-form-item>
+
+            <template v-if="authProtocol === 'CAS'">
+              <el-form-item label="service 匹配列表">
+                <div class="app-config__param-rows">
+                  <div v-for="(_, index) in casPatternRows" :key="index" class="app-config__auth-pattern-row">
+                    <el-input v-model="casPatternRows[index]" placeholder="ANT 表达式，如 https://partner.example.com/**" />
+                    <el-button link :icon="Delete" type="danger" @click="removeCasPatternRow(index)" />
+                  </div>
+                  <el-button link :icon="Plus" @click="addCasPatternRow">添加匹配规则</el-button>
+                </div>
+              </el-form-item>
+
+              <el-form-item v-if="hasPermission('AppManagement:app:config:editAuth')">
+                <el-button type="primary" :loading="savingAuthConfig" @click="saveAuthConfig">保存</el-button>
+              </el-form-item>
+
+              <h4 class="app-config__sync-group-title">CAS 协议接口</h4>
+              <div class="app-config__row">
+                <span class="app-config__label">单点登录接口</span>
+                <span class="app-config__value">{{ authUrls.casLoginUrl }}</span>
+                <el-button link :icon="CopyDocument" @click="copyText(authUrls.casLoginUrl)">复制</el-button>
+              </div>
+              <div class="app-config__row">
+                <span class="app-config__label">票据验证接口</span>
+                <span class="app-config__value">{{ authUrls.casServiceValidateUrl }}</span>
+                <el-button link :icon="CopyDocument" @click="copyText(authUrls.casServiceValidateUrl)">复制</el-button>
+              </div>
+              <div class="app-config__row">
+                <span class="app-config__label">单点登出接口</span>
+                <span class="app-config__value">{{ authUrls.casLogoutUrl }}</span>
+                <el-button link :icon="CopyDocument" @click="copyText(authUrls.casLogoutUrl)">复制</el-button>
+              </div>
+            </template>
+
+            <template v-else-if="authProtocol === 'OAUTH2'">
+              <el-form-item label="redirect_uri 匹配列表">
+                <div class="app-config__param-rows">
+                  <div v-for="(_, index) in oauth2PatternRows" :key="index" class="app-config__auth-pattern-row">
+                    <el-input
+                      v-model="oauth2PatternRows[index]"
+                      placeholder="ANT 表达式，如 https://partner.example.com/callback"
+                    />
+                    <el-button link :icon="Delete" type="danger" @click="removeOauth2PatternRow(index)" />
+                  </div>
+                  <el-button link :icon="Plus" @click="addOauth2PatternRow">添加匹配规则</el-button>
+                </div>
+              </el-form-item>
+
+              <el-form-item v-if="hasPermission('AppManagement:app:config:editAuth')">
+                <el-button type="primary" :loading="savingAuthConfig" @click="saveAuthConfig">保存</el-button>
+              </el-form-item>
+
+              <h4 class="app-config__sync-group-title">OAuth2.0 协议接口</h4>
+              <div class="app-config__row">
+                <span class="app-config__label">授权接口</span>
+                <span class="app-config__value">{{ authUrls.oauthAuthorizeUrl }}</span>
+                <el-button link :icon="CopyDocument" @click="copyText(authUrls.oauthAuthorizeUrl)">复制</el-button>
+              </div>
+              <el-table :data="OAUTH_AUTHORIZE_PARAMS" border size="small" class="app-config__auth-param-table">
+                <el-table-column label="参数名" prop="name" width="140" />
+                <el-table-column label="是否必选" prop="required" width="90" />
+                <el-table-column label="说明" prop="desc" />
+              </el-table>
+              <div class="app-config__row">
+                <span class="app-config__label">Access Token 接口</span>
+                <span class="app-config__value">{{ authUrls.oauthTokenUrl }}</span>
+                <el-button link :icon="CopyDocument" @click="copyText(authUrls.oauthTokenUrl)">复制</el-button>
+              </div>
+              <div class="app-config__row">
+                <span class="app-config__label">用户信息接口</span>
+                <span class="app-config__value">{{ authUrls.oauthUserInfoUrl }}</span>
+                <el-button link :icon="CopyDocument" @click="copyText(authUrls.oauthUserInfoUrl)">复制</el-button>
+              </div>
+            </template>
+
+            <el-form-item v-else>
+              <el-button
+                v-if="hasPermission('AppManagement:app:config:editAuth')"
+                type="primary"
+                :loading="savingAuthConfig"
+                @click="saveAuthConfig"
+              >
+                保存
+              </el-button>
+            </el-form-item>
+          </el-form>
+        </div>
+      </el-tab-pane>
     </el-tabs>
 
     <el-dialog
@@ -1023,5 +1231,21 @@ async function saveFieldMappings() {
 
 .app-config__field-mapping-save {
   margin-top: 12px;
+}
+
+// 认证管理：顶部提示条 + 匹配规则行编辑（单值，区别于同步配置通知参数的 key-value 两列）
+.app-config__auth-alert {
+  margin-bottom: 16px;
+}
+
+.app-config__auth-pattern-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-config__auth-param-table {
+  width: 100%;
+  margin: 8px 0 4px;
 }
 </style>
