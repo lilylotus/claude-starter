@@ -79,7 +79,7 @@ class OpenApiSignInterceptorTest {
     }
 
     /**
-     * 缺少 {@code X-App-Key} 请求头时应直接拒绝。
+     * 缺少 {@code appKey} 请求头时应直接拒绝。
      */
     @Test
     void preHandle_shouldRejectWhenAppKeyHeaderMissing() {
@@ -308,19 +308,19 @@ class OpenApiSignInterceptorTest {
             signParams.put(kv[0], kv[1]);
             request.setParameter(kv[0], kv[1]);
         }
-        signParams.put(SignConstants.QUERY_KEY_APP_KEY, ACCESS_KEY);
-        signParams.put(SignConstants.QUERY_KEY_SIGN_METHOD, SignConstants.signMethodOf(signAlgorithm));
-        signParams.put(SignConstants.QUERY_KEY_TS, String.valueOf(ts));
-        signParams.put(SignConstants.QUERY_KEY_NONCE, nonce);
+        String signMethod = SignConstants.signMethodOf(signAlgorithm);
+        signParams.put(SignConstants.HEADER_APP_KEY, ACCESS_KEY);
+        signParams.put(SignConstants.HEADER_SIGN_METHOD, signMethod);
+        signParams.put(SignConstants.HEADER_TIMESTAMP, String.valueOf(ts));
+        signParams.put(SignConstants.HEADER_NONCE, nonce);
 
         String urlSign = signAlgorithmCodec.hmac(signAlgorithm, SECRET_KEY_PLAIN,
                 SignCanonicalizer.canonicalize(signParams));
 
-        request.setParameter(SignConstants.QUERY_KEY_APP_KEY, ACCESS_KEY);
-        request.setParameter(SignConstants.QUERY_KEY_SIGN_METHOD, SignConstants.signMethodOf(signAlgorithm));
-        request.setParameter(SignConstants.QUERY_KEY_TS, String.valueOf(ts));
-        request.setParameter(SignConstants.QUERY_KEY_NONCE, nonce);
-        request.setParameter(SignConstants.QUERY_KEY_SIGNATURE, urlSign);
+        request.addHeader(SignConstants.HEADER_SIGN_METHOD, signMethod);
+        request.addHeader(SignConstants.HEADER_TIMESTAMP, String.valueOf(ts));
+        request.addHeader(SignConstants.HEADER_NONCE, nonce);
+        request.addHeader(SignConstants.HEADER_SIGNATURE, urlSign);
         return request;
     }
 }

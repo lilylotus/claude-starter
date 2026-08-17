@@ -22,7 +22,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
 
 /**
  * 对外拉取接口的请求校验入口（app-sync-notify-pull-api change design.md Decision 9/10）：
- * 解析 {@code X-App-Key} 定位应用与其对外接口配置，{@code needSign=true} 时执行验签；
+ * 解析 {@code appKey} 请求头定位应用与其对外接口配置，{@code needSign=true} 时执行验签；
  * 校验通过后把应用配置标记进 {@link OpenApiCallerContext}，供 controller/service 层读取。
  * 请求的 {@code dataType} 是否落在该应用允许同步的数据域内不在本拦截器内校验——按
  * spec 要求"不在范围内时返回空结果而不是报错"，与拦截器"拒绝请求"的语义不符，留给
@@ -65,7 +65,7 @@ public class OpenApiSignInterceptor implements HandlerInterceptor {
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         String accessKey = request.getHeader(SignConstants.HEADER_APP_KEY);
         if (!StringUtils.hasText(accessKey)) {
-            throw new BusinessException(UNAUTHORIZED_CODE, "缺少 X-App-Key 请求头");
+            throw new BusinessException(UNAUTHORIZED_CODE, "缺少 appKey 请求头");
         }
 
         AppConfigEntity appConfig = appConfigMapper.selectOne(
@@ -107,36 +107,43 @@ public class OpenApiSignInterceptor implements HandlerInterceptor {
      * 按 design.md Decision 10 校验签名：签名方法须与应用当前签名算法一致、时间戳未过期、
      * nonce 未被重放、重新计算的 urlSign 与请求携带的 {@code signature} 一致。拉取接口均为
      * GET 请求，不携带请求体，因此只校验 64 位十六进制的 urlSign（不涉及 128 位的 body 签名）。
+     * 签名方法/时间戳/随机数/签名结果均从请求头读取（move-sync-sign-params-to-headers change
+     * design.md Decision 2），业务 query 参数不再包含任何签名字段。
      *
      * @param request   当前请求
      * @param appConfig 应用对外接口配置
      * @return 验签是否通过
      */
     private boolean verifySignature(HttpServletRequest request, AppConfigEntity appConfig) {
-        Map<String, String> queryParams = extractQueryParams(request);
-        String signature = queryParams.remove(SignConstants.QUERY_KEY_SIGNATURE);
+        String signature = request.getHeader(SignConstants.HEADER_SIGNATURE);
         if (!StringUtils.hasText(signature) || signature.length() != URL_SIGN_HEX_LENGTH) {
             return false;
         }
 
-        String signMethod = queryParams.get(SignConstants.QUERY_KEY_SIGN_METHOD);
+        String signMethod = request.getHeader(SignConstants.HEADER_SIGN_METHOD);
         if (!Objects.equals(signMethod, SignConstants.signMethodOf(appConfig.getSignAlgorithm()))) {
             return false;
         }
 
-        String tsText = queryParams.get(SignConstants.QUERY_KEY_TS);
+        String tsText = request.getHeader(SignConstants.HEADER_TIMESTAMP);
         if (!isTimestampValid(tsText)) {
             return false;
         }
 
-        String nonce = queryParams.get(SignConstants.QUERY_KEY_NONCE);
+        String nonce = request.getHeader(SignConstants.HEADER_NONCE);
         if (!StringUtils.hasText(nonce) || !nonceStore.tryConsume(appConfig.getAccessKey(), nonce)) {
             return false;
         }
 
+        Map<String, String> signParams = extractQueryParams(request);
+        signParams.put(SignConstants.HEADER_APP_KEY, appConfig.getAccessKey());
+        signParams.put(SignConstants.HEADER_SIGN_METHOD, signMethod);
+        signParams.put(SignConstants.HEADER_TIMESTAMP, tsText);
+        signParams.put(SignConstants.HEADER_NONCE, nonce);
+
         String secretKey = Sm4JdkUtils.decrypt(appConfig.getSecretKey(), appSecretProperties.getSm4Key());
         String urlSign = signAlgorithmCodec.hmac(appConfig.getSignAlgorithm(), secretKey,
-                SignCanonicalizer.canonicalize(queryParams));
+                SignCanonicalizer.canonicalize(signParams));
         return signature.equalsIgnoreCase(urlSign);
     }
 

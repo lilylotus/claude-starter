@@ -15,11 +15,9 @@ import cn.nihility.rbac.sync.notify.entity.AppNotifyRecordEntity;
 import cn.nihility.rbac.sync.notify.mapper.AppNotifyRecordMapper;
 import cn.nihility.rbac.sync.notify.service.AppNotifyService;
 import cn.nihility.rbac.sync.sign.NotifySignatureAppender;
-import cn.nihility.rbac.sync.sign.SignConstants;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
-import java.util.HashMap;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -95,13 +93,11 @@ public class AppNotifyServiceImpl implements AppNotifyService {
         int notifyStatus;
         try {
             String secretKey = Sm4JdkUtils.decrypt(target.getSecretKey(), appSecretProperties.getSm4Key());
-            String url = notifySignatureAppender.appendSignatureIfNeeded(target.getNotifyUrl(),
+            Map<String, String> headers = notifySignatureAppender.buildSignatureHeaders(
                     Boolean.TRUE.equals(target.getNeedSign()), target.getSignAlgorithm(), target.getAccessKey(),
                     secretKey, requestBody);
 
-            Map<String, String> headers = new HashMap<>();
-            headers.put(SignConstants.HEADER_APP_KEY, target.getAccessKey());
-            HttpClientUtils.HttpResult result = HttpClientUtils.postBinary(url, headers,
+            HttpClientUtils.HttpResult result = HttpClientUtils.postBinary(target.getNotifyUrl(), headers,
                     requestBody.getBytes(StandardCharsets.UTF_8), "application/json;charset=UTF-8",
                     NOTIFY_RESPONSE_TIMEOUT_MILLIS);
 

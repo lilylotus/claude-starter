@@ -17,13 +17,13 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 应用数据同步对外拉取接口，路径前缀 {@code /open/api/sync}（区别于 {@code /api/**} 管理端
  * 前缀，语义上是外部系统开放接口），面向持有合法 AccessKey 的外部应用调用，不受管理端登录
- * 鉴权/管辖组织范围过滤器影响，鉴权只走 {@code X-App-Key} + 签名
+ * 鉴权/管辖组织范围过滤器影响，鉴权只走 {@code appKey} 请求头 + 签名
  * （{@code cn.nihility.rbac.sync.sign.OpenApiSignInterceptor}）（app-sync-notify-pull-api
  * change design.md Decision 9）。
  */
 @RestController
 @RequiredArgsConstructor
-@Tag(name = "应用数据同步-拉取", description = "面向外部应用的对外数据拉取接口，鉴权仅依赖 X-App-Key + 签名")
+@Tag(name = "应用数据同步-拉取", description = "面向外部应用的对外数据拉取接口，鉴权仅依赖 appKey 请求头 + 签名")
 public class SyncNotifyPullController {
 
     /** 对外拉取业务逻辑接口。 */

@@ -21,6 +21,7 @@ import cn.nihility.rbac.sync.notify.entity.AppNotifyRecordEntity;
 import cn.nihility.rbac.sync.notify.mapper.AppNotifyRecordMapper;
 import cn.nihility.rbac.sync.sign.NotifySignatureAppender;
 import cn.nihility.rbac.sync.sign.SignAlgorithmCodecImpl;
+import cn.nihility.rbac.sync.sign.SignConstants;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -107,7 +108,7 @@ class AppNotifyServiceImplTest {
 
     /**
      * 通知成功时应携带正确的请求体（sequence/dataType/operationType/bizId）与
-     * {@code X-App-Key} 请求头，且落库为成功状态。
+     * {@code appKey} 请求头，且落库为成功状态。
      */
     @Test
     void notifyIfConfigured_shouldSendCorrectPayloadAndRecordSuccess() {
@@ -233,7 +234,7 @@ class AppNotifyServiceImplTest {
 
     private static void handleOk(HttpExchange exchange) throws IOException {
         lastReceivedBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-        lastReceivedAppKeyHeader = exchange.getRequestHeaders().getFirst("X-App-Key");
+        lastReceivedAppKeyHeader = exchange.getRequestHeaders().getFirst(SignConstants.HEADER_APP_KEY);
         byte[] response = "ok".getBytes(StandardCharsets.UTF_8);
         exchange.sendResponseHeaders(200, response.length);
         try (OutputStream out = exchange.getResponseBody()) {
