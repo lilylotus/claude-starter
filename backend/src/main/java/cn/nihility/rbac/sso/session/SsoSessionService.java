@@ -1,11 +1,11 @@
 package cn.nihility.rbac.sso.session;
 
+import cn.nihility.rbac.common.util.RedisUtils;
 import cn.nihility.rbac.sso.config.RbacSsoProperties;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -21,9 +21,6 @@ public class SsoSessionService {
     /** Redis key 前缀，完整 key 为该前缀 + 会话令牌。 */
     private static final String SESSION_KEY_PREFIX = "sso:session:";
 
-    /** 字符串 Redis 模板。 */
-    private final StringRedisTemplate stringRedisTemplate;
-
     /** SSO 相关配置：会话有效期。 */
     private final RbacSsoProperties ssoProperties;
 
@@ -35,8 +32,8 @@ public class SsoSessionService {
      */
     public String issue(Long userId) {
         String token = newTokenValue();
-        stringRedisTemplate.opsForValue().set(SESSION_KEY_PREFIX + token, String.valueOf(userId),
-                ssoProperties.getSessionExpireSeconds(), TimeUnit.SECONDS);
+        RedisUtils.set(SESSION_KEY_PREFIX + token, String.valueOf(userId), ssoProperties.getSessionExpireSeconds(),
+                TimeUnit.SECONDS);
         return token;
     }
 
@@ -50,11 +47,7 @@ public class SsoSessionService {
         if (!StringUtils.hasText(token)) {
             return Optional.empty();
         }
-        String userIdStr = stringRedisTemplate.opsForValue().get(SESSION_KEY_PREFIX + token);
-        if (!StringUtils.hasText(userIdStr)) {
-            return Optional.empty();
-        }
-        return Optional.of(Long.valueOf(userIdStr));
+        return RedisUtils.get(SESSION_KEY_PREFIX + token).map(Long::valueOf);
     }
 
     /**
@@ -66,7 +59,7 @@ public class SsoSessionService {
         if (!StringUtils.hasText(token)) {
             return;
         }
-        stringRedisTemplate.delete(SESSION_KEY_PREFIX + token);
+        RedisUtils.delete(SESSION_KEY_PREFIX + token);
     }
 
     /**

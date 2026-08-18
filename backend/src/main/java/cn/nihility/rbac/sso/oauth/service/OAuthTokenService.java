@@ -1,6 +1,6 @@
 package cn.nihility.rbac.sso.oauth.service;
 
-import cn.nihility.rbac.common.util.JacksonUtils;
+import cn.nihility.rbac.common.util.RedisUtils;
 import cn.nihility.rbac.sso.config.RbacSsoProperties;
 import cn.nihility.rbac.sso.oauth.dto.IssuedToken;
 import cn.nihility.rbac.sso.oauth.dto.OAuthCodePayload;
@@ -10,7 +10,6 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -35,9 +34,6 @@ public class OAuthTokenService {
     /** 令牌类型：固定为 {@code Bearer}。 */
     public static final String TOKEN_TYPE_BEARER = "Bearer";
 
-    /** 字符串 Redis 模板。 */
-    private final StringRedisTemplate stringRedisTemplate;
-
     /** SSO 相关配置：各类凭证有效期。 */
     private final RbacSsoProperties ssoProperties;
 
@@ -53,8 +49,8 @@ public class OAuthTokenService {
     public String issueCode(String clientId, String redirectUri, Long userId, String scope) {
         String code = newHex();
         OAuthCodePayload payload = new OAuthCodePayload(clientId, redirectUri, userId, scope);
-        stringRedisTemplate.opsForValue().set(CODE_KEY_PREFIX + code, JacksonUtils.toJson(payload),
-                ssoProperties.getOauthCodeExpireSeconds(), TimeUnit.SECONDS);
+        RedisUtils.setObject(CODE_KEY_PREFIX + code, payload, ssoProperties.getOauthCodeExpireSeconds(),
+                TimeUnit.SECONDS);
         return code;
     }
 
@@ -69,12 +65,12 @@ public class OAuthTokenService {
             return Optional.empty();
         }
         String redisKey = CODE_KEY_PREFIX + code;
-        String json = stringRedisTemplate.opsForValue().get(redisKey);
-        if (!StringUtils.hasText(json)) {
+        Optional<OAuthCodePayload> payload = RedisUtils.getObject(redisKey, OAuthCodePayload.class);
+        if (payload.isEmpty()) {
             return Optional.empty();
         }
-        stringRedisTemplate.delete(redisKey);
-        return Optional.of(JacksonUtils.toObj(json, OAuthCodePayload.class));
+        RedisUtils.delete(redisKey);
+        return payload;
     }
 
     /**
@@ -89,7 +85,7 @@ public class OAuthTokenService {
         String accessToken = writeAccessToken(clientId, userId, scope);
         String refreshToken = newHex();
         OAuthRefreshPayload refreshPayload = new OAuthRefreshPayload(clientId, userId, scope);
-        stringRedisTemplate.opsForValue().set(REFRESH_KEY_PREFIX + refreshToken, JacksonUtils.toJson(refreshPayload),
+        RedisUtils.setObject(REFRESH_KEY_PREFIX + refreshToken, refreshPayload,
                 ssoProperties.getOauthRefreshTokenExpireSeconds(), TimeUnit.SECONDS);
         return new IssuedToken(accessToken, refreshToken, ssoProperties.getOauthTokenExpireSeconds());
     }
@@ -116,11 +112,7 @@ public class OAuthTokenService {
         if (!StringUtils.hasText(token)) {
             return Optional.empty();
         }
-        String json = stringRedisTemplate.opsForValue().get(TOKEN_KEY_PREFIX + token);
-        if (!StringUtils.hasText(json)) {
-            return Optional.empty();
-        }
-        return Optional.of(JacksonUtils.toObj(json, OAuthTokenPayload.class));
+        return RedisUtils.getObject(TOKEN_KEY_PREFIX + token, OAuthTokenPayload.class);
     }
 
     /**
@@ -133,11 +125,7 @@ public class OAuthTokenService {
         if (!StringUtils.hasText(refreshToken)) {
             return Optional.empty();
         }
-        String json = stringRedisTemplate.opsForValue().get(REFRESH_KEY_PREFIX + refreshToken);
-        if (!StringUtils.hasText(json)) {
-            return Optional.empty();
-        }
-        return Optional.of(JacksonUtils.toObj(json, OAuthRefreshPayload.class));
+        return RedisUtils.getObject(REFRESH_KEY_PREFIX + refreshToken, OAuthRefreshPayload.class);
     }
 
     /**
@@ -152,8 +140,8 @@ public class OAuthTokenService {
     private String writeAccessToken(String clientId, Long userId, String scope) {
         String accessToken = newHex();
         OAuthTokenPayload payload = new OAuthTokenPayload(clientId, userId, scope);
-        stringRedisTemplate.opsForValue().set(TOKEN_KEY_PREFIX + accessToken, JacksonUtils.toJson(payload),
-                ssoProperties.getOauthTokenExpireSeconds(), TimeUnit.SECONDS);
+        RedisUtils.setObject(TOKEN_KEY_PREFIX + accessToken, payload, ssoProperties.getOauthTokenExpireSeconds(),
+                TimeUnit.SECONDS);
         return accessToken;
     }
 

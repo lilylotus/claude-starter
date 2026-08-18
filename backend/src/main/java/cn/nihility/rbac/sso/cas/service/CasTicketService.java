@@ -1,13 +1,12 @@
 package cn.nihility.rbac.sso.cas.service;
 
-import cn.nihility.rbac.common.util.JacksonUtils;
+import cn.nihility.rbac.common.util.RedisUtils;
 import cn.nihility.rbac.sso.cas.dto.CasTicketPayload;
 import cn.nihility.rbac.sso.config.RbacSsoProperties;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -26,9 +25,6 @@ public class CasTicketService {
     /** Redis key 前缀，完整 key 为该前缀 + 票据。 */
     private static final String REDIS_KEY_PREFIX = "cas:st:";
 
-    /** 字符串 Redis 模板。 */
-    private final StringRedisTemplate stringRedisTemplate;
-
     /** SSO 相关配置：CAS 票据有效期。 */
     private final RbacSsoProperties ssoProperties;
 
@@ -43,8 +39,8 @@ public class CasTicketService {
     public String issue(String appId, String service, Long userId) {
         String ticket = TICKET_PREFIX + newHex();
         CasTicketPayload payload = new CasTicketPayload(appId, service, userId);
-        stringRedisTemplate.opsForValue().set(REDIS_KEY_PREFIX + ticket, JacksonUtils.toJson(payload),
-                ssoProperties.getCasTicketExpireSeconds(), TimeUnit.SECONDS);
+        RedisUtils.setObject(REDIS_KEY_PREFIX + ticket, payload, ssoProperties.getCasTicketExpireSeconds(),
+                TimeUnit.SECONDS);
         return ticket;
     }
 
@@ -59,12 +55,12 @@ public class CasTicketService {
             return Optional.empty();
         }
         String redisKey = REDIS_KEY_PREFIX + ticket;
-        String json = stringRedisTemplate.opsForValue().get(redisKey);
-        if (!StringUtils.hasText(json)) {
+        Optional<CasTicketPayload> payload = RedisUtils.getObject(redisKey, CasTicketPayload.class);
+        if (payload.isEmpty()) {
             return Optional.empty();
         }
-        stringRedisTemplate.delete(redisKey);
-        return Optional.of(JacksonUtils.toObj(json, CasTicketPayload.class));
+        RedisUtils.delete(redisKey);
+        return payload;
     }
 
     /**

@@ -10,9 +10,12 @@ import cn.nihility.rbac.auth.config.RbacLoginProperties;
 import cn.nihility.rbac.auth.constant.AuthErrorCode;
 import cn.nihility.rbac.auth.dto.TokenPair;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.common.util.RedisUtils;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -27,11 +30,19 @@ import org.springframework.data.redis.core.ValueOperations;
  * （password-login-auth spec.md "口令登录"/"access-key 刷新"相关 Scenario）。
  * 用一个内存 {@link Map} 模拟 Redis 中 {@code user:identity-token:<userId>} 这条会话 Hash，
  * 使断言可以直接读取该 Hash 的最新内容，而不必逐个字段单独打桩。
+ * <p>
+ * 本类不依赖 Spring 容器，但被测服务经由 {@link RedisUtils} 间接依赖的
+ * {@link StringRedisTemplate} 是 JVM 级静态单例——{@link BeforeAll}/{@link AfterAll} 保存并
+ * 还原 {@link RedisUtils} 在本类执行前后的原始状态，避免污染同一 JVM 内其它真实起 Spring
+ * 容器/Redis 连接的测试用例（Gradle 默认在同一 JVM 内顺序执行多个测试类）。
  */
 @ExtendWith(MockitoExtension.class)
 class TokenServiceImplTest {
 
-    /** 被测服务的 Redis 模板依赖，使用 Mockito 打桩。 */
+    /** 本类执行前 {@link RedisUtils} 生效的原始模板，{@link #restoreRedisUtils()} 还原用。 */
+    private static StringRedisTemplate originalStringRedisTemplate;
+
+    /** 被测服务经由 {@link RedisUtils} 间接依赖的 Redis 模板，使用 Mockito 打桩。 */
     @Mock
     private StringRedisTemplate stringRedisTemplate;
 
@@ -54,6 +65,23 @@ class TokenServiceImplTest {
 
     /** 被测服务实例。 */
     private TokenServiceImpl tokenService;
+
+    /**
+     * 本类第一个用例执行前保存 {@link RedisUtils} 当前生效的原始模板。
+     */
+    @BeforeAll
+    static void captureOriginalRedisUtilsState() {
+        originalStringRedisTemplate = RedisUtils.current();
+    }
+
+    /**
+     * 本类全部用例执行完毕后把 {@link RedisUtils} 还原为原始模板，避免影响同一 JVM 内后续
+     * 执行的其它测试类。
+     */
+    @AfterAll
+    static void restoreRedisUtils() {
+        RedisUtils.configure(originalStringRedisTemplate);
+    }
 
     /**
      * 每个用例执行前重新构造被测服务，并把 Mockito 打桩的 Redis 操作接口接到内存 Map 上。
@@ -93,7 +121,8 @@ class TokenServiceImplTest {
             return hashStore.getOrDefault(key, Map.of());
         });
 
-        tokenService = new TokenServiceImpl(stringRedisTemplate, loginProperties);
+        RedisUtils.configure(stringRedisTemplate);
+        tokenService = new TokenServiceImpl(loginProperties);
     }
 
     /**

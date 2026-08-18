@@ -5,6 +5,7 @@ import cn.nihility.rbac.auth.constant.AuthErrorCode;
 import cn.nihility.rbac.auth.dto.TokenPair;
 import cn.nihility.rbac.auth.service.TokenService;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.common.util.RedisUtils;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -14,15 +15,13 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 
 /**
  * Redis 会话令牌业务逻辑实现（password-login-auth change design.md Decision 3）：以
  * {@code user:} 为前缀维护三类记录——{@code user:identity-token:<userId>} 会话 Hash、
  * {@code user:access-token:<accessKey>}/{@code user:refresh-token:<refreshKey>} 两个
- * 反查记录，均使用 {@link StringRedisTemplate}（值均为字符串，无需自定义序列化器）。
+ * 反查记录，均通过 {@link RedisUtils} 操作（值均为字符串，无需自定义序列化器）。
  */
 @Service
 @RequiredArgsConstructor
@@ -49,9 +48,6 @@ public class TokenServiceImpl implements TokenService {
     /** 会话 Hash 中 refresh-key 过期时间（epoch millis）字段名。 */
     private static final String FIELD_REFRESH_EXPIRE_AT = "refreshExpireAt";
 
-    /** 字符串 Redis 模板，Spring Boot 已自动装配，无需自定义序列化器。 */
-    private final StringRedisTemplate stringRedisTemplate;
-
     /** 登录相关配置：access/refresh 令牌有效期。 */
     private final RbacLoginProperties loginProperties;
 
@@ -73,12 +69,12 @@ public class TokenServiceImpl implements TokenService {
         hash.put(FIELD_REFRESH_EXPIRE_AT, String.valueOf(refreshExpireAtMillis));
 
         String identityKey = IDENTITY_TOKEN_PREFIX + userId;
-        stringRedisTemplate.opsForHash().putAll(identityKey, hash);
-        stringRedisTemplate.expire(identityKey, loginProperties.getRefreshTokenExpireSeconds(), TimeUnit.SECONDS);
+        RedisUtils.putHash(identityKey, hash);
+        RedisUtils.expire(identityKey, loginProperties.getRefreshTokenExpireSeconds(), TimeUnit.SECONDS);
 
-        stringRedisTemplate.opsForValue().set(ACCESS_TOKEN_PREFIX + accessKey, String.valueOf(userId),
+        RedisUtils.set(ACCESS_TOKEN_PREFIX + accessKey, String.valueOf(userId),
                 loginProperties.getAccessTokenExpireSeconds(), TimeUnit.SECONDS);
-        stringRedisTemplate.opsForValue().set(REFRESH_TOKEN_PREFIX + refreshKey, String.valueOf(userId),
+        RedisUtils.set(REFRESH_TOKEN_PREFIX + refreshKey, String.valueOf(userId),
                 loginProperties.getRefreshTokenExpireSeconds(), TimeUnit.SECONDS);
 
         return TokenPair.builder()
@@ -94,13 +90,13 @@ public class TokenServiceImpl implements TokenService {
      */
     @Override
     public Optional<Long> verifyAccessKey(String accessKey) {
-        String userIdStr = stringRedisTemplate.opsForValue().get(ACCESS_TOKEN_PREFIX + accessKey);
-        if (!StringUtils.hasText(userIdStr)) {
+        Optional<String> userIdStr = RedisUtils.get(ACCESS_TOKEN_PREFIX + accessKey);
+        if (userIdStr.isEmpty()) {
             return Optional.empty();
         }
-        Long userId = Long.valueOf(userIdStr);
+        Long userId = Long.valueOf(userIdStr.get());
 
-        Map<Object, Object> hash = stringRedisTemplate.opsForHash().entries(IDENTITY_TOKEN_PREFIX + userId);
+        Map<Object, Object> hash = RedisUtils.hashEntries(IDENTITY_TOKEN_PREFIX + userId);
         if (hash.isEmpty()) {
             return Optional.empty();
         }
@@ -124,14 +120,14 @@ public class TokenServiceImpl implements TokenService {
      */
     @Override
     public TokenPair refresh(String refreshKey) {
-        String userIdStr = stringRedisTemplate.opsForValue().get(REFRESH_TOKEN_PREFIX + refreshKey);
-        if (!StringUtils.hasText(userIdStr)) {
+        Optional<String> userIdStr = RedisUtils.get(REFRESH_TOKEN_PREFIX + refreshKey);
+        if (userIdStr.isEmpty()) {
             throw new BusinessException(AuthErrorCode.UNAUTHORIZED, "刷新令牌无效或已过期，请重新登录");
         }
-        Long userId = Long.valueOf(userIdStr);
+        Long userId = Long.valueOf(userIdStr.get());
 
         String identityKey = IDENTITY_TOKEN_PREFIX + userId;
-        Map<Object, Object> hash = stringRedisTemplate.opsForHash().entries(identityKey);
+        Map<Object, Object> hash = RedisUtils.hashEntries(identityKey);
         Object storedRefreshKey = hash.get(FIELD_REFRESH_KEY);
         if (storedRefreshKey == null || !refreshKey.equals(storedRefreshKey.toString())) {
             throw new BusinessException(AuthErrorCode.UNAUTHORIZED, "刷新令牌无效或已过期，请重新登录");
@@ -146,9 +142,9 @@ public class TokenServiceImpl implements TokenService {
         long now = System.currentTimeMillis();
         long newAccessExpireAtMillis = now + loginProperties.getAccessTokenExpireSeconds() * 1000;
 
-        stringRedisTemplate.opsForHash().put(identityKey, FIELD_ACCESS_KEY, newAccessKey);
-        stringRedisTemplate.opsForHash().put(identityKey, FIELD_ACCESS_EXPIRE_AT, String.valueOf(newAccessExpireAtMillis));
-        stringRedisTemplate.opsForValue().set(ACCESS_TOKEN_PREFIX + newAccessKey, String.valueOf(userId),
+        RedisUtils.putHashField(identityKey, FIELD_ACCESS_KEY, newAccessKey);
+        RedisUtils.putHashField(identityKey, FIELD_ACCESS_EXPIRE_AT, String.valueOf(newAccessExpireAtMillis));
+        RedisUtils.set(ACCESS_TOKEN_PREFIX + newAccessKey, String.valueOf(userId),
                 loginProperties.getAccessTokenExpireSeconds(), TimeUnit.SECONDS);
 
         return TokenPair.builder()
