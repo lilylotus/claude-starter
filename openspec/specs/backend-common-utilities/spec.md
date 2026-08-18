@@ -1,7 +1,7 @@
 # backend-common-utilities Specification
 
 ## Purpose
-后端跨模块复用的公共基础设施能力，与 CLAUDE.md 里 `common/` 目录下已有的 `Result`、`GlobalResponseAdvice`、`BusinessException`、`GlobalExceptionHandler` 同属一类定位：不属于任何具体业务模块，供各业务模块直接复用，避免重复实现。目前包含统一的 JSON 序列化/反序列化/类型转换工具类 `JacksonUtils`、统一解析当前登录操作人账号编码的 `CurrentOperatorService`，以及统一发起对外 HTTP 请求的 `HttpClientUtils`。
+后端跨模块复用的公共基础设施能力，与 CLAUDE.md 里 `common/` 目录下已有的 `Result`、`GlobalResponseAdvice`、`BusinessException`、`GlobalExceptionHandler` 同属一类定位：不属于任何具体业务模块，供各业务模块直接复用，避免重复实现。目前包含统一的 JSON 序列化/反序列化/类型转换工具类 `JacksonUtils`、统一解析当前登录操作人账号编码的 `CurrentOperatorService`、统一发起对外 HTTP 请求的 `HttpClientUtils`、统一的全局固定大小线程池工具类 `ThreadPoolUtils`，以及统一的 Redis 操作工具类 `RedisUtils`/`RedisObjectUtils`。
 
 ## Requirements
 ### Requirement: 统一的 JSON 序列化/反序列化工具类
@@ -136,3 +136,85 @@
 #### Scenario: 未预期异常仍按兜底逻辑处理
 - **WHEN** 发生一个既不是参数缺失/类型不匹配、也不是已知业务异常的未预期异常
 - **THEN** 系统记录服务端日志，对外仍只返回笼统的服务器内部错误提示，不改变现有行为
+
+### Requirement: 全局固定大小线程池
+系统 SHALL 提供一个全局唯一的固定大小线程池，核心线程数与最大线程数均为 4，
+供业务代码提交异步任务，无需自行创建或管理 `ExecutorService`。
+
+#### Scenario: 获取全局线程池执行任务
+- **WHEN** 业务代码调用线程池工具类提交一个 `Runnable`/`Callable` 任务
+- **THEN** 任务被提交到进程内唯一的全局线程池执行，核心/最大线程数为 4
+
+### Requirement: 有界任务队列
+线程池 SHALL 使用容量为 2048 的有界队列缓存待执行任务，避免任务无限堆积。
+
+#### Scenario: 任务队列缓存待执行任务
+- **WHEN** 当前 4 个线程都在执行任务，且有新任务提交
+- **THEN** 新任务进入容量为 2048 的有界队列等待执行，而不是被立即拒绝或无限扩容
+
+### Requirement: 队列满时拒绝新任务并记录日志
+当线程数已达到最大值（4）且任务队列已满（2048）时，线程池 SHALL 拒绝新提交的任务，
+并向调用方抛出异常，而不是静默丢弃任务或无限阻塞等待；拒绝发生时 SHALL 记录一条
+包含拒绝原因（线程池当前状态，如活跃线程数、队列积压数）的日志，便于运维排查过载原因。
+
+#### Scenario: 线程与队列均已饱和时提交新任务
+- **WHEN** 4 个线程均在执行任务，且队列中已有 2048 个待执行任务，此时业务代码再提交
+  一个新任务
+- **THEN** 线程池立即拒绝该任务并抛出 `RejectedExecutionException`，调用方可据此感知
+  过载并做降级处理
+
+#### Scenario: 拒绝任务时记录日志
+- **WHEN** 线程池因线程与队列均已饱和而拒绝一个新提交的任务
+- **THEN** 系统记录一条 WARN 级别日志，日志内容包含拒绝原因及线程池当前状态
+  （如活跃线程数、队列积压数），而不是只抛异常不留任何日志痕迹
+
+### Requirement: 全局字符串 Redis 工具类
+系统 SHALL 提供一个全局静态工具类（`RedisUtils`），封装基于 `StringRedisTemplate` 的
+字符串 key 读写、Hash 字段读写、key 存在性判断、过期时间设置与删除操作，供业务代码
+直接调用，无需各自注入 `StringRedisTemplate`。
+
+#### Scenario: 读写字符串 key
+- **WHEN** 业务代码调用 `RedisUtils.set(key, value, timeout, unit)` 写入一个字符串值
+  并设置过期时间
+- **THEN** 之后调用 `RedisUtils.get(key)` 能读取到该值，超过过期时间后读取返回空
+
+#### Scenario: 读写 Hash 字段
+- **WHEN** 业务代码调用 `RedisUtils.putHash`/`putHashField` 写入一个 Hash 的多个/单个字段
+- **THEN** 调用 `RedisUtils.hashEntries`/`getHashObject` 能读取到已写入的字段值
+
+### Requirement: 基于 JSON 字符串中转的对象存取
+`RedisUtils` SHALL 提供对象存取方法（`setObject`/`getObject`/`putHashObject`/
+`getHashObject`），写入前把对象序列化为 JSON 字符串、读取后按目标类型反序列化，
+供业务代码直接存取对象实例而不必手动调用 JSON 工具类。
+
+#### Scenario: 存取对象实例
+- **WHEN** 业务代码调用 `RedisUtils.setObject(key, payload, timeout, unit)` 写入一个
+  对象实例
+- **THEN** 调用 `RedisUtils.getObject(key, PayloadClass.class)` 能读取到反序列化后的
+  同等对象
+
+### Requirement: 基于专用对象 Redis 模板的对象存取
+系统 SHALL 提供一个基于专用 `objectRedisTemplate`（`RedisTemplate<String, Object>`，
+value/hashValue 用 `Jackson2JsonRedisSerializer` 包装）的对象存取工具类
+（`RedisObjectUtils`），使 `opsForValue()`/`opsForHash()` 可以直接 put/get 对象实例，
+序列化在 Redis 客户端层面完成，不需要调用方手动转 JSON 字符串。
+
+#### Scenario: 直接存取对象实例
+- **WHEN** 业务代码调用 `RedisObjectUtils.set(key, value)` 写入一个对象实例
+- **THEN** 调用 `RedisObjectUtils.get(key, ValueClass.class)` 能读取到转换后的同等对象，
+  底层未经过手动 JSON 字符串序列化
+
+#### Scenario: 读取原始值并按需转换类型
+- **WHEN** 业务代码调用 `RedisObjectUtils.get(key)` 读取一个已写入的复杂对象
+- **THEN** 返回值为反序列化后的原始 `LinkedHashMap`（Jackson 处理未知目标类型的标准
+  行为），业务代码可再调用 `RedisObjectUtils.get(key, ValueClass.class)` 转换为目标类型
+
+### Requirement: Redis 工具类未初始化时明确报错
+`RedisUtils`/`RedisObjectUtils` 依赖的底层 Redis 模板 SHALL 由 Spring 容器在启动阶段
+注入；容器尚未完成注入时调用工具类方法 SHALL 抛出 `IllegalStateException`，而不是
+返回 `null` 或抛出难以定位根因的 `NullPointerException`。
+
+#### Scenario: Spring 容器未启动时调用工具类方法
+- **WHEN** `RedisUtils`/`RedisObjectUtils` 尚未完成初始化（底层 Redis 模板未注入）时，
+  调用其读写方法
+- **THEN** 方法抛出 `IllegalStateException`，异常信息提示容器尚未启动完成初始化
