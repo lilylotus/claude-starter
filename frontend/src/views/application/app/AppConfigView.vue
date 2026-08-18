@@ -18,6 +18,8 @@ import {
   TRANSFORM_TYPE_OPTIONS,
   type AppAuthConfigVO,
   type AppConfigVO,
+  type AppUserinfoFieldMappingSaveRequest,
+  type AppUserinfoFieldMappingVO,
   type AuthProtocol,
   type AppSyncDomainConfigVO,
   type AppSyncFieldMappingVO,
@@ -118,6 +120,7 @@ onMounted(() => {
   ensureFieldMappingLoaded(syncDomainTab.value)
   ensureOrgScopeLoaded(syncDomainTab.value)
   fetchAuthConfig()
+  fetchUserinfoFieldMappings()
 })
 
 function goBack() {
@@ -596,6 +599,163 @@ async function saveAuthConfig() {
     savingAuthConfig.value = false
   }
 }
+
+// ---- 认证管理：用户信息响应字段映射（CAS 票据验证/OAuth2 userinfo 接口共用，每个应用
+// 一份），交互模式照抄上面“同步配置”标签页的“字段映射”表格：顶部“新增字段”下拉选择本地
+// 字段插入一行、应用字段名称/编码可编辑、转换方式下拉+条件展示固定值/脚本输入框、增删行、
+// 保存。本地字段目录复用 metadataFieldOptionsCache.USER 这份缓存（与“同步字段映射”表格
+// 的用户域共用同一份元数据字段查询结果），并在下拉最前面插入一个固定的“用户ID”伪字段选项
+// （metadataFieldId 传 null，见 openspec/changes/add-sso-userinfo-field-mapping/design.md
+// Decision 2）----
+
+interface UserinfoFieldMappingRow {
+  id: number | null
+  metadataFieldId: number | null
+  fieldName: string
+  fieldCode: string
+  appFieldName: string
+  appFieldCode: string
+  transformType: TransformType
+  transformValue: string
+}
+
+const userinfoFieldMappingRows = ref<UserinfoFieldMappingRow[]>([])
+const userinfoFieldMappingLoading = ref(false)
+const savingUserinfoFieldMapping = ref(false)
+// “新增字段”下拉框当前选中值：undefined 表示未选中（清空态），null 表示选中了“用户ID”
+// 伪字段，两者需要能区分，因此不能都用 undefined 表达
+const pendingUserinfoFieldId = ref<number | null | undefined>(undefined)
+
+// 本地字段目录：与“同步字段映射”表格的用户域共用同一份缓存（metadataFieldOptionsCache.USER），
+// 避免重复请求；哪个标签页先加载都会把结果写入这份共享缓存
+const userinfoMetadataFieldOptions = computed<MetadataField[]>(() => metadataFieldOptionsCache.USER ?? [])
+
+const userinfoUsedFieldIds = computed(() => new Set(userinfoFieldMappingRows.value.map((row) => row.metadataFieldId)))
+// “用户ID”伪字段是否已经在表格里出现过（metadataFieldId 为 null 的那一行）
+const userinfoPseudoFieldAvailable = computed(() => !userinfoUsedFieldIds.value.has(null))
+// “新增字段”下拉框可选的真实元数据字段：状态启用、且尚未出现在表格里
+const addableUserinfoMetadataFieldOptions = computed(() =>
+  userinfoMetadataFieldOptions.value.filter(
+    (field) => field.status === METADATA_FIELD_STATUS_ENABLED && !userinfoUsedFieldIds.value.has(field.id),
+  ),
+)
+
+function toUserinfoFieldMappingRow(vo: AppUserinfoFieldMappingVO): UserinfoFieldMappingRow {
+  return {
+    id: vo.id,
+    metadataFieldId: vo.metadataFieldId,
+    fieldName: vo.fieldName,
+    fieldCode: vo.fieldCode,
+    appFieldName: vo.appFieldName,
+    appFieldCode: vo.appFieldCode,
+    transformType: vo.transformType,
+    transformValue: vo.transformValue ?? '',
+  }
+}
+
+// 按需加载用户域元数据字段目录（若“同步配置”标签页已加载过则直接复用，不重复请求）
+async function ensureUserinfoMetadataFieldOptionsLoaded() {
+  if (metadataFieldOptionsCache.USER) return
+  const fieldPage = await metadataFieldApi.getMetadataFieldPageForSyncDomain('USER')
+  metadataFieldOptionsCache.USER = fieldPage.records
+}
+
+async function fetchUserinfoFieldMappings() {
+  userinfoFieldMappingLoading.value = true
+  try {
+    const [mappings] = await Promise.all([
+      appApi.getAppUserinfoFieldMappings(appId.value),
+      ensureUserinfoMetadataFieldOptionsLoaded(),
+    ])
+    userinfoFieldMappingRows.value = mappings.map(toUserinfoFieldMappingRow)
+  } finally {
+    userinfoFieldMappingLoading.value = false
+  }
+}
+
+function handleAddUserinfoField(metadataFieldId: number | null | undefined) {
+  if (metadataFieldId === undefined) return
+  if (metadataFieldId === null) {
+    userinfoFieldMappingRows.value.push({
+      id: null,
+      metadataFieldId: null,
+      fieldName: '用户ID',
+      fieldCode: 'id',
+      appFieldName: '用户ID',
+      appFieldCode: 'id',
+      transformType: 'NO_TRANSFORM',
+      transformValue: '',
+    })
+  } else {
+    const field = userinfoMetadataFieldOptions.value.find((item) => item.id === metadataFieldId)
+    if (!field) return
+    userinfoFieldMappingRows.value.push({
+      id: null,
+      metadataFieldId: field.id,
+      fieldName: field.fieldName,
+      fieldCode: field.fieldCode,
+      // 应用字段名称/编码默认预填为源字段的名称/编码，多数场景下两者相同，用户仍可编辑覆盖
+      appFieldName: field.fieldName,
+      appFieldCode: field.fieldCode,
+      transformType: 'NO_TRANSFORM',
+      transformValue: '',
+    })
+  }
+  pendingUserinfoFieldId.value = undefined
+}
+
+function removeUserinfoFieldMappingRow(index: number) {
+  userinfoFieldMappingRows.value.splice(index, 1)
+}
+
+// appFieldCode 标识符正则，对齐后端 AppUserinfoFieldMappingSaveRequest 的
+// @Pattern(regexp = "^[a-zA-Z][a-zA-Z0-9_-]*$")
+const APP_FIELD_CODE_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/
+
+function validateUserinfoFieldMappingRows(rows: UserinfoFieldMappingRow[]): string {
+  const seenCodes = new Set<string>()
+  for (const row of rows) {
+    if (!row.appFieldName.trim()) return '应用字段名称不能为空'
+    const code = row.appFieldCode.trim()
+    if (!code) return '应用字段编码不能为空'
+    if (!APP_FIELD_CODE_PATTERN.test(code)) {
+      return '应用字段编码格式不正确，须以字母开头，只能包含字母、数字、下划线、短横线'
+    }
+    if (seenCodes.has(code)) return `应用字段编码"${code}"重复，请修改后再保存`
+    seenCodes.add(code)
+    if (row.transformType === 'FIXED_VALUE' && !row.transformValue.trim()) {
+      return '转换方式为固定值时，取值不能为空'
+    }
+    if (row.transformType === 'SCRIPT' && !row.transformValue.trim()) {
+      return '转换方式为转换脚本时，脚本内容不能为空'
+    }
+  }
+  return ''
+}
+
+async function saveUserinfoFieldMappings() {
+  const rows = userinfoFieldMappingRows.value
+  const validationError = validateUserinfoFieldMappingRows(rows)
+  if (validationError) {
+    ElMessage.error(validationError)
+    return
+  }
+  savingUserinfoFieldMapping.value = true
+  try {
+    const payload: AppUserinfoFieldMappingSaveRequest[] = rows.map((row) => ({
+      metadataFieldId: row.metadataFieldId,
+      appFieldName: row.appFieldName.trim(),
+      appFieldCode: row.appFieldCode.trim(),
+      transformType: row.transformType,
+      transformValue: row.transformType === 'NO_TRANSFORM' ? null : row.transformValue,
+    }))
+    const data = await appApi.replaceAppUserinfoFieldMappings(appId.value, payload)
+    userinfoFieldMappingRows.value = data.map(toUserinfoFieldMappingRow)
+    ElMessage.success('保存成功')
+  } finally {
+    savingUserinfoFieldMapping.value = false
+  }
+}
 </script>
 
 <template>
@@ -971,6 +1131,91 @@ async function saveAuthConfig() {
               </el-button>
             </el-form-item>
           </el-form>
+
+          <h4 class="app-config__sync-group-title">用户信息响应字段映射</h4>
+          <p class="app-config__field-mapping-hint">
+            配置 CAS 票据验证 / OAuth2 用户信息接口返回给应用的字段（协议固定字段 cas:user /
+            sub 不受此配置影响，无需在此重复配置）
+          </p>
+          <div class="app-config__field-mapping-toolbar">
+            <el-select
+              v-model="pendingUserinfoFieldId"
+              placeholder="选择字段新增映射"
+              filterable
+              clearable
+              class="app-config__field-mapping-select"
+              @change="handleAddUserinfoField"
+            >
+              <el-option v-if="userinfoPseudoFieldAvailable" label="用户ID" :value="null as unknown as number" />
+              <el-option
+                v-for="field in addableUserinfoMetadataFieldOptions"
+                :key="field.id"
+                :label="`${field.fieldName}（${field.fieldCode}）`"
+                :value="field.id"
+              />
+            </el-select>
+          </div>
+
+          <el-table
+            v-loading="userinfoFieldMappingLoading"
+            :data="userinfoFieldMappingRows"
+            border
+            size="small"
+            class="app-config__field-mapping-table"
+          >
+            <el-table-column label="字段名称" prop="fieldName" width="130" />
+            <el-table-column label="字段编码" prop="fieldCode" width="130" />
+            <el-table-column label="应用字段名称" min-width="140">
+              <template #default="{ row }">
+                <el-input v-model="row.appFieldName" placeholder="请输入应用侧字段名称" />
+              </template>
+            </el-table-column>
+            <el-table-column label="应用字段编码" min-width="140">
+              <template #default="{ row }">
+                <el-input v-model="row.appFieldCode" placeholder="请输入应用侧字段编码" />
+              </template>
+            </el-table-column>
+            <el-table-column label="转换方式" width="130">
+              <template #default="{ row }">
+                <el-select v-model="row.transformType">
+                  <el-option
+                    v-for="item in TRANSFORM_TYPE_OPTIONS"
+                    :key="item.value"
+                    :label="item.label"
+                    :value="item.value"
+                  />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="转换取值" min-width="220">
+              <template #default="{ row }">
+                <el-input
+                  v-if="row.transformType === 'FIXED_VALUE'"
+                  v-model="row.transformValue"
+                  placeholder="请输入固定值"
+                />
+                <el-input
+                  v-else-if="row.transformType === 'SCRIPT'"
+                  v-model="row.transformValue"
+                  type="textarea"
+                  :rows="3"
+                  placeholder="请输入 JavaScript 转换脚本"
+                />
+                <span v-else class="app-config__field-mapping-disabled">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="70" fixed="right">
+              <template #default="{ $index }">
+                <el-button link :icon="Delete" type="danger" @click="removeUserinfoFieldMappingRow($index)" />
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <div v-if="hasPermission('AppManagement:app:config:editAuth')" class="app-config__field-mapping-save">
+            <el-button type="primary" :loading="savingUserinfoFieldMapping" @click="saveUserinfoFieldMappings">
+              保存字段映射
+            </el-button>
+          </div>
         </div>
       </el-tab-pane>
     </el-tabs>
@@ -1231,6 +1476,12 @@ async function saveAuthConfig() {
 
 .app-config__field-mapping-save {
   margin-top: 12px;
+}
+
+.app-config__field-mapping-hint {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  margin: -8px 0 12px;
 }
 
 // 认证管理：顶部提示条 + 匹配规则行编辑（单值，区别于同步配置通知参数的 key-value 两列）

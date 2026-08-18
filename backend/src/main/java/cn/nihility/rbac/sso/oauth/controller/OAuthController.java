@@ -15,6 +15,7 @@ import cn.nihility.rbac.sso.session.SsoSessionService;
 import cn.nihility.rbac.sso.support.AppProtocolGuard;
 import cn.nihility.rbac.sso.support.ProtocolResponseWriter;
 import cn.nihility.rbac.sso.support.SsoProtocolException;
+import cn.nihility.rbac.sso.support.SsoUserinfoAttributesResolver;
 import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import io.swagger.v3.oas.annotations.Operation;
@@ -67,6 +68,9 @@ public class OAuthController {
 
     /** 用户数据访问接口，userinfo 端点按用户 id 查询用户标识/姓名。 */
     private final UserMapper userMapper;
+
+    /** 用户信息响应属性运行时解析组件，按应用配置的字段映射生成 userinfo 响应字段。 */
+    private final SsoUserinfoAttributesResolver ssoUserinfoAttributesResolver;
 
     /**
      * OAuth2 授权：{@code redirect_uri} 校验通过后，若 {@code response_type} 非
@@ -159,13 +163,17 @@ public class OAuthController {
 
     /**
      * OAuth2 用户信息查询：解析 {@code Authorization: Bearer <access_token>} 请求头，
-     * 校验通过后返回该令牌绑定用户的基本身份信息。
+     * 校验通过后返回该令牌绑定用户的基本身份信息。除固定的 {@code sub}（取用户 id，不受
+     * 字段映射配置影响，见 add-sso-userinfo-field-mapping change design.md Decision 3）外，
+     * 其余字段按该应用配置的用户信息字段映射动态生成；写入顺序上先写入映射字段、再写入
+     * {@code sub}，即使某行映射的应用侧字段编码恰好配置成 {@code sub}，最终仍以固定值为准。
      *
      * @param authorization {@code Authorization} 请求头原始值
      * @param response      当前响应
      * @throws IOException 写响应失败
      */
-    @Operation(summary = "OAuth2 用户信息查询", description = "校验 Authorization: Bearer <access_token>，返回绑定用户的基本身份信息")
+    @Operation(summary = "OAuth2 用户信息查询", description = "校验 Authorization: Bearer <access_token>，返回绑定用户的基本身份信息；"
+            + "除固定的 sub 外，其余字段按应用配置的用户信息字段映射动态生成")
     @GetMapping("/api/authn/oauth/userinfo")
     public void userinfo(@RequestHeader(value = "Authorization", required = false) String authorization,
             HttpServletResponse response) throws IOException {
@@ -183,12 +191,19 @@ public class OAuthController {
             return;
         }
 
-        Long userId = payloadOpt.get().userId();
+        OAuthTokenPayload payload = payloadOpt.get();
+        Long userId = payload.userId();
         UserEntity user = userMapper.selectById(userId);
         Map<String, Object> body = new LinkedHashMap<>();
+        if (user != null) {
+            try {
+                Long appRefId = appProtocolGuard.resolveAppRefId(payload.clientId());
+                body.putAll(ssoUserinfoAttributesResolver.resolve(appRefId, user));
+            } catch (SsoProtocolException e) {
+                // 令牌签发后应用被删除等边缘场景：不影响固定的 sub 字段正常返回，映射字段跳过。
+            }
+        }
         body.put("sub", String.valueOf(userId));
-        body.put("username", user != null ? user.getCode() : null);
-        body.put("name", user != null ? user.getName() : null);
         ProtocolResponseWriter.json(response, HttpServletResponse.SC_OK, body);
     }
 

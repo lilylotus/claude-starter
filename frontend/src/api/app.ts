@@ -11,6 +11,8 @@ import type {
   AppSyncFieldMappingVO,
   AppSyncOrgScopeRow,
   AppSyncOrgScopeSaveRequest,
+  AppUserinfoFieldMappingSaveRequest,
+  AppUserinfoFieldMappingVO,
   PageResult,
   SecretKeyResult,
   SignAlgorithmUpdateRequest,
@@ -136,4 +138,19 @@ export function getAppAuthConfig(id: number): Promise<AppAuthConfigVO> {
 // 修改应用的认证配置（协议类型、对应的匹配列表）
 export function updateAppAuthConfig(id: number, data: AppAuthConfigUpdateRequest): Promise<AppAuthConfigVO> {
   return request.put(`/apps/${id}/config/auth`, data)
+}
+
+// ---- 认证管理·用户信息响应字段映射：CAS 票据验证/OAuth2 userinfo 接口共用，每个应用一份 ----
+
+// 查询用户信息字段映射列表；未保存过时后端现算返回默认两行（用户ID、姓名）
+export function getAppUserinfoFieldMappings(id: number): Promise<AppUserinfoFieldMappingVO[]> {
+  return request.get(`/apps/${id}/config/auth/userinfo-field-mappings`)
+}
+
+// 整体替换用户信息字段映射列表（先删后插语义），提交完整的当前列表
+export function replaceAppUserinfoFieldMappings(
+  id: number,
+  data: AppUserinfoFieldMappingSaveRequest[],
+): Promise<AppUserinfoFieldMappingVO[]> {
+  return request.put(`/apps/${id}/config/auth/userinfo-field-mappings`, data)
 }

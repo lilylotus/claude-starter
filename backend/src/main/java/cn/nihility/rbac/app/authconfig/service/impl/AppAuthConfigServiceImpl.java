@@ -3,23 +3,37 @@ package cn.nihility.rbac.app.authconfig.service.impl;
 import cn.nihility.rbac.app.authconfig.constant.AuthProtocol;
 import cn.nihility.rbac.app.authconfig.dto.AppAuthConfigUpdateRequest;
 import cn.nihility.rbac.app.authconfig.dto.AppAuthConfigVO;
+import cn.nihility.rbac.app.authconfig.dto.AppUserinfoFieldMappingRow;
+import cn.nihility.rbac.app.authconfig.dto.AppUserinfoFieldMappingSaveRequest;
+import cn.nihility.rbac.app.authconfig.dto.AppUserinfoFieldMappingVO;
 import cn.nihility.rbac.app.authconfig.entity.AppAuthConfigEntity;
+import cn.nihility.rbac.app.authconfig.entity.AppUserinfoFieldMappingEntity;
 import cn.nihility.rbac.app.authconfig.mapper.AppAuthConfigMapper;
+import cn.nihility.rbac.app.authconfig.mapper.AppUserinfoFieldMappingMapper;
 import cn.nihility.rbac.app.authconfig.mapstruct.AppAuthConfigConvert;
+import cn.nihility.rbac.app.authconfig.mapstruct.AppUserinfoFieldMappingConvert;
 import cn.nihility.rbac.app.authconfig.service.AppAuthConfigService;
+import cn.nihility.rbac.app.authconfig.support.AppUserinfoFieldMappingDefaults;
 import cn.nihility.rbac.app.entity.AppConfigEntity;
 import cn.nihility.rbac.app.entity.AppEntity;
 import cn.nihility.rbac.app.mapper.AppConfigMapper;
 import cn.nihility.rbac.app.mapper.AppMapper;
 import cn.nihility.rbac.app.support.AppScopeGuard;
+import cn.nihility.rbac.app.sync.constant.TransformType;
+import cn.nihility.rbac.app.sync.support.TransformScriptValidator;
 import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.common.util.JacksonUtils;
+import cn.nihility.rbac.formfield.constant.FormFieldBizType;
+import cn.nihility.rbac.metadata.constant.MetadataFieldStatus;
+import cn.nihility.rbac.metadata.entity.MetadataFieldEntity;
+import cn.nihility.rbac.metadata.mapper.MetadataFieldMapper;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -28,6 +42,7 @@ import java.util.Objects;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 /**
@@ -40,11 +55,17 @@ public class AppAuthConfigServiceImpl implements AppAuthConfigService {
     /** 应用单点登录协议配置数据访问接口。 */
     private final AppAuthConfigMapper appAuthConfigMapper;
 
+    /** 应用用户信息响应字段映射数据访问接口。 */
+    private final AppUserinfoFieldMappingMapper appUserinfoFieldMappingMapper;
+
     /** 应用对外接口配置数据访问接口，仅用于查询该应用的 AppId 以计算协议接口地址。 */
     private final AppConfigMapper appConfigMapper;
 
     /** 应用数据访问接口，仅用于只读查询应用实体（校验存在性、管辖组织范围）。 */
     private final AppMapper appMapper;
+
+    /** 元数据字段数据访问接口，校验用户信息字段映射请求中 {@code metadataFieldId} 的合法性。 */
+    private final MetadataFieldMapper metadataFieldMapper;
 
     /** 管辖组织范围解析业务逻辑接口，写操作按应用 {@code orgId} 复用管辖范围校验。 */
     private final OrgScopeService orgScopeService;
@@ -227,5 +248,119 @@ public class AppAuthConfigServiceImpl implements AppAuthConfigService {
         snapshot.put("CAS service 匹配列表", entity.getCasServicePatterns());
         snapshot.put("OAuth2 redirect_uri 匹配列表", entity.getOauth2RedirectUriPatterns());
         return snapshot;
+    }
+
+    /**
+     * {@inheritDoc}
+     * <p>
+     * 该应用无任何记录时现算默认两行（不落库），复用 {@link AppUserinfoFieldMappingDefaults}。
+     */
+    @Override
+    public List<AppUserinfoFieldMappingVO> listUserinfoFieldMappings(Long appRefId) {
+        List<AppUserinfoFieldMappingRow> rows = appUserinfoFieldMappingMapper.selectByAppRefId(appRefId);
+        if (rows.isEmpty()) {
+            rows = AppUserinfoFieldMappingDefaults.compute(metadataFieldMapper);
+        }
+        return AppUserinfoFieldMappingConvert.INSTANCE.toVOList(rows);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    @Transactional
+    public List<AppUserinfoFieldMappingVO> replaceUserinfoFieldMappings(Long appRefId,
+            List<AppUserinfoFieldMappingSaveRequest> requests) {
+        AppEntity appEntity = AppScopeGuard.getExistingAppInScope(appMapper, orgScopeService, appRefId);
+        List<AppUserinfoFieldMappingSaveRequest> effectiveRequests = requests == null ? List.of() : requests;
+        assertUserinfoFieldMappingRequestsValid(effectiveRequests);
+
+        LambdaQueryWrapper<AppUserinfoFieldMappingEntity> deleteWrapper =
+                new LambdaQueryWrapper<AppUserinfoFieldMappingEntity>()
+                        .eq(AppUserinfoFieldMappingEntity::getAppRefId, appRefId);
+        Long beforeCount = appUserinfoFieldMappingMapper.selectCount(deleteWrapper);
+        beforeCount = beforeCount == null ? 0L : beforeCount;
+        appUserinfoFieldMappingMapper.delete(deleteWrapper);
+
+        String operator = Objects.toString(currentOperatorService.resolveUserId(), null);
+        LocalDateTime now = LocalDateTime.now();
+        for (AppUserinfoFieldMappingSaveRequest request : effectiveRequests) {
+            AppUserinfoFieldMappingEntity entity = AppUserinfoFieldMappingConvert.INSTANCE.toEntity(request);
+            entity.setAppRefId(appRefId);
+            entity.setTransformValue(TransformType.NO_TRANSFORM.equals(request.getTransformType())
+                    ? null : request.getTransformValue());
+            entity.setCreateBy(operator);
+            entity.setCreateTime(now);
+            entity.setUpdateBy(operator);
+            entity.setUpdateTime(now);
+            appUserinfoFieldMappingMapper.insert(entity);
+        }
+
+        operationLogRecorder.recordUpdate(OperationLogResourceType.APP, appRefId, appEntity.getName(),
+                Map.of("用户信息字段映射", beforeCount + " 行"), Map.of("用户信息字段映射", effectiveRequests.size() + " 行"));
+        return listUserinfoFieldMappings(appRefId);
+    }
+
+    /**
+     * 逐项校验用户信息字段映射保存请求：同一请求列表内 {@code appFieldCode} 不允许重复；
+     * {@code metadataFieldId} 非空时必须存在、状态启用、{@code bizType=USER}（为空视为合法
+     * 的"用户ID"伪字段，跳过校验）；转换取值按 {@code transformType} 校验（对齐
+     * {@code AppSyncConfigServiceImpl#assertRequestsValid} 的既有逻辑）。
+     *
+     * @param requests 本次提交的完整字段映射行列表
+     */
+    private void assertUserinfoFieldMappingRequestsValid(List<AppUserinfoFieldMappingSaveRequest> requests) {
+        Set<String> seenAppFieldCodes = new HashSet<>();
+        for (AppUserinfoFieldMappingSaveRequest request : requests) {
+            if (!seenAppFieldCodes.add(request.getAppFieldCode())) {
+                throw new BusinessException("应用字段编码不能重复：" + request.getAppFieldCode());
+            }
+        }
+
+        for (AppUserinfoFieldMappingSaveRequest request : requests) {
+            if (!TransformType.ALL_TYPES.contains(request.getTransformType())) {
+                throw new BusinessException("非法的转换方式：" + request.getTransformType());
+            }
+            assertUserinfoMetadataFieldValid(request.getMetadataFieldId());
+            assertTransformValueValid(request.getTransformType(), request.getTransformValue());
+        }
+    }
+
+    /**
+     * 校验用户信息字段映射请求中的本地字段：为空时视为固定的"用户ID"伪字段，合法，无需校验；
+     * 非空时必须存在、状态启用、{@code bizType=USER}。
+     *
+     * @param metadataFieldId 本地字段 id，可能为 {@code null}
+     */
+    private void assertUserinfoMetadataFieldValid(Long metadataFieldId) {
+        if (metadataFieldId == null) {
+            return;
+        }
+        MetadataFieldEntity metadataField = metadataFieldMapper.selectById(metadataFieldId);
+        if (metadataField == null || !Objects.equals(metadataField.getStatus(), MetadataFieldStatus.ENABLED)) {
+            throw new BusinessException("本地字段不存在或未启用：" + metadataFieldId);
+        }
+        if (!Objects.equals(metadataField.getBizType(), FormFieldBizType.USER)) {
+            throw new BusinessException("本地字段[" + metadataField.getFieldName() + "]不属于用户域");
+        }
+    }
+
+    /**
+     * 按转换方式校验转换取值：{@code FIXED_VALUE} 要求非空；{@code SCRIPT} 要求非空且语法
+     * 合法（{@link TransformScriptValidator#validateSyntax}）；{@code NO_TRANSFORM} 不校验。
+     *
+     * @param transformType  转换方式
+     * @param transformValue 转换取值
+     */
+    private void assertTransformValueValid(String transformType, String transformValue) {
+        if (TransformType.FIXED_VALUE.equals(transformType) && !StringUtils.hasText(transformValue)) {
+            throw new BusinessException("转换方式为固定值时，转换取值不能为空");
+        }
+        if (TransformType.SCRIPT.equals(transformType)) {
+            if (!StringUtils.hasText(transformValue)) {
+                throw new BusinessException("转换方式为转换脚本时，转换取值不能为空");
+            }
+            TransformScriptValidator.validateSyntax(transformValue);
+        }
     }
 }

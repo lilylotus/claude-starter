@@ -83,6 +83,24 @@ public class AppProtocolGuard {
     }
 
     /**
+     * 按对外应用标识（AppId/client_id）解析内部应用 id（{@code tab_app.id}），应用不存在时
+     * 抛出 {@link SsoProtocolException}。供 {@code CasController}/{@code OAuthController}
+     * 在票据验证/用户信息查询成功后解析出 {@code appRefId}，交给
+     * {@code SsoUserinfoAttributesResolver} 查询用户信息字段映射配置
+     * （add-sso-userinfo-field-mapping change tasks.md 4.2）。
+     *
+     * @param appId 对外应用标识
+     * @return 应用 id（{@code tab_app.id}）
+     */
+    public Long resolveAppRefId(String appId) {
+        AppConfigEntity appConfig = findAppConfig(appId);
+        if (appConfig == null) {
+            throw new SsoProtocolException("应用不存在");
+        }
+        return appConfig.getAppRefId();
+    }
+
+    /**
      * 按对外应用标识查询该应用的对外接口凭证配置，供 OAuth2 {@code client_secret} 校验使用。
      * 应用不存在或协议类型不是 OAuth2.0 时抛出 {@link SsoProtocolException}，两种情况使用
      * 同一提示信息，不向调用方泄露具体区别（同 {@code OpenApiSignInterceptor} 既有先例）。

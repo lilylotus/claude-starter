@@ -27,6 +27,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import jakarta.servlet.http.Cookie;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -216,8 +217,10 @@ class CasControllerTest {
     }
 
     /**
-     * 合法票据校验成功，且返回的 CAS 3.0 XML 响应体含正确的用户标识与姓名；用同一票据再次
-     * 发起验证请求应返回认证失败响应（一次性消费，spec.md "合法票据校验成功且不可重复使用" Scenario）。
+     * 合法票据校验成功，且携带 {@code format=XML} 时返回的 CAS 3.0 XML 响应体含正确的用户
+     * 标识与默认属性（用户ID、姓名）；用同一票据再次发起验证请求应返回认证失败响应（一次性
+     * 消费，spec.md "合法票据校验成功且不可重复使用"、"format=XML 时返回 XML 格式响应"
+     * Scenario）。
      */
     @Test
     void serviceValidate_shouldSucceedOnce_thenFailOnSecondValidate() throws Exception {
@@ -229,17 +232,43 @@ class CasControllerTest {
         String ticket = location.substring(location.indexOf("ticket=") + "ticket=".length());
 
         String successBody = mockMvc.perform(get("/api/authn/cas/{appId}/p3/serviceValidate", appId)
-                        .param("service", ALLOWED_SERVICE).param("ticket", ticket))
+                        .param("service", ALLOWED_SERVICE).param("ticket", ticket).param("format", "XML"))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         assertThat(successBody).contains("<cas:authenticationSuccess>");
         assertThat(successBody).contains("<cas:name>CAS测试用户</cas:name>");
 
         String failureBody = mockMvc.perform(get("/api/authn/cas/{appId}/p3/serviceValidate", appId)
-                        .param("service", ALLOWED_SERVICE).param("ticket", ticket))
+                        .param("service", ALLOWED_SERVICE).param("ticket", ticket).param("format", "XML"))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         assertThat(failureBody).contains("INVALID_TICKET");
+    }
+
+    /**
+     * 未指定 {@code format} 参数时默认返回 JSON 格式响应（而不是 XML），属性节点按默认的
+     * "用户ID + 姓名"两个字段动态生成（add-sso-userinfo-field-mapping change spec.md
+     * "未指定 format 时默认返回 JSON"、"用户属性按字段映射动态生成" Scenario）。
+     */
+    @Test
+    void serviceValidate_shouldReturnJson_byDefault() throws Exception {
+        String sessionToken = ssoSessionService.issue(userId);
+        Cookie cookie = new Cookie("sso_session", sessionToken);
+        String location = mockMvc.perform(get("/api/authn/cas/{appId}/login", appId).param("service", ALLOWED_SERVICE).cookie(cookie))
+                .andReturn().getResponse().getHeader("Location");
+        String ticket = location.substring(location.indexOf("ticket=") + "ticket=".length());
+
+        String body = mockMvc.perform(get("/api/authn/cas/{appId}/p3/serviceValidate", appId)
+                        .param("service", ALLOWED_SERVICE).param("ticket", ticket))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        Map<String, Object> json = JacksonUtils.toObj(body, JacksonUtils.MAP_OBJECT_TYPE_REFERENCE);
+        Map<String, Object> serviceResponse = (Map<String, Object>) json.get("serviceResponse");
+        Map<String, Object> authenticationSuccess = (Map<String, Object>) serviceResponse.get("authenticationSuccess");
+        Map<String, Object> attributes = (Map<String, Object>) authenticationSuccess.get("attributes");
+        assertThat(authenticationSuccess.get("user")).isNotNull();
+        assertThat(attributes.get("name")).isEqualTo("CAS测试用户");
+        assertThat(attributes).containsKey("id");
     }
 
     /**
@@ -255,7 +284,8 @@ class CasControllerTest {
         String ticket = location.substring(location.indexOf("ticket=") + "ticket=".length());
 
         String body = mockMvc.perform(get("/api/authn/cas/{appId}/p3/serviceValidate", appId)
-                        .param("service", "https://partner.example.com/other").param("ticket", ticket))
+                        .param("service", "https://partner.example.com/other").param("ticket", ticket)
+                        .param("format", "XML"))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         assertThat(body).contains("<cas:authenticationFailure");

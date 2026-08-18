@@ -8,7 +8,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import cn.nihility.rbac.app.authconfig.constant.AuthProtocol;
 import cn.nihility.rbac.app.authconfig.entity.AppAuthConfigEntity;
+import cn.nihility.rbac.app.authconfig.entity.AppUserinfoFieldMappingEntity;
 import cn.nihility.rbac.app.authconfig.mapper.AppAuthConfigMapper;
+import cn.nihility.rbac.app.authconfig.mapper.AppUserinfoFieldMappingMapper;
 import cn.nihility.rbac.app.config.AppSecretProperties;
 import cn.nihility.rbac.app.constant.AppStatus;
 import cn.nihility.rbac.app.constant.SignAlgorithm;
@@ -17,11 +19,15 @@ import cn.nihility.rbac.app.entity.AppConfigEntity;
 import cn.nihility.rbac.app.entity.AppEntity;
 import cn.nihility.rbac.app.mapper.AppConfigMapper;
 import cn.nihility.rbac.app.mapper.AppMapper;
+import cn.nihility.rbac.app.sync.constant.TransformType;
 import cn.nihility.rbac.auth.entity.UserPasswordEntity;
 import cn.nihility.rbac.auth.mapper.UserPasswordMapper;
 import cn.nihility.rbac.auth.util.PasswordDigestUtils;
 import cn.nihility.rbac.common.util.JacksonUtils;
 import cn.nihility.rbac.common.util.Sm4JdkUtils;
+import cn.nihility.rbac.formfield.constant.FormFieldBizType;
+import cn.nihility.rbac.metadata.entity.MetadataFieldEntity;
+import cn.nihility.rbac.metadata.mapper.MetadataFieldMapper;
 import cn.nihility.rbac.sso.session.SsoSessionService;
 import cn.nihility.rbac.user.constant.UserStatus;
 import cn.nihility.rbac.user.entity.UserEntity;
@@ -85,6 +91,14 @@ class OAuthControllerTest {
     /** 应用对外接口凭证相关配置，提供 SM4 加密主密钥，供测试构造已加密的 secretKey。 */
     @Autowired
     private AppSecretProperties appSecretProperties;
+
+    /** 应用用户信息响应字段映射数据访问接口，供"sub 固定优先于映射配置"用例插入测试数据。 */
+    @Autowired
+    private AppUserinfoFieldMappingMapper appUserinfoFieldMappingMapper;
+
+    /** 元数据字段数据访问接口，查询"用户编号"字段 id 构造映射测试数据。 */
+    @Autowired
+    private MetadataFieldMapper metadataFieldMapper;
 
     /** 测试用 client_secret 明文。 */
     private static final String CLIENT_SECRET_PLAIN = "test-client-secret";
@@ -182,6 +196,8 @@ class OAuthControllerTest {
     @AfterEach
     void tearDown() {
         if (appRefId != null) {
+            appUserinfoFieldMappingMapper.delete(new LambdaQueryWrapper<AppUserinfoFieldMappingEntity>()
+                    .eq(AppUserinfoFieldMappingEntity::getAppRefId, appRefId));
             appAuthConfigMapper.delete(new LambdaQueryWrapper<AppAuthConfigEntity>().eq(AppAuthConfigEntity::getAppRefId, appRefId));
             appConfigMapper.delete(new LambdaQueryWrapper<AppConfigEntity>().eq(AppConfigEntity::getAppRefId, appRefId));
             appMapper.deleteById(appRefId);
@@ -356,11 +372,57 @@ class OAuthControllerTest {
     }
 
     /**
-     * 携带一个有效的 access token 请求用户信息接口，应返回该令牌签发时绑定用户的基本身份信息
-     * （spec.md "合法令牌查询用户信息成功" Scenario）。
+     * 携带一个有效的 access token 请求用户信息接口，应返回该令牌签发时绑定用户的基本身份信息，
+     * 除固定的 {@code sub} 字段外，其余字段按默认的"用户ID + 姓名"两个字段动态生成
+     * （spec.md "合法令牌查询用户信息成功"、"用户信息字段按映射配置动态生成" Scenario）。
      */
     @Test
     void userinfo_shouldReturnUserInfo_whenTokenValid() throws Exception {
+        String code = issueAuthorizationCode();
+        String tokenResponseBody = mockMvc.perform(post("/api/authn/oauth/token")
+                        .param("grant_type", "authorization_code")
+                        .param("client_id", clientId)
+                        .param("client_secret", CLIENT_SECRET_PLAIN)
+                        .param("redirect_uri", ALLOWED_REDIRECT_URI)
+                        .param("code", code))
+                .andReturn().getResponse().getContentAsString();
+        Map<String, Object> issued = JacksonUtils.toObj(tokenResponseBody, JacksonUtils.MAP_OBJECT_TYPE_REFERENCE);
+        String accessToken = (String) issued.get("access_token");
+
+        String body = mockMvc.perform(get("/api/authn/oauth/userinfo").header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        Map<String, Object> userInfo = JacksonUtils.toObj(body, JacksonUtils.MAP_OBJECT_TYPE_REFERENCE);
+        assertThat(userInfo.get("sub")).isEqualTo(String.valueOf(userId));
+        assertThat(userInfo.get("name")).isEqualTo("OAuth测试用户");
+        assertThat(userInfo).containsKey("id");
+        assertThat(userInfo).doesNotContainKey("username");
+    }
+
+    /**
+     * 某行用户信息字段映射的应用侧字段编码恰好配置成 {@code sub} 时，响应体的 {@code sub}
+     * 字段最终仍以协议规定的固定用户 id 为准，不受该行映射的转换结果影响
+     * （add-sso-userinfo-field-mapping change spec.md "映射字段编码与 sub 冲突时固定值优先"
+     * Scenario）。
+     */
+    @Test
+    void userinfo_shouldKeepFixedSub_whenMappingAppFieldCodeConflictsWithSub() throws Exception {
+        MetadataFieldEntity codeField = metadataFieldMapper.selectOne(new LambdaQueryWrapper<MetadataFieldEntity>()
+                .eq(MetadataFieldEntity::getBizType, FormFieldBizType.USER)
+                .eq(MetadataFieldEntity::getColumnName, "code"));
+        LocalDateTime now = LocalDateTime.now();
+        appUserinfoFieldMappingMapper.insert(AppUserinfoFieldMappingEntity.builder()
+                .appRefId(appRefId)
+                .metadataFieldId(codeField.getId())
+                .appFieldName("sub")
+                .appFieldCode("sub")
+                .transformType(TransformType.NO_TRANSFORM)
+                .createBy("test")
+                .createTime(now)
+                .updateBy("test")
+                .updateTime(now)
+                .build());
+
         String code = issueAuthorizationCode();
         String tokenResponseBody = mockMvc.perform(post("/api/authn/oauth/token")
                         .param("grant_type", "authorization_code")

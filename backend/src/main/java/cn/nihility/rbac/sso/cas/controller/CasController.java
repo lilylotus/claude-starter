@@ -2,6 +2,7 @@ package cn.nihility.rbac.sso.cas.controller;
 
 import cn.nihility.rbac.sso.cas.dto.CasTicketPayload;
 import cn.nihility.rbac.sso.cas.service.CasTicketService;
+import cn.nihility.rbac.sso.cas.support.CasJsonResponses;
 import cn.nihility.rbac.sso.cas.support.CasXmlResponses;
 import cn.nihility.rbac.sso.config.RbacSsoProperties;
 import cn.nihility.rbac.sso.session.SsoSessionCookieUtils;
@@ -9,6 +10,7 @@ import cn.nihility.rbac.sso.session.SsoSessionService;
 import cn.nihility.rbac.sso.support.AppProtocolGuard;
 import cn.nihility.rbac.sso.support.ProtocolResponseWriter;
 import cn.nihility.rbac.sso.support.SsoProtocolException;
+import cn.nihility.rbac.sso.support.SsoUserinfoAttributesResolver;
 import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import io.swagger.v3.oas.annotations.Operation;
@@ -16,6 +18,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
@@ -30,12 +33,17 @@ import org.springframework.web.bind.annotation.RestController;
  * CAS 协议运行时端点（app-sso-protocol-runtime change design.md Decision 5）：
  * {@code /login}、{@code /p3/serviceValidate}、{@code /logout}。三个端点均绕开
  * {@code GlobalResponseAdvice} 的响应包装，方法签名声明为 {@code void}，直接操作
- * {@link HttpServletResponse} 写重定向/XML/纯文本响应（design.md Decision 4）。
+ * {@link HttpServletResponse} 写重定向/XML/JSON/纯文本响应（design.md Decision 4；
+ * {@code serviceValidate} 支持 {@code format} 参数返回 XML/JSON 见
+ * add-sso-userinfo-field-mapping change design.md Decision 1）。
  */
 @RestController
 @RequiredArgsConstructor
 @Tag(name = "CAS 单点登录", description = "CAS 协议运行时端点：登录、票据验证、登出")
 public class CasController {
+
+    /** {@code format} 参数标准化后表示"返回 XML"的取值，其余（含缺省）一律按 JSON 处理。 */
+    private static final String FORMAT_XML = "XML";
 
     /** 应用协议校验入口。 */
     private final AppProtocolGuard appProtocolGuard;
@@ -51,6 +59,9 @@ public class CasController {
 
     /** 用户数据访问接口，票据验证成功后按用户 id 查询用户标识/姓名。 */
     private final UserMapper userMapper;
+
+    /** 用户信息响应属性运行时解析组件，按应用配置的字段映射生成 {@code cas:attributes}。 */
+    private final SsoUserinfoAttributesResolver ssoUserinfoAttributesResolver;
 
     /**
      * CAS 单点登录：{@code service} 校验通过后，若当前浏览器持有有效 SSO 会话则签发服务
@@ -86,33 +97,65 @@ public class CasController {
     }
 
     /**
-     * CAS 票据验证：校验并消费（一次性）票据，返回 CAS 3.0 格式的 XML 响应。
+     * CAS 票据验证：校验并消费（一次性）票据，按 {@code format} 参数返回 CAS 3.0 格式的
+     * XML 或 JSON 响应（大小写不敏感，仅 {@code format=XML} 时返回 XML，其余（含缺省）一律
+     * 返回 JSON，默认值变更见 design.md Decision 1）。用户属性（{@code cas:attributes}/JSON
+     * 对应节点）按该应用配置的用户信息字段映射动态生成。
      *
-     * @param appId    应用对外标识（路径变量，本端点不再重复校验，票据本身已绑定签发时的
-     *                 应用与 {@code service}）
+     * @param appId    应用对外标识（路径变量，本端点不再重复校验；解析应用 id 以查询用户信息
+     *                 字段映射配置时改用票据自身绑定的 {@code appId}，见方法内 {@code payload}）
      * @param service  CAS {@code service} 参数
      * @param ticket   待验证的服务票据
+     * @param format   响应格式，大小写不敏感，仅 {@code XML} 时返回 XML，其余（含缺省）返回 JSON
      * @param response 当前响应
      * @throws IOException 写响应失败
      */
-    @Operation(summary = "CAS 票据验证", description = "校验并一次性消费服务票据，返回 CAS 3.0 格式 XML 响应")
+    @Operation(summary = "CAS 票据验证", description = "校验并一次性消费服务票据，按 format 参数返回 CAS 3.0 格式 XML（format=XML）或 "
+            + "JSON（缺省/其它取值，默认 JSON）响应，属性按应用配置的用户信息字段映射动态生成")
     @GetMapping("/api/authn/cas/{appId}/p3/serviceValidate")
     public void serviceValidate(@PathVariable String appId, @RequestParam String service,
-            @RequestParam String ticket, HttpServletResponse response) throws IOException {
+            @RequestParam String ticket, @RequestParam(required = false) String format, HttpServletResponse response)
+            throws IOException {
+        boolean useXml = FORMAT_XML.equals(format == null ? null : format.trim().toUpperCase());
+
         Optional<CasTicketPayload> payloadOpt = casTicketService.consume(ticket);
         if (payloadOpt.isEmpty() || !Objects.equals(payloadOpt.get().service(), service)) {
-            ProtocolResponseWriter.xml(response,
-                    CasXmlResponses.failure("INVALID_TICKET", "Ticket 不存在、已过期或已被使用"));
+            writeFailure(response, useXml);
             return;
         }
 
-        UserEntity user = userMapper.selectById(payloadOpt.get().userId());
+        CasTicketPayload payload = payloadOpt.get();
+        UserEntity user = userMapper.selectById(payload.userId());
         if (user == null) {
-            ProtocolResponseWriter.xml(response,
-                    CasXmlResponses.failure("INVALID_TICKET", "Ticket 不存在、已过期或已被使用"));
+            writeFailure(response, useXml);
             return;
         }
-        ProtocolResponseWriter.xml(response, CasXmlResponses.success(user.getCode(), user.getName()));
+
+        Long appRefId = appProtocolGuard.resolveAppRefId(payload.appId());
+        Map<String, Object> attributes = ssoUserinfoAttributesResolver.resolve(appRefId, user);
+        if (useXml) {
+            ProtocolResponseWriter.xml(response, CasXmlResponses.success(user.getCode(), attributes));
+        } else {
+            ProtocolResponseWriter.json(response, HttpServletResponse.SC_OK,
+                    CasJsonResponses.success(user.getCode(), attributes));
+        }
+    }
+
+    /**
+     * 按 {@code format} 写出票据验证失败响应（XML 或 JSON）。
+     *
+     * @param response 当前响应
+     * @param useXml   {@code true} 写 XML，{@code false} 写 JSON
+     * @throws IOException 写响应失败
+     */
+    private void writeFailure(HttpServletResponse response, boolean useXml) throws IOException {
+        String code = "INVALID_TICKET";
+        String message = "Ticket 不存在、已过期或已被使用";
+        if (useXml) {
+            ProtocolResponseWriter.xml(response, CasXmlResponses.failure(code, message));
+        } else {
+            ProtocolResponseWriter.json(response, HttpServletResponse.SC_OK, CasJsonResponses.failure(code, message));
+        }
     }
 
     /**

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 应用用户信息响应字段映射关联查询：tab_app_userinfo_field_mapping 关联
+     tab_metadata_field 回填本地字段名称、字段编码（design.md Decision 2：只存
+     metadata_field_id 外键，不落快照，查询时实时 JOIN 读取）。用 LEFT JOIN（而非 INNER
+     JOIN）是有意为之：metadata_field_id 本身允许为空（表示固定的"用户ID"伪字段），且若
+     关联的元数据字段被删除（当前接口不提供删除能力，但保留防御性），映射行本身仍应正常
+     返回。field_name/field_code 用 COALESCE 回填固定伪字段的展示信息。 -->
+<mapper namespace="cn.nihility.rbac.app.authconfig.mapper.AppUserinfoFieldMappingMapper">
+
+    <select id="selectByAppRefId" resultType="cn.nihility.rbac.app.authconfig.dto.AppUserinfoFieldMappingRow">
+        SELECT
+        m.id AS id,
+        m.metadata_field_id AS metadataFieldId,
+        COALESCE(mf.field_name, '用户ID') AS fieldName,
+        COALESCE(mf.field_code, 'id') AS fieldCode,
+        m.app_field_name AS appFieldName,
+        m.app_field_code AS appFieldCode,
+        m.transform_type AS transformType,
+        m.transform_value AS transformValue
+        FROM tab_app_userinfo_field_mapping m
+        LEFT JOIN tab_metadata_field mf ON mf.id = m.metadata_field_id
+        WHERE m.app_id = #{appRefId}
+        ORDER BY m.id ASC
+    </select>
+
+</mapper>

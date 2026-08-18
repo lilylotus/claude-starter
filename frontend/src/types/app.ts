@@ -236,3 +236,34 @@ export interface AppAuthConfigUpdateRequest {
   casServicePatterns: string[]
   oauth2RedirectUriPatterns: string[]
 }
+
+// ---- 认证管理·用户信息响应字段映射：每个应用一份，CAS 票据验证/OAuth2 userinfo 接口共用，
+// 与后端 app/authconfig 模块对齐（见 openspec/changes/add-sso-userinfo-field-mapping）。
+// metadataFieldId 允许为 null，表示固定的"用户ID"伪字段（不在元数据字段目录里，
+// 因为 id 是主键，见 design.md Decision 2），此时 fieldName/fieldCode 由后端回填为
+// 固定字面量 "用户ID"/"id" ----
+
+// 用户信息字段映射行，来自 GET /api/apps/{id}/config/auth/userinfo-field-mappings、
+// PUT 同一地址的返回值；未保存过时后端现算返回默认两行（用户ID、姓名），此时每行 id 为 null
+export interface AppUserinfoFieldMappingVO {
+  id: number | null
+  metadataFieldId: number | null
+  fieldName: string
+  fieldCode: string
+  appFieldName: string
+  appFieldCode: string
+  transformType: TransformType
+  transformValue: string | null
+}
+
+// 整体替换用户信息字段映射列表时单行的请求体，对应
+// PUT /api/apps/{id}/config/auth/userinfo-field-mappings 的请求体元素；metadataFieldId
+// 为 null 表示"用户ID"伪字段，transformValue 是否必填取决于 transformType（FIXED_VALUE/
+// SCRIPT 必填）
+export interface AppUserinfoFieldMappingSaveRequest {
+  metadataFieldId: number | null
+  appFieldName: string
+  appFieldCode: string
+  transformType: TransformType
+  transformValue: string | null
+}
