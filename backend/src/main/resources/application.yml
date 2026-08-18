@@ -79,3 +79,20 @@ rbac:
   # 数据同步事件总线配置（app-sync-notify-pull-api change design.md Decision 4）。
   sync:
     ring-buffer-size: 1024
+
+  # SSO 单点登录运行时配置（app-sso-protocol-runtime change design.md Decision 2/5/6），
+  # 全部为默认值，此处显式列出便于按需覆盖。
+  sso:
+    # SSO 会话 Cookie 是否追加 Secure 属性，本地 http 开发环境保持 false，
+    # 生产环境部署在 https 之后应改为 true。
+    cookie-secure: false
+    # SSO 会话有效期（秒），默认 28800 秒（8 小时），固定过期，不做滑动续期。
+    session-expire-seconds: 28800
+    # CAS 服务票据（ST）有效期（秒），默认 120 秒，一次性短期凭证。
+    cas-ticket-expire-seconds: 120
+    # OAuth2 授权码有效期（秒），默认 300 秒（5 分钟）。
+    oauth-code-expire-seconds: 300
+    # OAuth2 access token 有效期（秒），默认 7200 秒（2 小时）。
+    oauth-token-expire-seconds: 7200
+    # OAuth2 refresh token 有效期（秒），默认 1209600 秒（14 天）。
+    oauth-refresh-token-expire-seconds: 1209600

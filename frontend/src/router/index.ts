@@ -140,6 +140,16 @@ const router = createRouter({
       meta: { title: '登录' },
     },
     {
+      // SSO 专用登录页：外部应用做 CAS/OAuth2 单点登录、用户未登录时跳转来的独立
+      // 登录页，完全独立于管理端登录，不挂在 AppLayout 下（不是嵌套路由），
+      // meta 不设 requiresAuth（不能被下面的 router.beforeEach 守卫拦截重定向到
+      // 管理端登录页）
+      path: '/sso/login',
+      name: 'sso-login',
+      component: () => import('@/views/sso/SsoLoginView.vue'),
+      meta: { title: '单点登录' },
+    },
+    {
       // 首登强制改密页面：不挂在 menu.ts 侧边栏菜单下（不是主动导航入口，是登录后
       // firstLogin=true 时被动跳转进入），因此不出现在侧边栏，也不在权限资源.txt 里
       // 登记为一个独立的可访问菜单资源；但 POST /api/auth/password 本身仍属于"业务接口"，

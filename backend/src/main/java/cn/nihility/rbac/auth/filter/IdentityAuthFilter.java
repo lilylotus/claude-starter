@@ -62,10 +62,13 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
 
     /**
      * 完全豁免身份校验（含 {@code menu} 请求头校验）的路径：登录相关接口 +
-     * springdoc/swagger-ui + 对外同步拉取接口。{@code /open/api/sync/**} 面向外部应用，
-     * 鉴权只走 AccessKey + 签名（{@code cn.nihility.rbac.sync.sign.OpenApiSignInterceptor}），
-     * 不使用本过滤器基于登录会话的 {@code identity-token}/{@code menu} 校验
-     * （app-sync-notify-pull-api change design.md Decision 9）。
+     * springdoc/swagger-ui + 对外同步拉取接口 + SSO 协议运行时端点。{@code /open/api/sync/**}
+     * 面向外部应用，鉴权只走 AccessKey + 签名（
+     * {@code cn.nihility.rbac.sync.sign.OpenApiSignInterceptor}），不使用本过滤器基于登录
+     * 会话的 {@code identity-token}/{@code menu} 校验（app-sync-notify-pull-api change
+     * design.md Decision 9）。{@code /api/authn/**}（SSO 专用登录、CAS、OAuth2 协议端点）
+     * 面向外部浏览器/应用，鉴权走本过滤器机制之外的 SSO Cookie 会话，同样不适用
+     * （app-sso-protocol-runtime change design.md Decision 7）。
      */
     private static final List<String> FULL_WHITELIST = List.of(
             "/api/auth/public-key",
@@ -77,7 +80,8 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
             "/v3/api-docs/**",
             "/swagger-resources/**",
             "/webjars/**",
-            "/open/api/sync/**");
+            "/open/api/sync/**",
+            "/api/authn/**");
 
     /**
      * 仍需 {@code identity-token}/{@code menu} 校验，但豁免"首登强制改密"拦截与
