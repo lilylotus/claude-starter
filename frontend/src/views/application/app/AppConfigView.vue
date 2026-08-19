@@ -49,14 +49,19 @@ const loading = ref(false)
 const loadError = ref('')
 const config = ref<AppConfigVO | null>(null)
 
-// 五个分区（基础信息/同步配置/认证管理/通知日志/拉取日志）用 el-tabs 切换展示，而不是纵向
-// 堆叠；原“接口配置” tab（只有签名算法一项）已合并进“同步配置”tab 的“基础同步配置”表单
-const activeTab = ref<'basic' | 'sync' | 'auth' | 'notifyLog' | 'pullLog'>('basic')
+// 三个一级分区（基础信息/同步配置/认证管理）用 el-tabs 切换展示，而不是纵向堆叠；原
+// “接口配置” tab（只有签名算法一项）已合并进“同步配置”tab 的“基础同步配置”表单；
+// “通知日志”“拉取日志”不再是一级 tab，改为“同步配置”内部子级 tab（见 syncSectionTab）
+const activeTab = ref<'basic' | 'sync' | 'auth'>('basic')
 
-// 切到“通知日志”“拉取日志”标签页时按需触发首次加载，不在页面 onMounted 里一起拉取
-function handleActiveTabChange() {
-  if (activeTab.value === 'notifyLog') ensureNotifyLogLoaded()
-  else if (activeTab.value === 'pullLog') ensurePullLogLoaded()
+// “同步配置”一级 tab 内部的子级 tabs：基础同步配置/数据范围/通知日志/拉取日志，
+// 互斥展示，默认展示“基础同步配置”（见 openspec/changes/app-config-sync-subtabs）
+const syncSectionTab = ref<'basicSync' | 'domainScope' | 'notifyLog' | 'pullLog'>('basicSync')
+
+// 切到“通知日志”“拉取日志”子 tab 时按需触发首次加载，不在页面 onMounted 里一起拉取
+function handleSyncSectionTabChange() {
+  if (syncSectionTab.value === 'notifyLog') ensureNotifyLogLoaded()
+  else if (syncSectionTab.value === 'pullLog') ensurePullLogLoaded()
 }
 
 // 签名算法的本地可编辑副本，与 config.signAlgorithm 分离，未点“保存”前不影响已加载的
@@ -925,13 +930,7 @@ function handlePullLogSizeChange(newSize: number) {
       :closable="false"
     />
 
-    <el-tabs
-      v-else
-      v-model="activeTab"
-      class="app-config__tabs"
-      v-loading="loading"
-      @tab-change="handleActiveTabChange"
-    >
+    <el-tabs v-else v-model="activeTab" class="app-config__tabs" v-loading="loading">
       <el-tab-pane label="基础信息" name="basic">
         <div class="app-config__row">
           <span class="app-config__label">AppId</span>
@@ -959,229 +958,362 @@ function handlePullLogSizeChange(newSize: number) {
       </el-tab-pane>
 
       <el-tab-pane label="同步配置" name="sync">
-        <el-form label-width="110px">
-          <h4 class="app-config__sync-group-title">基础同步配置</h4>
-          <el-form-item label="同步方式">
-            <el-radio-group v-model="syncForm.syncMode">
-              <el-radio value="NOTIFY">通知</el-radio>
-              <el-radio value="PULL">拉取</el-radio>
-            </el-radio-group>
-          </el-form-item>
-          <template v-if="syncForm.syncMode === 'NOTIFY'">
-            <el-form-item label="接口地址">
-              <el-input
-                v-model="syncForm.notifyUrl"
-                placeholder="请输入通知回调接口地址，如 https://partner.example.com/callback"
-              />
-            </el-form-item>
-            <el-form-item label="参数配置">
-              <div class="app-config__param-rows">
-                <div v-for="(row, index) in notifyParamRows" :key="index" class="app-config__param-row">
-                  <el-input v-model="row.key" placeholder="参数名" />
-                  <el-input v-model="row.value" placeholder="参数值" />
-                  <el-button link :icon="Delete" type="danger" @click="removeNotifyParamRow(index)" />
-                </div>
-                <el-button link :icon="Plus" @click="addNotifyParamRow">添加参数</el-button>
-              </div>
-            </el-form-item>
-          </template>
-          <el-form-item label="签名校验">
-            <el-switch v-model="syncForm.needSign" />
-          </el-form-item>
-          <el-form-item v-if="syncForm.needSign" label="签名算法">
-            <el-radio-group v-model="signAlgorithmForm">
-              <el-radio value="SHA256">SHA-256</el-radio>
-              <el-radio value="SM3">国密 SM3</el-radio>
-            </el-radio-group>
-          </el-form-item>
-
-          <el-form-item v-if="hasPermission('AppManagement:app:config:editSync')">
-            <el-button type="primary" :loading="savingBasicSync" @click="saveBasicSyncConfig">保存</el-button>
-          </el-form-item>
-        </el-form>
-
-        <h4 class="app-config__sync-group-title">数据范围</h4>
         <el-tabs
-          v-model="syncDomainTab"
-          tab-position="left"
-          class="app-config__domain-tabs"
-          @tab-change="handleDomainTabChange"
+          v-model="syncSectionTab"
+          class="app-config__sync-section-tabs"
+          @tab-change="handleSyncSectionTabChange"
         >
-          <el-tab-pane
-            v-for="option in SYNC_DOMAIN_OPTIONS"
-            :key="option.value"
-            :label="option.label"
-            :name="option.value"
-          >
-            <div v-loading="domainConfigLoading" class="app-config__domain-panel">
-              <el-tabs v-model="domainSubTab[option.value]" class="app-config__domain-sub-tabs">
-                <el-tab-pane label="是否启用" name="enable">
-                  <el-form label-width="110px">
-                    <el-form-item label="是否启用">
-                      <el-switch v-model="domainConfigs[option.value].syncEnabled" />
-                    </el-form-item>
-                    <el-form-item label="拉取分页大小">
-                      <el-input-number v-model="domainConfigs[option.value].pageSize" :min="1" />
-                    </el-form-item>
-                    <el-form-item v-if="hasPermission('AppManagement:app:config:editSync')">
-                      <el-button
-                        type="primary"
-                        :loading="savingDomainConfig"
-                        @click="saveDomainConfig(option.value)"
-                      >
-                        保存
-                      </el-button>
-                    </el-form-item>
-                  </el-form>
-                </el-tab-pane>
+          <el-tab-pane label="基础同步配置" name="basicSync">
+            <el-form label-width="110px">
+              <el-form-item label="同步方式">
+                <el-radio-group v-model="syncForm.syncMode">
+                  <el-radio value="NOTIFY">通知</el-radio>
+                  <el-radio value="PULL">拉取</el-radio>
+                </el-radio-group>
+              </el-form-item>
+              <template v-if="syncForm.syncMode === 'NOTIFY'">
+                <el-form-item label="接口地址">
+                  <el-input
+                    v-model="syncForm.notifyUrl"
+                    placeholder="请输入通知回调接口地址，如 https://partner.example.com/callback"
+                  />
+                </el-form-item>
+                <el-form-item label="参数配置">
+                  <div class="app-config__param-rows">
+                    <div v-for="(row, index) in notifyParamRows" :key="index" class="app-config__param-row">
+                      <el-input v-model="row.key" placeholder="参数名" />
+                      <el-input v-model="row.value" placeholder="参数值" />
+                      <el-button link :icon="Delete" type="danger" @click="removeNotifyParamRow(index)" />
+                    </div>
+                    <el-button link :icon="Plus" @click="addNotifyParamRow">添加参数</el-button>
+                  </div>
+                </el-form-item>
+              </template>
+              <el-form-item label="签名校验">
+                <el-switch v-model="syncForm.needSign" />
+              </el-form-item>
+              <el-form-item v-if="syncForm.needSign" label="签名算法">
+                <el-radio-group v-model="signAlgorithmForm">
+                  <el-radio value="SHA256">SHA-256</el-radio>
+                  <el-radio value="SM3">国密 SM3</el-radio>
+                </el-radio-group>
+              </el-form-item>
 
-                <el-tab-pane
-                  v-if="orgScopeSupportedDomains.includes(option.value)"
-                  label="同步范围"
-                  name="orgScope"
-                >
-                  <div v-loading="orgScopeLoading" class="app-config__org-scope">
-                    <el-radio-group v-model="orgScopeState[option.value].mode">
-                      <el-radio value="ALL">全部数据</el-radio>
-                      <el-radio value="SCOPED">指定组织范围</el-radio>
-                    </el-radio-group>
+              <el-form-item v-if="hasPermission('AppManagement:app:config:editSync')">
+                <el-button type="primary" :loading="savingBasicSync" @click="saveBasicSyncConfig">保存</el-button>
+              </el-form-item>
+            </el-form>
+          </el-tab-pane>
 
-                    <div v-if="orgScopeState[option.value].mode === 'SCOPED'" class="app-config__org-scope-section">
-                      <div class="app-config__org-scope-section__header">
-                        <el-button link type="primary" @click="addOrgScopeRow(option.value)">+ 添加组织</el-button>
-                      </div>
-
-                      <p v-if="orgScopeState[option.value].rows.length === 0" class="app-config__org-scope-empty">
-                        暂无指定组织，请添加至少一个组织
-                      </p>
-
-                      <div v-else class="app-config__org-scope-list">
-                        <div
-                          v-for="(scope, index) in orgScopeState[option.value].rows"
-                          :key="index"
-                          class="app-config__org-scope-row"
-                        >
-                          <div class="app-config__org-scope-row__fields">
-                            <el-tree-select
-                              v-model="scope.orgId"
-                              :data="orgTree"
-                              :props="{ label: 'name', children: 'children' }"
-                              node-key="id"
-                              check-strictly
-                              placeholder="请选择组织"
-                              style="width: 100%"
-                            />
-                            <el-checkbox v-model="scope.includeChildren">含子组织</el-checkbox>
-                          </div>
+          <el-tab-pane label="数据范围" name="domainScope">
+            <el-tabs
+              v-model="syncDomainTab"
+              tab-position="left"
+              class="app-config__domain-tabs"
+              @tab-change="handleDomainTabChange"
+            >
+              <el-tab-pane
+                v-for="option in SYNC_DOMAIN_OPTIONS"
+                :key="option.value"
+                :label="option.label"
+                :name="option.value"
+              >
+                <div v-loading="domainConfigLoading" class="app-config__domain-panel">
+                  <el-tabs v-model="domainSubTab[option.value]" class="app-config__domain-sub-tabs">
+                    <el-tab-pane label="是否启用" name="enable">
+                      <el-form label-width="110px">
+                        <el-form-item label="是否启用">
+                          <el-switch v-model="domainConfigs[option.value].syncEnabled" />
+                        </el-form-item>
+                        <el-form-item label="拉取分页大小">
+                          <el-input-number v-model="domainConfigs[option.value].pageSize" :min="1" />
+                        </el-form-item>
+                        <el-form-item v-if="hasPermission('AppManagement:app:config:editSync')">
                           <el-button
-                            link
-                            type="danger"
-                            class="app-config__org-scope-row__remove"
-                            @click="removeOrgScopeRow(option.value, index)"
+                            type="primary"
+                            :loading="savingDomainConfig"
+                            @click="saveDomainConfig(option.value)"
                           >
-                            删除
+                            保存
+                          </el-button>
+                        </el-form-item>
+                      </el-form>
+                    </el-tab-pane>
+
+                    <el-tab-pane
+                      v-if="orgScopeSupportedDomains.includes(option.value)"
+                      label="同步范围"
+                      name="orgScope"
+                    >
+                      <div v-loading="orgScopeLoading" class="app-config__org-scope">
+                        <el-radio-group v-model="orgScopeState[option.value].mode">
+                          <el-radio value="ALL">全部数据</el-radio>
+                          <el-radio value="SCOPED">指定组织范围</el-radio>
+                        </el-radio-group>
+
+                        <div
+                          v-if="orgScopeState[option.value].mode === 'SCOPED'"
+                          class="app-config__org-scope-section"
+                        >
+                          <div class="app-config__org-scope-section__header">
+                            <el-button link type="primary" @click="addOrgScopeRow(option.value)">
+                              + 添加组织
+                            </el-button>
+                          </div>
+
+                          <p v-if="orgScopeState[option.value].rows.length === 0" class="app-config__org-scope-empty">
+                            暂无指定组织，请添加至少一个组织
+                          </p>
+
+                          <div v-else class="app-config__org-scope-list">
+                            <div
+                              v-for="(scope, index) in orgScopeState[option.value].rows"
+                              :key="index"
+                              class="app-config__org-scope-row"
+                            >
+                              <div class="app-config__org-scope-row__fields">
+                                <el-tree-select
+                                  v-model="scope.orgId"
+                                  :data="orgTree"
+                                  :props="{ label: 'name', children: 'children' }"
+                                  node-key="id"
+                                  check-strictly
+                                  placeholder="请选择组织"
+                                  style="width: 100%"
+                                />
+                                <el-checkbox v-model="scope.includeChildren">含子组织</el-checkbox>
+                              </div>
+                              <el-button
+                                link
+                                type="danger"
+                                class="app-config__org-scope-row__remove"
+                                @click="removeOrgScopeRow(option.value, index)"
+                              >
+                                删除
+                              </el-button>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div
+                          v-if="hasPermission('AppManagement:app:config:editSync')"
+                          class="app-config__org-scope-save"
+                        >
+                          <el-button type="primary" :loading="savingOrgScope" @click="saveOrgScope(option.value)">
+                            保存同步范围
                           </el-button>
                         </div>
                       </div>
-                    </div>
+                    </el-tab-pane>
 
-                    <div v-if="hasPermission('AppManagement:app:config:editSync')" class="app-config__org-scope-save">
-                      <el-button type="primary" :loading="savingOrgScope" @click="saveOrgScope(option.value)">
-                        保存同步范围
-                      </el-button>
-                    </div>
-                  </div>
-                </el-tab-pane>
-
-                <el-tab-pane
-                  v-if="fieldMappingSupportedDomains.includes(option.value)"
-                  label="字段映射"
-                  name="fieldMapping"
-                >
-                  <div class="app-config__field-mapping-toolbar">
-                    <el-select
-                      v-model="pendingFieldId"
-                      placeholder="选择字段新增映射"
-                      filterable
-                      clearable
-                      class="app-config__field-mapping-select"
-                      @change="handleAddField"
+                    <el-tab-pane
+                      v-if="fieldMappingSupportedDomains.includes(option.value)"
+                      label="字段映射"
+                      name="fieldMapping"
                     >
-                      <el-option
-                        v-for="field in addableMetadataFieldOptions"
-                        :key="field.id"
-                        :label="`${field.fieldName}（${field.fieldCode}）`"
-                        :value="field.id"
-                      />
-                    </el-select>
-                  </div>
-
-                  <el-table
-                    v-loading="fieldMappingLoading"
-                    :data="currentFieldMappingRows"
-                    border
-                    size="small"
-                    class="app-config__field-mapping-table"
-                  >
-                    <el-table-column label="字段名称" prop="fieldName" width="130" />
-                    <el-table-column label="字段编码" prop="fieldCode" width="130" />
-                    <el-table-column label="应用字段名称" min-width="140">
-                      <template #default="{ row }">
-                        <el-input v-model="row.appFieldName" placeholder="请输入应用侧字段名称" />
-                      </template>
-                    </el-table-column>
-                    <el-table-column label="应用字段编码" min-width="140">
-                      <template #default="{ row }">
-                        <el-input v-model="row.appFieldCode" placeholder="请输入应用侧字段编码" />
-                      </template>
-                    </el-table-column>
-                    <el-table-column label="转换方式" width="130">
-                      <template #default="{ row }">
-                        <el-select v-model="row.transformType">
+                      <div class="app-config__field-mapping-toolbar">
+                        <el-select
+                          v-model="pendingFieldId"
+                          placeholder="选择字段新增映射"
+                          filterable
+                          clearable
+                          class="app-config__field-mapping-select"
+                          @change="handleAddField"
+                        >
                           <el-option
-                            v-for="item in TRANSFORM_TYPE_OPTIONS"
-                            :key="item.value"
-                            :label="item.label"
-                            :value="item.value"
+                            v-for="field in addableMetadataFieldOptions"
+                            :key="field.id"
+                            :label="`${field.fieldName}（${field.fieldCode}）`"
+                            :value="field.id"
                           />
                         </el-select>
-                      </template>
-                    </el-table-column>
-                    <el-table-column label="转换取值" min-width="220">
-                      <template #default="{ row }">
-                        <el-input
-                          v-if="row.transformType === 'FIXED_VALUE'"
-                          v-model="row.transformValue"
-                          placeholder="请输入固定值"
-                        />
-                        <el-input
-                          v-else-if="row.transformType === 'SCRIPT'"
-                          v-model="row.transformValue"
-                          type="textarea"
-                          :rows="3"
-                          placeholder="请输入 JavaScript 转换脚本"
-                        />
-                        <span v-else class="app-config__field-mapping-disabled">-</span>
-                      </template>
-                    </el-table-column>
-                    <el-table-column label="操作" width="70" fixed="right">
-                      <template #default="{ $index }">
-                        <el-button link :icon="Delete" type="danger" @click="removeFieldMappingRow($index)" />
-                      </template>
-                    </el-table-column>
-                  </el-table>
+                      </div>
 
-                  <div
-                    v-if="hasPermission('AppManagement:app:config:editSync')"
-                    class="app-config__field-mapping-save"
+                      <el-table
+                        v-loading="fieldMappingLoading"
+                        :data="currentFieldMappingRows"
+                        border
+                        size="small"
+                        class="app-config__field-mapping-table"
+                      >
+                        <el-table-column label="字段名称" prop="fieldName" width="130" />
+                        <el-table-column label="字段编码" prop="fieldCode" width="130" />
+                        <el-table-column label="应用字段名称" min-width="140">
+                          <template #default="{ row }">
+                            <el-input v-model="row.appFieldName" placeholder="请输入应用侧字段名称" />
+                          </template>
+                        </el-table-column>
+                        <el-table-column label="应用字段编码" min-width="140">
+                          <template #default="{ row }">
+                            <el-input v-model="row.appFieldCode" placeholder="请输入应用侧字段编码" />
+                          </template>
+                        </el-table-column>
+                        <el-table-column label="转换方式" width="130">
+                          <template #default="{ row }">
+                            <el-select v-model="row.transformType">
+                              <el-option
+                                v-for="item in TRANSFORM_TYPE_OPTIONS"
+                                :key="item.value"
+                                :label="item.label"
+                                :value="item.value"
+                              />
+                            </el-select>
+                          </template>
+                        </el-table-column>
+                        <el-table-column label="转换取值" min-width="220">
+                          <template #default="{ row }">
+                            <el-input
+                              v-if="row.transformType === 'FIXED_VALUE'"
+                              v-model="row.transformValue"
+                              placeholder="请输入固定值"
+                            />
+                            <el-input
+                              v-else-if="row.transformType === 'SCRIPT'"
+                              v-model="row.transformValue"
+                              type="textarea"
+                              :rows="3"
+                              placeholder="请输入 JavaScript 转换脚本"
+                            />
+                            <span v-else class="app-config__field-mapping-disabled">-</span>
+                          </template>
+                        </el-table-column>
+                        <el-table-column label="操作" width="70" fixed="right">
+                          <template #default="{ $index }">
+                            <el-button link :icon="Delete" type="danger" @click="removeFieldMappingRow($index)" />
+                          </template>
+                        </el-table-column>
+                      </el-table>
+
+                      <div
+                        v-if="hasPermission('AppManagement:app:config:editSync')"
+                        class="app-config__field-mapping-save"
+                      >
+                        <el-button type="primary" :loading="savingFieldMapping" @click="saveFieldMappings">
+                          保存字段映射
+                        </el-button>
+                      </div>
+                    </el-tab-pane>
+                  </el-tabs>
+                </div>
+              </el-tab-pane>
+            </el-tabs>
+          </el-tab-pane>
+
+          <el-tab-pane label="通知日志" name="notifyLog">
+            <el-form class="app-config__log-filter-form" inline @submit.prevent>
+              <el-form-item label="状态">
+                <el-select
+                  v-model="notifyLogFilters.notifyStatus"
+                  placeholder="全部状态"
+                  clearable
+                  style="width: 140px"
+                >
+                  <el-option
+                    v-for="opt in NOTIFY_STATUS_OPTIONS"
+                    :key="opt.value"
+                    :label="opt.label"
+                    :value="opt.value"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="通知时间">
+                <el-date-picker
+                  v-model="notifyLogDateRange"
+                  type="datetimerange"
+                  range-separator="至"
+                  start-placeholder="开始时间"
+                  end-placeholder="结束时间"
+                  value-format="YYYY-MM-DDTHH:mm:ss"
+                />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" @click="handleNotifyLogSearch">查询</el-button>
+                <el-button @click="handleNotifyLogReset">重置</el-button>
+              </el-form-item>
+            </el-form>
+
+            <el-table v-loading="notifyLogLoading" :data="notifyLogList" empty-text="暂无通知日志">
+              <el-table-column label="数据类型" width="100">
+                <template #default="{ row }">{{ displayOrDash((row as AppNotifyRecordRow).dataType) }}</template>
+              </el-table-column>
+              <el-table-column label="bizId" width="100">
+                <template #default="{ row }">{{ displayOrDash((row as AppNotifyRecordRow).bizId) }}</template>
+              </el-table-column>
+              <el-table-column label="状态" width="90">
+                <template #default="{ row }">
+                  <el-tag
+                    :type="(row as AppNotifyRecordRow).notifyStatus === NOTIFY_STATUS_SUCCESS ? 'success' : 'danger'"
                   >
-                    <el-button type="primary" :loading="savingFieldMapping" @click="saveFieldMappings">
-                      保存字段映射
-                    </el-button>
-                  </div>
-                </el-tab-pane>
-              </el-tabs>
-            </div>
+                    {{ (row as AppNotifyRecordRow).notifyStatus === NOTIFY_STATUS_SUCCESS ? '成功' : '失败' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="HTTP 状态码" width="110">
+                <template #default="{ row }">{{ displayOrDash((row as AppNotifyRecordRow).httpStatus) }}</template>
+              </el-table-column>
+              <el-table-column label="回调地址" min-width="200" show-overflow-tooltip>
+                <template #default="{ row }">{{ displayOrDash((row as AppNotifyRecordRow).notifyUrl) }}</template>
+              </el-table-column>
+              <el-table-column label="错误摘要" min-width="180" show-overflow-tooltip>
+                <template #default="{ row }">{{ displayOrDash((row as AppNotifyRecordRow).errorMsg) }}</template>
+              </el-table-column>
+              <el-table-column prop="createTime" label="时间" width="170" />
+            </el-table>
+
+            <el-pagination
+              class="app-config__log-pagination"
+              background
+              layout="sizes, prev, pager, next, total"
+              :page-sizes="[...PAGE_SIZE_OPTIONS]"
+              :current-page="notifyLogPage"
+              :page-size="notifyLogPageSize"
+              :total="notifyLogTotal"
+              @current-change="handleNotifyLogPageChange"
+              @size-change="handleNotifyLogSizeChange"
+            />
+          </el-tab-pane>
+
+          <el-tab-pane label="拉取日志" name="pullLog">
+            <el-form class="app-config__log-filter-form" inline @submit.prevent>
+              <el-form-item label="拉取时间">
+                <el-date-picker
+                  v-model="pullLogDateRange"
+                  type="datetimerange"
+                  range-separator="至"
+                  start-placeholder="开始时间"
+                  end-placeholder="结束时间"
+                  value-format="YYYY-MM-DDTHH:mm:ss"
+                />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" @click="handlePullLogSearch">查询</el-button>
+                <el-button @click="handlePullLogReset">重置</el-button>
+              </el-form-item>
+            </el-form>
+
+            <el-table v-loading="pullLogLoading" :data="pullLogList" empty-text="暂无拉取日志">
+              <el-table-column label="拉取方式" width="120">
+                <template #default="{ row }">{{ PULL_MODE_LABELS[(row as AppPullRecordRow).pullMode] }}</template>
+              </el-table-column>
+              <el-table-column label="数据类型" width="100">
+                <template #default="{ row }">{{ displayOrDash((row as AppPullRecordRow).dataType) }}</template>
+              </el-table-column>
+              <el-table-column label="请求摘要" min-width="220" show-overflow-tooltip prop="requestSummary" />
+              <el-table-column label="返回条数" prop="resultCount" width="100" />
+              <el-table-column prop="createTime" label="时间" width="170" />
+            </el-table>
+
+            <el-pagination
+              class="app-config__log-pagination"
+              background
+              layout="sizes, prev, pager, next, total"
+              :page-sizes="[...PAGE_SIZE_OPTIONS]"
+              :current-page="pullLogPage"
+              :page-size="pullLogPageSize"
+              :total="pullLogTotal"
+              @current-change="handlePullLogPageChange"
+              @size-change="handlePullLogSizeChange"
+            />
           </el-tab-pane>
         </el-tabs>
       </el-tab-pane>
@@ -1373,111 +1505,6 @@ function handlePullLogSizeChange(newSize: number) {
           </div>
         </div>
       </el-tab-pane>
-
-      <el-tab-pane label="通知日志" name="notifyLog">
-        <el-form class="app-config__log-filter-form" inline @submit.prevent>
-          <el-form-item label="状态">
-            <el-select v-model="notifyLogFilters.notifyStatus" placeholder="全部状态" clearable style="width: 140px">
-              <el-option v-for="opt in NOTIFY_STATUS_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="通知时间">
-            <el-date-picker
-              v-model="notifyLogDateRange"
-              type="datetimerange"
-              range-separator="至"
-              start-placeholder="开始时间"
-              end-placeholder="结束时间"
-              value-format="YYYY-MM-DDTHH:mm:ss"
-            />
-          </el-form-item>
-          <el-form-item>
-            <el-button type="primary" @click="handleNotifyLogSearch">查询</el-button>
-            <el-button @click="handleNotifyLogReset">重置</el-button>
-          </el-form-item>
-        </el-form>
-
-        <el-table v-loading="notifyLogLoading" :data="notifyLogList" empty-text="暂无通知日志">
-          <el-table-column label="数据类型" width="100">
-            <template #default="{ row }">{{ displayOrDash((row as AppNotifyRecordRow).dataType) }}</template>
-          </el-table-column>
-          <el-table-column label="bizId" width="100">
-            <template #default="{ row }">{{ displayOrDash((row as AppNotifyRecordRow).bizId) }}</template>
-          </el-table-column>
-          <el-table-column label="状态" width="90">
-            <template #default="{ row }">
-              <el-tag :type="(row as AppNotifyRecordRow).notifyStatus === NOTIFY_STATUS_SUCCESS ? 'success' : 'danger'">
-                {{ (row as AppNotifyRecordRow).notifyStatus === NOTIFY_STATUS_SUCCESS ? '成功' : '失败' }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="HTTP 状态码" width="110">
-            <template #default="{ row }">{{ displayOrDash((row as AppNotifyRecordRow).httpStatus) }}</template>
-          </el-table-column>
-          <el-table-column label="回调地址" min-width="200" show-overflow-tooltip>
-            <template #default="{ row }">{{ displayOrDash((row as AppNotifyRecordRow).notifyUrl) }}</template>
-          </el-table-column>
-          <el-table-column label="错误摘要" min-width="180" show-overflow-tooltip>
-            <template #default="{ row }">{{ displayOrDash((row as AppNotifyRecordRow).errorMsg) }}</template>
-          </el-table-column>
-          <el-table-column prop="createTime" label="时间" width="170" />
-        </el-table>
-
-        <el-pagination
-          class="app-config__log-pagination"
-          background
-          layout="sizes, prev, pager, next, total"
-          :page-sizes="[...PAGE_SIZE_OPTIONS]"
-          :current-page="notifyLogPage"
-          :page-size="notifyLogPageSize"
-          :total="notifyLogTotal"
-          @current-change="handleNotifyLogPageChange"
-          @size-change="handleNotifyLogSizeChange"
-        />
-      </el-tab-pane>
-
-      <el-tab-pane label="拉取日志" name="pullLog">
-        <el-form class="app-config__log-filter-form" inline @submit.prevent>
-          <el-form-item label="拉取时间">
-            <el-date-picker
-              v-model="pullLogDateRange"
-              type="datetimerange"
-              range-separator="至"
-              start-placeholder="开始时间"
-              end-placeholder="结束时间"
-              value-format="YYYY-MM-DDTHH:mm:ss"
-            />
-          </el-form-item>
-          <el-form-item>
-            <el-button type="primary" @click="handlePullLogSearch">查询</el-button>
-            <el-button @click="handlePullLogReset">重置</el-button>
-          </el-form-item>
-        </el-form>
-
-        <el-table v-loading="pullLogLoading" :data="pullLogList" empty-text="暂无拉取日志">
-          <el-table-column label="拉取方式" width="120">
-            <template #default="{ row }">{{ PULL_MODE_LABELS[(row as AppPullRecordRow).pullMode] }}</template>
-          </el-table-column>
-          <el-table-column label="数据类型" width="100">
-            <template #default="{ row }">{{ displayOrDash((row as AppPullRecordRow).dataType) }}</template>
-          </el-table-column>
-          <el-table-column label="请求摘要" min-width="220" show-overflow-tooltip prop="requestSummary" />
-          <el-table-column label="返回条数" prop="resultCount" width="100" />
-          <el-table-column prop="createTime" label="时间" width="170" />
-        </el-table>
-
-        <el-pagination
-          class="app-config__log-pagination"
-          background
-          layout="sizes, prev, pager, next, total"
-          :page-sizes="[...PAGE_SIZE_OPTIONS]"
-          :current-page="pullLogPage"
-          :page-size="pullLogPageSize"
-          :total="pullLogTotal"
-          @current-change="handlePullLogPageChange"
-          @size-change="handlePullLogSizeChange"
-        />
-      </el-tab-pane>
     </el-tabs>
 
     <el-dialog
@@ -1614,6 +1641,17 @@ function handlePullLogSizeChange(newSize: number) {
 
   .el-input {
     max-width: 220px;
+  }
+}
+
+// “同步配置”一级 tab 内部的子级 tabs：基础同步配置/数据范围/通知日志/拉取日志，顶部横排，
+// 写法与下面数据域面板内“是否启用/同步范围/字段映射”二级 tabs（.app-config__domain-sub-tabs）
+// 保持一致，收紧和一级 tab 内容区的间距
+.app-config__sync-section-tabs {
+  margin-top: 4px;
+
+  :deep(.el-tabs__header) {
+    margin-bottom: 16px;
   }
 }
 
