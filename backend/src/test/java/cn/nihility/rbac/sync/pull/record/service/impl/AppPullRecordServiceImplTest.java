@@ -6,7 +6,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.common.result.PageResult;
-import cn.nihility.rbac.sync.pull.record.constant.PullMode;
 import cn.nihility.rbac.sync.pull.record.dto.AppPullRecordQueryRequest;
 import cn.nihility.rbac.sync.pull.record.dto.AppPullRecordVO;
 import cn.nihility.rbac.sync.pull.record.entity.AppPullRecordEntity;
@@ -24,7 +23,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 /**
  * {@link AppPullRecordServiceImpl} 的单元测试，重点覆盖写入拉取日志时审计字段固定为
  * {@code open-api}、分页查询参数原样透传给 mapper、查询结果按 MapStruct 转换为视图对象
- * （add-app-sync-notify-pull-logs change tasks.md 7.2/7.3）。
+ * （add-app-sync-notify-pull-logs change tasks.md 7.2/7.3；{@code pullMode} 随拉取接口
+ * 合并为一个而删除，见 app-sync-drop-changelog change tasks.md 6.1/6.2）。
  */
 @ExtendWith(MockitoExtension.class)
 class AppPullRecordServiceImplTest {
@@ -46,15 +46,14 @@ class AppPullRecordServiceImplTest {
      */
     @Test
     void record_shouldInsertEntityWithOpenApiOperator() {
-        service.record(1L, PullMode.BY_ID, "ORG", "请求了 3 个 bizId", 2);
+        service.record(1L, "ORG", "page=1, pageSize=20", 2);
 
         ArgumentCaptor<AppPullRecordEntity> captor = ArgumentCaptor.forClass(AppPullRecordEntity.class);
         verify(appPullRecordMapper).insert(captor.capture());
         AppPullRecordEntity entity = captor.getValue();
         assertThat(entity.getAppRefId()).isEqualTo(1L);
-        assertThat(entity.getPullMode()).isEqualTo(PullMode.BY_ID);
         assertThat(entity.getDataType()).isEqualTo("ORG");
-        assertThat(entity.getRequestSummary()).isEqualTo("请求了 3 个 bizId");
+        assertThat(entity.getRequestSummary()).isEqualTo("page=1, pageSize=20");
         assertThat(entity.getResultCount()).isEqualTo(2);
         assertThat(entity.getCreateBy()).isEqualTo("open-api");
         assertThat(entity.getUpdateBy()).isEqualTo("open-api");
@@ -93,9 +92,8 @@ class AppPullRecordServiceImplTest {
         AppPullRecordEntity entity = AppPullRecordEntity.builder()
                 .id(1L)
                 .appRefId(1L)
-                .pullMode(PullMode.BY_SEQUENCE)
-                .dataType(null)
-                .requestSummary("fromSequence=1000, limit=20")
+                .dataType("ORG")
+                .requestSummary("page=1, pageSize=20, updateTimeFrom=2026-01-01T00:00")
                 .resultCount(5)
                 .createTime(LocalDateTime.of(2026, 1, 1, 12, 0))
                 .build();
@@ -115,9 +113,8 @@ class AppPullRecordServiceImplTest {
         assertThat(result.getRecords()).hasSize(1);
         AppPullRecordVO vo = result.getRecords().get(0);
         assertThat(vo.getId()).isEqualTo(1L);
-        assertThat(vo.getPullMode()).isEqualTo(PullMode.BY_SEQUENCE);
-        assertThat(vo.getDataType()).isNull();
-        assertThat(vo.getRequestSummary()).isEqualTo("fromSequence=1000, limit=20");
+        assertThat(vo.getDataType()).isEqualTo("ORG");
+        assertThat(vo.getRequestSummary()).isEqualTo("page=1, pageSize=20, updateTimeFrom=2026-01-01T00:00");
         assertThat(vo.getResultCount()).isEqualTo(5);
     }
 }

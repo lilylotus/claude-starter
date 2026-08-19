@@ -2,14 +2,12 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<!-- 同步候选应用查询：tab_app_config INNER JOIN tab_app INNER JOIN
+<!-- 通知候选应用查询：tab_app_config INNER JOIN tab_app INNER JOIN
      tab_app_sync_domain_config，联表条件写在 ON 后，业务过滤条件（sync_domain/
-     sync_enabled/应用状态/同步总开关）写在 WHERE 后。不再过滤 sync_mode（app-sync-org-scope-
-     and-app-change-log change design.md Decision 5，原 app-sync-notify-pull-api change
-     design.md Decision 3/8 的 sync_mode='NOTIFY' 过滤条件已去掉）。新增
-     c.sync_master_enabled = 1 条件：应用同步总开关关闭时不作为候选应用，一次性覆盖"不再产生
-     变更记录""不再发送通知"两个效果，总开关与数据域 sync_enabled 是"与"的关系
-     （app-sync-master-switch change design.md Decision 1）。 -->
+     sync_enabled/应用状态/同步总开关/同步方式）写在 WHERE 后。新增 c.sync_mode = 'NOTIFY'
+     条件：拉取模式的应用不再产生任何变更记录，也不需要被匹配为候选应用（app-sync-drop-
+     changelog change design.md Decision 6）。c.sync_master_enabled = 1 条件：应用同步
+     总开关关闭时不作为候选应用（app-sync-master-switch change design.md Decision 1）。 -->
 <mapper namespace="cn.nihility.rbac.sync.notify.mapper.NotifyTargetMapper">
 
     <select id="selectCandidateAppRefIds" resultType="java.lang.Long">
@@ -21,6 +19,7 @@
         AND d.sync_enabled = 1
         AND a.status = 2000
         AND c.sync_master_enabled = 1
+        AND c.sync_mode = 'NOTIFY'
     </select>
 
 </mapper>

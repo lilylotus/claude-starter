@@ -12,9 +12,10 @@ import lombok.Setter;
 
 /**
  * 应用拉取变更数据请求记录持久化实体，对应表 {@code tab_app_pull_record}
- * （add-app-sync-notify-pull-logs change design.md Decision 2）。记录外部应用调用现有
- * 两个拉取接口（按数据类型+id 拉取、按序列号批量拉取）的请求，仅用于问题排查/展示，不驱动
- * 任何业务逻辑。
+ * （add-app-sync-notify-pull-logs change design.md Decision 2）。记录外部应用调用分页拉取
+ * 接口的请求，仅用于问题排查/展示，不驱动任何业务逻辑。{@code pullMode} 字段随拉取接口
+ * 合并为一个统一的分页拉取接口而删除，只剩一种拉取方式，该字段失去意义
+ * （app-sync-drop-changelog change design.md）。
  */
 @Getter
 @Setter
@@ -31,13 +32,10 @@ public class AppPullRecordEntity {
     /** 发起拉取的应用 id，关联 {@code tab_app.id}。 */
     private Long appRefId;
 
-    /** 拉取方式：BY_ID=按id拉取，BY_SEQUENCE=按序列号拉取。 */
-    private String pullMode;
-
-    /** 请求的数据类型，按序列号拉取未传时为空。 */
+    /** 请求的数据类型。 */
     private String dataType;
 
-    /** 请求参数摘要：按id拉取记bizId个数，按序列号拉取记fromSequence/limit。 */
+    /** 请求参数摘要：页码、每页大小，以及本次传入的过滤条件概要。 */
     private String requestSummary;
 
     /** 本次返回的记录条数。 */

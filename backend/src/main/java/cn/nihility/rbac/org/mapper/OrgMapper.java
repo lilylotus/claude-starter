@@ -5,13 +5,16 @@ import cn.nihility.rbac.org.entity.OrgEntity;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Set;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 /**
  * 组织机构 MyBatis-Plus 数据访问接口，单表 CRUD 直接复用 {@link BaseMapper}，
- * 不在此处编写 SQL；{@link #countByColumnValue} 是唯一的例外，SQL 写在
- * {@code resources/mybatis/mapper/OrgMapper.xml} 里。
+ * 不在此处编写 SQL；{@link #countByColumnValue}、{@link #selectSyncPullPage} 是例外，
+ * SQL 写在 {@code resources/mybatis/mapper/OrgMapper.xml} 里。
  */
 @Mapper
 public interface OrgMapper extends BaseMapper<OrgEntity> {
@@ -47,4 +50,23 @@ public interface OrgMapper extends BaseMapper<OrgEntity> {
                 .set(OrgEntity::getParentCode, newParentCode);
         return update(null, wrapper);
     }
+
+    /**
+     * 分页拉取组织当前数据，不过滤 {@code status}（停用/已删除记录原样返回），按
+     * {@code update_time ASC, id ASC} 排序（app-sync-drop-changelog change design.md
+     * Decision 1/2/4）。
+     *
+     * @param offset         偏移量
+     * @param limit          每页大小
+     * @param updateTimeFrom 更新时间范围起点（含），可为空
+     * @param updateTimeTo   更新时间范围终点（含），可为空
+     * @param ids            主键 id 列表精确过滤，{@code null} 表示不过滤
+     * @param codes          组织编码列表精确过滤，{@code null} 表示不过滤
+     * @param allowedOrgIds  组织范围过滤下推的允许组织 id 全集，{@code null} 表示不限制
+     * @return 查询结果列表
+     */
+    List<OrgEntity> selectSyncPullPage(@Param("offset") int offset, @Param("limit") int limit,
+            @Param("updateTimeFrom") LocalDateTime updateTimeFrom, @Param("updateTimeTo") LocalDateTime updateTimeTo,
+            @Param("ids") List<Long> ids, @Param("codes") List<String> codes,
+            @Param("allowedOrgIds") Set<Long> allowedOrgIds);
 }

@@ -6,21 +6,21 @@ import cn.nihility.rbac.app.sync.constant.SyncDomain;
 import cn.nihility.rbac.app.sync.entity.AppSyncDomainConfigEntity;
 import cn.nihility.rbac.app.sync.mapper.AppSyncDomainConfigMapper;
 import cn.nihility.rbac.common.exception.BusinessException;
-import cn.nihility.rbac.sync.changelog.entity.AppDataChangeLogEntity;
-import cn.nihility.rbac.sync.changelog.service.AppDataChangeLogService;
-import cn.nihility.rbac.sync.constant.SyncOperationType;
 import cn.nihility.rbac.sync.openapi.OpenApiCallerContext;
-import cn.nihility.rbac.sync.openapi.dto.SyncPullRecordVO;
+import cn.nihility.rbac.sync.openapi.dto.SyncPullPageVO;
+import cn.nihility.rbac.sync.openapi.dto.SyncPullRequest;
 import cn.nihility.rbac.sync.openapi.service.SyncPullService;
-import cn.nihility.rbac.sync.pull.record.constant.PullMode;
 import cn.nihility.rbac.sync.pull.record.service.AppPullRecordService;
-import cn.nihility.rbac.sync.transform.BizSnapshotResolver;
+import cn.nihility.rbac.sync.scope.AppSyncOrgScopeResolver;
 import cn.nihility.rbac.sync.transform.FieldMappingTransformer;
+import cn.nihility.rbac.sync.transform.SyncBizPageQuery;
+import cn.nihility.rbac.sync.transform.SyncBizPageQueryResolver;
+import cn.nihility.rbac.sync.transform.SyncBizPageRow;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import java.util.LinkedHashSet;
+import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -35,8 +35,8 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class SyncPullServiceImpl implements SyncPullService {
 
-    /** 未指定 {@code limit}/未指定数据域配置时兜底使用的分页大小。 */
-    private static final int DEFAULT_LIMIT = 20;
+    /** 未指定 {@code pageSize}、且数据域配置的 {@code pageSize} 也异常缺失时兜底使用的分页大小。 */
+    private static final int DEFAULT_PAGE_SIZE = 20;
 
     /** 应用同步数据域配置数据访问接口。 */
     private final AppSyncDomainConfigMapper appSyncDomainConfigMapper;
@@ -47,102 +47,64 @@ public class SyncPullServiceImpl implements SyncPullService {
      */
     private final AppConfigMapper appConfigMapper;
 
-    /** 应用数据变更记录业务逻辑接口。 */
-    private final AppDataChangeLogService appDataChangeLogService;
+    /** 应用同步组织范围解析业务逻辑组件，供 ORG/USER/POSITION 三个数据域下推组织范围过滤。 */
+    private final AppSyncOrgScopeResolver appSyncOrgScopeResolver;
+
+    /** 业务表当前数据分页查询解析器。 */
+    private final SyncBizPageQueryResolver syncBizPageQueryResolver;
 
     /** 字段映射转换执行器。 */
     private final FieldMappingTransformer fieldMappingTransformer;
 
-    /** 业务对象当前快照解析器，按数据域现查组织/用户/任职/应用/角色业务表当前数据。 */
-    private final BizSnapshotResolver bizSnapshotResolver;
-
-    /** 拉取日志写入业务逻辑接口，记录外部应用调用两个拉取接口的请求，仅用于问题排查/展示。 */
+    /** 拉取日志写入业务逻辑接口，记录外部应用调用拉取接口的请求，仅用于问题排查/展示。 */
     private final AppPullRecordService appPullRecordService;
 
     /**
      * {@inheritDoc}
      */
     @Override
-    public List<SyncPullRecordVO> pullByBizIds(String dataType, List<Long> bizIds) {
-        assertValidDataType(dataType);
+    public SyncPullPageVO pull(SyncPullRequest request) {
+        assertValidDataType(request.getDataType());
         Long appRefId = OpenApiCallerContext.getAppRefId();
+        String dataType = request.getDataType();
+        int page = request.getPage() != null && request.getPage() > 0 ? request.getPage() : 1;
 
-        List<SyncPullRecordVO> result;
-        if (bizIds == null || bizIds.isEmpty() || !isSyncMasterEnabled(appRefId) || !isDomainEnabled(appRefId,
-                dataType)) {
-            result = List.of();
-        } else {
-            List<AppDataChangeLogEntity> logs =
-                    appDataChangeLogService.selectLatestByBizIds(appRefId, dataType, bizIds);
-            result = logs.stream().map(changeLog -> toVO(appRefId, changeLog)).filter(Optional::isPresent)
-                    .map(Optional::get).toList();
+        AppSyncDomainConfigEntity domainConfig = null;
+        boolean canQuery = isSyncMasterEnabled(appRefId);
+        if (canQuery) {
+            domainConfig = findDomainConfig(appRefId, dataType);
+            canQuery = domainConfig != null && Boolean.TRUE.equals(domainConfig.getSyncEnabled());
         }
+        // page/pageSize 无论本次是否实际查询都要计算出"实际使用的值"，供响应顶层回显
+        // （app-sync-drop-changelog change design.md Decision 2 修订版）。
+        int effectivePageSize =
+                effectivePageSize(request.getPageSize(), domainConfig != null ? domainConfig.getPageSize() : null);
 
-        int requestedBizIdCount = bizIds == null ? 0 : bizIds.size();
-        recordPull(appRefId, PullMode.BY_ID, dataType, "请求了 " + requestedBizIdCount + " 个 bizId", result.size());
-        return result;
-    }
-
-    /**
-     * {@inheritDoc}
-     */
-    @Override
-    public List<SyncPullRecordVO> pullBySequence(String dataType, Long fromSequence, Integer limit) {
-        Long appRefId = OpenApiCallerContext.getAppRefId();
-        List<SyncPullRecordVO> result = doPullBySequence(appRefId, dataType, fromSequence, limit);
-
-        recordPull(appRefId, PullMode.BY_SEQUENCE, StringUtils.hasText(dataType) ? dataType : null,
-                "fromSequence=" + fromSequence + ", limit=" + limit, result.size());
-        return result;
-    }
-
-    /**
-     * {@link #pullBySequence} 的实际查询逻辑，抽成独立方法便于在外层统一记录拉取日志
-     * （add-app-sync-notify-pull-logs change tasks.md 3.3）。
-     *
-     * @param appRefId     调用方应用 id
-     * @param dataType     数据类型，可为空
-     * @param fromSequence 起始序列号
-     * @param limit        单次最多返回条数，可为空
-     * @return 变更记录列表，按序列号升序排列
-     */
-    private List<SyncPullRecordVO> doPullBySequence(Long appRefId, String dataType, Long fromSequence,
-            Integer limit) {
-        if (!isSyncMasterEnabled(appRefId)) {
-            return List.of();
-        }
-        List<AppSyncDomainConfigEntity> enabledConfigs = listEnabledDomainConfigs(appRefId);
-
-        if (StringUtils.hasText(dataType)) {
-            assertValidDataType(dataType);
-            AppSyncDomainConfigEntity domainConfig = enabledConfigs.stream()
-                    .filter(config -> dataType.equals(config.getSyncDomain()))
-                    .findFirst()
-                    .orElse(null);
-            if (domainConfig == null) {
-                return List.of();
+        List<Map<String, Object>> records = List.of();
+        // 排序后最后一条查询结果行的 updateTime 即本页最大更新时间，rows 为空时保持 null
+        // （app-sync-drop-changelog change design.md Decision 9，四次实现后修正）。
+        LocalDateTime latestUpdateTime = null;
+        if (canQuery) {
+            SyncBizPageQuery query = SyncBizPageQuery.builder()
+                    .page(page)
+                    .pageSize(effectivePageSize)
+                    .updateTimeFrom(request.getUpdateTimeFrom())
+                    .updateTimeTo(request.getUpdateTimeTo())
+                    .ids(request.getIds())
+                    .codes(request.getCodes())
+                    .mobile(request.getMobile())
+                    .allowedOrgIds(resolveAllowedOrgIds(appRefId, dataType))
+                    .build();
+            List<SyncBizPageRow> rows = syncBizPageQueryResolver.query(dataType, query);
+            records = rows.stream().map(row -> toRecord(appRefId, dataType, row)).toList();
+            if (!rows.isEmpty()) {
+                latestUpdateTime = rows.get(rows.size() - 1).getUpdateTime();
             }
-            int effectiveLimit = effectiveLimit(limit, domainConfig.getPageSize());
-            List<AppDataChangeLogEntity> logs = appDataChangeLogService.selectBySequence(appRefId, List.of(dataType),
-                    fromSequence, effectiveLimit);
-            return logs.stream().map(changeLog -> toVO(appRefId, changeLog)).filter(Optional::isPresent)
-                    .map(Optional::get).toList();
         }
 
-        if (enabledConfigs.isEmpty()) {
-            return List.of();
-        }
-        int minPageSize = enabledConfigs.stream()
-                .map(AppSyncDomainConfigEntity::getPageSize)
-                .min(Integer::compareTo)
-                .orElse(DEFAULT_LIMIT);
-        int effectiveLimit = effectiveLimit(limit, minPageSize);
-        Set<String> domains = new LinkedHashSet<>();
-        enabledConfigs.forEach(config -> domains.add(config.getSyncDomain()));
-        List<AppDataChangeLogEntity> logs = appDataChangeLogService.selectBySequence(appRefId, domains, fromSequence,
-                effectiveLimit);
-        return logs.stream().map(changeLog -> toVO(appRefId, changeLog)).filter(Optional::isPresent)
-                .map(Optional::get).toList();
+        recordPull(appRefId, dataType, buildRequestSummary(request, page, effectivePageSize), records.size());
+        return SyncPullPageVO.builder().dataType(dataType).page(page).pageSize(effectivePageSize)
+                .dataSize(records.size()).latestUpdateTime(latestUpdateTime).records(records).build();
     }
 
     /**
@@ -150,37 +112,35 @@ public class SyncPullServiceImpl implements SyncPullService {
      * （add-app-sync-notify-pull-logs change spec"日志写入失败不影响拉取主流程"场景）。
      *
      * @param appRefId       调用方应用 id
-     * @param pullMode       拉取方式：BY_ID/BY_SEQUENCE
-     * @param dataType       请求的数据类型，可为空
+     * @param dataType       请求的数据类型
      * @param requestSummary 请求参数摘要
      * @param resultCount    本次返回的记录条数
      */
-    private void recordPull(Long appRefId, String pullMode, String dataType, String requestSummary,
-            int resultCount) {
+    private void recordPull(Long appRefId, String dataType, String requestSummary, int resultCount) {
         try {
-            appPullRecordService.record(appRefId, pullMode, dataType, requestSummary, resultCount);
+            appPullRecordService.record(appRefId, dataType, requestSummary, resultCount);
         } catch (Exception e) {
-            log.warn("写入拉取日志失败：appRefId={}, pullMode={}", appRefId, pullMode, e);
+            log.warn("写入拉取日志失败：appRefId={}, dataType={}", appRefId, dataType, e);
         }
     }
 
     /**
-     * 校验请求的数据类型是否是同步能力支持的合法取值（ORG/USER/POSITION/APP/ROLE，不含
-     * DICT），非法取值直接拒绝（区别于"合法但未开通"场景的返回空结果，见 design.md
-     * Decision 9）。
+     * 校验请求的数据类型是否是同步能力支持的合法取值（ORG/USER/POSITION/APP/ROLE/DICT），
+     * 非法取值直接拒绝（区别于"合法但未开通"场景的返回空结果）（app-sync-drop-changelog
+     * change design.md Decision 7，三次实现后修正：DICT 纳入合法拉取数据类型）。
      *
      * @param dataType 数据类型
      */
     private void assertValidDataType(String dataType) {
-        if (!SyncDomain.CHANGE_LOG_DOMAINS.contains(dataType)) {
+        if (!SyncDomain.SYNC_PULL_DOMAINS.contains(dataType)) {
             throw new BusinessException("非法的数据类型：" + dataType);
         }
     }
 
     /**
      * 判断给定应用当前同步总开关是否开启。应用对外接口配置理论上因一对一不变式必然存在，
-     * 查不到时按防御性写法保守返回 {@code false}（视同关闭，不放行拉取），风格与
-     * {@link #isDomainEnabled} 一致（app-sync-master-switch change design.md Decision 2）。
+     * 查不到时按防御性写法保守返回 {@code false}（视同关闭，不放行拉取）（app-sync-master-switch
+     * change design.md Decision 2）。
      *
      * @param appRefId 应用 id
      * @return 同步总开关是否开启
@@ -192,71 +152,116 @@ public class SyncPullServiceImpl implements SyncPullService {
     }
 
     /**
-     * 判断给定应用的给定数据域当前是否允许同步。
+     * 查询给定应用给定数据域的同步配置。
      *
      * @param appRefId 应用 id
      * @param dataType 数据类型
-     * @return 是否允许同步
+     * @return 数据域配置，查不到时返回 {@code null}
      */
-    private boolean isDomainEnabled(Long appRefId, String dataType) {
-        AppSyncDomainConfigEntity config = appSyncDomainConfigMapper.selectOne(
-                new LambdaQueryWrapper<AppSyncDomainConfigEntity>()
-                        .eq(AppSyncDomainConfigEntity::getAppRefId, appRefId)
-                        .eq(AppSyncDomainConfigEntity::getSyncDomain, dataType));
-        return config != null && Boolean.TRUE.equals(config.getSyncEnabled());
+    private AppSyncDomainConfigEntity findDomainConfig(Long appRefId, String dataType) {
+        return appSyncDomainConfigMapper.selectOne(new LambdaQueryWrapper<AppSyncDomainConfigEntity>()
+                .eq(AppSyncDomainConfigEntity::getAppRefId, appRefId)
+                .eq(AppSyncDomainConfigEntity::getSyncDomain, dataType));
     }
 
     /**
-     * 查询给定应用当前允许同步（{@code syncEnabled=true}）的全部数据域配置。
+     * 解析组织范围过滤下推所需的允许组织 id 全集：仅 ORG/USER/POSITION 三个数据域生效，
+     * APP/ROLE 恒返回 {@code null}（不限制）（app-sync-drop-changelog change design.md
+     * Decision 4）。
      *
      * @param appRefId 应用 id
-     * @return 允许同步的数据域配置列表
+     * @param dataType 数据类型
+     * @return 允许组织 id 全集，{@code null} 表示不限制
      */
-    private List<AppSyncDomainConfigEntity> listEnabledDomainConfigs(Long appRefId) {
-        return appSyncDomainConfigMapper.selectList(new LambdaQueryWrapper<AppSyncDomainConfigEntity>()
-                .eq(AppSyncDomainConfigEntity::getAppRefId, appRefId)
-                .eq(AppSyncDomainConfigEntity::getSyncEnabled, true));
-    }
-
-    /**
-     * 计算本次拉取的有效 {@code limit}：调用方显式指定且为正数时优先，否则回退到给定默认值。
-     *
-     * @param requestedLimit 调用方请求的 {@code limit}，可为空
-     * @param fallback       回退默认值
-     * @return 有效 {@code limit}
-     */
-    private int effectiveLimit(Integer requestedLimit, int fallback) {
-        return requestedLimit != null && requestedLimit > 0 ? requestedLimit : fallback;
-    }
-
-    /**
-     * 把一条变更记录转换为拉取接口的返回视图对象：{@code sequence}/{@code dataType}/
-     * {@code operationType}/{@code bizId}/{@code occurredAt} 等元信息仍取自变更记录本身，
-     * {@code data} 改为按 {@code dataType}+{@code bizId} 现查业务表当前数据（而不是
-     * 变更发生那一刻冻结的历史快照），再按该应用该数据域的字段映射配置转换
-     * （fix-app-sync-pull-live-data change design.md Decision 2）。业务表已查不到该行
-     * （理论上不会发生，仅作防御性兜底）时返回 {@link Optional#empty()}，调用方需要
-     * 过滤掉这类记录，不能让调用方拿到一条 {@code data} 缺失的残缺记录。
-     *
-     * @param appRefId  应用 id
-     * @param changeLog 变更记录
-     * @return 拉取接口返回视图对象，业务表查不到对应行时为空
-     */
-    private Optional<SyncPullRecordVO> toVO(Long appRefId, AppDataChangeLogEntity changeLog) {
-        Map<String, Object> snapshot = bizSnapshotResolver.resolve(changeLog.getDataType(), changeLog.getBizId());
-        if (snapshot == null) {
-            log.warn("业务表查不到对应行，跳过该条拉取记录：changeLogId={}, dataType={}, bizId={}", changeLog.getId(),
-                    changeLog.getDataType(), changeLog.getBizId());
-            return Optional.empty();
+    private Set<Long> resolveAllowedOrgIds(Long appRefId, String dataType) {
+        if (!SyncDomain.ORG_SCOPE_DOMAINS.contains(dataType)) {
+            return null;
         }
-        Map<String, Object> data = fieldMappingTransformer.transform(appRefId, changeLog.getDataType(), snapshot);
-        return Optional.of(SyncPullRecordVO.builder()
-                .sequence(changeLog.getId())
-                .dataType(changeLog.getDataType())
-                .operationType(SyncOperationType.code(changeLog.getOperationType()))
-                .bizId(changeLog.getBizId())
-                .occurredAt(changeLog.getCreateTime())
-                .data(data)
-                .build());
+        return appSyncOrgScopeResolver.resolveAllowedOrgIds(appRefId, dataType).orElse(null);
+    }
+
+    /**
+     * 计算本次拉取的有效 {@code pageSize}：调用方显式指定且为正数时优先，否则回退到该数据域
+     * 配置的 {@code pageSize}，配置值也异常缺失时再回退到 {@link #DEFAULT_PAGE_SIZE}
+     * （app-sync-drop-changelog change design.md Decision 5）。
+     *
+     * @param requestedPageSize 调用方请求的 {@code pageSize}，可为空
+     * @param configuredPageSize 该数据域配置的 {@code pageSize}
+     * @return 有效 {@code pageSize}
+     */
+    private int effectivePageSize(Integer requestedPageSize, Integer configuredPageSize) {
+        if (requestedPageSize != null && requestedPageSize > 0) {
+            return requestedPageSize;
+        }
+        return configuredPageSize != null && configuredPageSize > 0 ? configuredPageSize : DEFAULT_PAGE_SIZE;
+    }
+
+    /**
+     * 把一条业务表查询结果行转换为拉取接口 {@code records} 里的一条元素：先放入按该应用该
+     * 数据域字段映射配置转换后的业务字段，再用 {@code bizId}/{@code bizCode}/
+     * {@code bizStatus}/{@code updateTime} 四个通用固定键覆盖式写入，保证响应结构稳定可预期
+     * （app-sync-drop-changelog change design.md Decision 2 修订版）。其中
+     * {@code bizStatus} 直接取自业务表原始 {@code status} 字段，不经过字段映射转换，
+     * 保证该数据域即使配置了字段映射（转换结果可能不包含原始 {@code status} 字段）也始终能
+     * 稳定拿到记录当前状态（2000 启用/3000 停用/-1000 已删除），不受字段映射配置影响
+     * （app-sync-drop-changelog change design.md Decision 1）。四个通用固定键之后，再按
+     * 领域特定固定键各自的值是否非空条件写入 {@code userCode}/{@code orgCode}（仅
+     * POSITION）/{@code dictTypeCode}（仅 DICT）——与四个通用固定键不同，这些键在值为空的
+     * 数据域里不出现（键本身不存在，不是"键存在值为 null"），同样遵循不被字段映射结果覆盖的
+     * 规则（design.md Decision 7/8，五次实现后修正）。
+     *
+     * @param appRefId 应用 id
+     * @param dataType 数据类型
+     * @param row      业务表查询结果行
+     * @return 合并后的记录字段 Map
+     */
+    private Map<String, Object> toRecord(Long appRefId, String dataType, SyncBizPageRow row) {
+        Map<String, Object> data = fieldMappingTransformer.transform(appRefId, dataType, row.getData());
+        Map<String, Object> record = new LinkedHashMap<>(data);
+        record.put("bizId", row.getId());
+        record.put("bizCode", row.getCode());
+        record.put("bizStatus", row.getStatus());
+        record.put("updateTime", row.getUpdateTime());
+        if (row.getUserCode() != null) {
+            record.put("userCode", row.getUserCode());
+        }
+        if (row.getOrgCode() != null) {
+            record.put("orgCode", row.getOrgCode());
+        }
+        if (row.getDictTypeCode() != null) {
+            record.put("dictTypeCode", row.getDictTypeCode());
+        }
+        return record;
+    }
+
+    /**
+     * 构造拉取日志的请求参数摘要：页码、每页大小，以及本次实际传入的过滤条件概要
+     * （app-sync-drop-changelog change tasks.md 6.3）。
+     *
+     * @param request           原始请求参数
+     * @param page              本次实际使用的页码
+     * @param effectivePageSize 本次实际使用的每页大小
+     * @return 请求参数摘要文本
+     */
+    private String buildRequestSummary(SyncPullRequest request, int page, int effectivePageSize) {
+        StringBuilder summary = new StringBuilder();
+        summary.append("page=").append(page);
+        summary.append(", pageSize=").append(effectivePageSize);
+        if (request.getUpdateTimeFrom() != null) {
+            summary.append(", updateTimeFrom=").append(request.getUpdateTimeFrom());
+        }
+        if (request.getUpdateTimeTo() != null) {
+            summary.append(", updateTimeTo=").append(request.getUpdateTimeTo());
+        }
+        if (request.getIds() != null && !request.getIds().isEmpty()) {
+            summary.append(", ids=").append(request.getIds().size()).append("个");
+        }
+        if (request.getCodes() != null && !request.getCodes().isEmpty()) {
+            summary.append(", codes=").append(request.getCodes().size()).append("个");
+        }
+        if (StringUtils.hasText(request.getMobile())) {
+            summary.append(", mobile=").append(request.getMobile());
+        }
+        return summary.toString();
     }
 }

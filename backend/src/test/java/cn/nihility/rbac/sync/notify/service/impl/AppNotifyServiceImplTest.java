@@ -3,6 +3,7 @@ package cn.nihility.rbac.sync.notify.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -12,18 +13,20 @@ import cn.nihility.rbac.app.constant.SignAlgorithm;
 import cn.nihility.rbac.app.constant.SyncMode;
 import cn.nihility.rbac.app.entity.AppConfigEntity;
 import cn.nihility.rbac.app.mapper.AppConfigMapper;
+import cn.nihility.rbac.app.sync.constant.SyncDomain;
 import cn.nihility.rbac.common.config.HttpClientProperties;
 import cn.nihility.rbac.common.util.HttpClientUtils;
 import cn.nihility.rbac.common.util.JacksonUtils;
 import cn.nihility.rbac.common.util.Sm4JdkUtils;
 import cn.nihility.rbac.operationlog.constant.OperationType;
-import cn.nihility.rbac.sync.changelog.entity.AppDataChangeLogEntity;
+import cn.nihility.rbac.sync.event.DomainChangeEvent;
 import cn.nihility.rbac.sync.notify.constant.NotifyStatus;
 import cn.nihility.rbac.sync.notify.entity.AppNotifyRecordEntity;
 import cn.nihility.rbac.sync.notify.mapper.AppNotifyRecordMapper;
 import cn.nihility.rbac.sync.sign.NotifySignatureAppender;
 import cn.nihility.rbac.sync.sign.SignAlgorithmCodecImpl;
 import cn.nihility.rbac.sync.sign.SignConstants;
+import cn.nihility.rbac.sync.transform.BizSnapshotResolver;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -45,8 +48,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 /**
  * {@link AppNotifyServiceImpl} 的单元测试：本地起一个内嵌 {@link HttpServer} 充当外部应用
  * 的通知回调地址，验证请求体、成功/失败结果落库，以及 {@code syncMode != NOTIFY} 时直接
- * 跳过、目标应用查不到时直接跳过等分支（app-sync-org-scope-and-app-change-log change
- * design.md Decision 6）。
+ * 跳过、目标应用查不到时直接跳过等分支。方法签名从"传入一条已落库的变更记录"改为"传入
+ * {@code DomainChangeEvent} + 目标应用 id"，payload 去掉 {@code sequence}、新增
+ * {@code bizCode}（app-sync-drop-changelog change design.md Decision 6）。
  */
 @ExtendWith(MockitoExtension.class)
 class AppNotifyServiceImplTest {
@@ -62,6 +66,9 @@ class AppNotifyServiceImplTest {
 
     @Mock
     private AppNotifyRecordMapper appNotifyRecordMapper;
+
+    @Mock
+    private BizSnapshotResolver bizSnapshotResolver;
 
     private AppNotifyServiceImpl service;
 
@@ -97,10 +104,12 @@ class AppNotifyServiceImplTest {
         NotifySignatureAppender notifySignatureAppender = new NotifySignatureAppender(new SignAlgorithmCodecImpl());
 
         service = new AppNotifyServiceImpl(appConfigMapper, appNotifyRecordMapper, notifySignatureAppender,
-                appSecretProperties);
+                appSecretProperties, bizSnapshotResolver);
 
         lastReceivedBody = null;
         lastReceivedAppKeyHeader = null;
+        lenient().when(bizSnapshotResolver.resolveBizCode(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any())).thenReturn("ORG001");
     }
 
     @AfterEach
@@ -109,7 +118,7 @@ class AppNotifyServiceImplTest {
     }
 
     /**
-     * 通知成功时应携带正确的请求体（sequence/dataType/operationType/bizId）与
+     * 通知成功时应携带正确的请求体（dataType/operationType/bizId/bizCode）与
      * {@code appKey} 请求头，且落库为成功状态。
      */
     @Test
@@ -127,28 +136,27 @@ class AppNotifyServiceImplTest {
                 .build();
         when(appConfigMapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(target);
 
-        AppDataChangeLogEntity changeLog = AppDataChangeLogEntity.builder()
-                .id(1024L)
-                .appRefId(1L)
-                .dataType("ORG")
+        DomainChangeEvent event = DomainChangeEvent.builder()
+                .dataType(SyncDomain.ORG)
                 .bizId(88L)
                 .operationType(OperationType.CREATE)
-                .createTime(LocalDateTime.now())
+                .operator("1")
+                .occurredAt(LocalDateTime.now())
                 .build();
 
-        service.notifyIfConfigured(changeLog);
+        service.notifyIfConfigured(event, 1L);
 
         assertThat(lastReceivedAppKeyHeader).isEqualTo("access-key-1");
         Map<String, Object> payload = JacksonUtils.toObj(lastReceivedBody, JacksonUtils.MAP_OBJECT_TYPE_REFERENCE);
-        assertThat(payload.get("sequence")).isEqualTo(1024);
+        assertThat(payload).doesNotContainKey("sequence");
         assertThat(payload.get("dataType")).isEqualTo("ORG");
         assertThat(payload.get("operationType")).isEqualTo("CREATE");
         assertThat(payload.get("bizId")).isEqualTo(88);
+        assertThat(payload.get("bizCode")).isEqualTo("ORG001");
 
         ArgumentCaptor<AppNotifyRecordEntity> captor = ArgumentCaptor.forClass(AppNotifyRecordEntity.class);
         verify(appNotifyRecordMapper).insert(captor.capture());
         AppNotifyRecordEntity record = captor.getValue();
-        assertThat(record.getChangeLogId()).isEqualTo(1024L);
         assertThat(record.getAppRefId()).isEqualTo(1L);
         assertThat(record.getNotifyStatus()).isEqualTo(NotifyStatus.SUCCESS);
         assertThat(record.getHttpStatus()).isEqualTo(200);
@@ -174,16 +182,15 @@ class AppNotifyServiceImplTest {
                 .build();
         when(appConfigMapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(target);
 
-        AppDataChangeLogEntity changeLog = AppDataChangeLogEntity.builder()
-                .id(1025L)
-                .appRefId(2L)
-                .dataType("ORG")
+        DomainChangeEvent event = DomainChangeEvent.builder()
+                .dataType(SyncDomain.ORG)
                 .bizId(89L)
                 .operationType(OperationType.UPDATE)
-                .createTime(LocalDateTime.now())
+                .operator("1")
+                .occurredAt(LocalDateTime.now())
                 .build();
 
-        service.notifyIfConfigured(changeLog);
+        service.notifyIfConfigured(event, 2L);
 
         ArgumentCaptor<AppNotifyRecordEntity> captor = ArgumentCaptor.forClass(AppNotifyRecordEntity.class);
         verify(appNotifyRecordMapper).insert(captor.capture());
@@ -212,16 +219,15 @@ class AppNotifyServiceImplTest {
         doThrow(new RuntimeException("db down")).when(appNotifyRecordMapper)
                 .insert(org.mockito.ArgumentMatchers.any(AppNotifyRecordEntity.class));
 
-        AppDataChangeLogEntity changeLog = AppDataChangeLogEntity.builder()
-                .id(1028L)
-                .appRefId(5L)
-                .dataType("ORG")
+        DomainChangeEvent event = DomainChangeEvent.builder()
+                .dataType(SyncDomain.ORG)
                 .bizId(92L)
                 .operationType(OperationType.CREATE)
-                .createTime(LocalDateTime.now())
+                .operator("1")
+                .occurredAt(LocalDateTime.now())
                 .build();
 
-        assertThatCode(() -> service.notifyIfConfigured(changeLog)).doesNotThrowAnyException();
+        assertThatCode(() -> service.notifyIfConfigured(event, 5L)).doesNotThrowAnyException();
         assertThat(lastReceivedBody).isNotNull();
     }
 
@@ -236,16 +242,15 @@ class AppNotifyServiceImplTest {
                 .build();
         when(appConfigMapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(target);
 
-        AppDataChangeLogEntity changeLog = AppDataChangeLogEntity.builder()
-                .id(1026L)
-                .appRefId(3L)
-                .dataType("ORG")
+        DomainChangeEvent event = DomainChangeEvent.builder()
+                .dataType(SyncDomain.ORG)
                 .bizId(90L)
                 .operationType(OperationType.CREATE)
-                .createTime(LocalDateTime.now())
+                .operator("1")
+                .occurredAt(LocalDateTime.now())
                 .build();
 
-        service.notifyIfConfigured(changeLog);
+        service.notifyIfConfigured(event, 3L);
 
         verify(appNotifyRecordMapper, never()).insert(org.mockito.ArgumentMatchers.any(AppNotifyRecordEntity.class));
     }
@@ -257,16 +262,15 @@ class AppNotifyServiceImplTest {
     void notifyIfConfigured_shouldSkip_whenTargetNotFound() {
         when(appConfigMapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(null);
 
-        AppDataChangeLogEntity changeLog = AppDataChangeLogEntity.builder()
-                .id(1027L)
-                .appRefId(4L)
-                .dataType("ORG")
+        DomainChangeEvent event = DomainChangeEvent.builder()
+                .dataType(SyncDomain.ORG)
                 .bizId(91L)
                 .operationType(OperationType.CREATE)
-                .createTime(LocalDateTime.now())
+                .operator("1")
+                .occurredAt(LocalDateTime.now())
                 .build();
 
-        service.notifyIfConfigured(changeLog);
+        service.notifyIfConfigured(event, 4L);
 
         verify(appNotifyRecordMapper, never()).insert(org.mockito.ArgumentMatchers.any(AppNotifyRecordEntity.class));
     }

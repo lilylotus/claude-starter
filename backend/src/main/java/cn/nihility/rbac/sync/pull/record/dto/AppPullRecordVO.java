@@ -27,12 +27,8 @@ public class AppPullRecordVO {
     @Schema(description = "应用 id")
     private Long appRefId;
 
-    /** 拉取方式：BY_ID=按id拉取，BY_SEQUENCE=按序列号拉取。 */
-    @Schema(description = "拉取方式：BY_ID=按id拉取，BY_SEQUENCE=按序列号拉取")
-    private String pullMode;
-
-    /** 请求的数据类型，按序列号拉取未传时为空。 */
-    @Schema(description = "请求的数据类型，按序列号拉取未传时为空")
+    /** 请求的数据类型。 */
+    @Schema(description = "请求的数据类型")
     private String dataType;
 
     /** 请求参数摘要。 */

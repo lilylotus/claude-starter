@@ -317,14 +317,6 @@ export interface AppNotifyRecordRow {
   createTime: string
 }
 
-// 拉取方式：按 id 拉取 / 按序列号批量拉取，与后端 sync/pull/record 相关常量对齐
-export type PullMode = 'BY_ID' | 'BY_SEQUENCE'
-
-export const PULL_MODE_LABELS: Record<PullMode, string> = {
-  BY_ID: '按 ID 拉取',
-  BY_SEQUENCE: '按序列号拉取',
-}
-
 // 拉取日志查询参数，对应 GET /api/apps/{id}/config/sync/pull-records 的 query 参数，
 // 全部可选；startTime/endTime 为 ISO-8601 时间，省略时不做时间范围限制
 export interface AppPullRecordQueryParams {
@@ -335,9 +327,8 @@ export interface AppPullRecordQueryParams {
 }
 
 // 拉取日志列表行，来自 GET /api/apps/{id}/config/sync/pull-records 分页接口；
-// dataType 按序列号拉取未传数据类型时为空，requestSummary 为可读的请求参数摘要文本
+// dataType 未传数据类型时为空，requestSummary 为可读的请求参数摘要文本
 export interface AppPullRecordRow {
-  pullMode: PullMode
   dataType: string | null
   requestSummary: string
   resultCount: number

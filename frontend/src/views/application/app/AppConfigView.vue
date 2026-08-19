@@ -15,7 +15,6 @@ import {
   AUTH_PROTOCOL_OPTIONS,
   NOTIFY_STATUS_OPTIONS,
   NOTIFY_STATUS_SUCCESS,
-  PULL_MODE_LABELS,
   SYNC_DOMAIN_FIELD_MAPPING_DOMAINS,
   SYNC_DOMAIN_OPTIONS,
   SYNC_DOMAIN_ORG_SCOPE_DOMAINS,
@@ -1303,13 +1302,10 @@ function handlePullLogSizeChange(newSize: number) {
             </el-form>
 
             <el-table v-loading="pullLogLoading" :data="pullLogList" empty-text="暂无拉取日志">
-              <el-table-column label="拉取方式" width="120">
-                <template #default="{ row }">{{ PULL_MODE_LABELS[(row as AppPullRecordRow).pullMode] }}</template>
-              </el-table-column>
-              <el-table-column label="数据类型" width="100">
+              <el-table-column label="数据类型" width="120">
                 <template #default="{ row }">{{ displayOrDash((row as AppPullRecordRow).dataType) }}</template>
               </el-table-column>
-              <el-table-column label="请求摘要" min-width="220" show-overflow-tooltip prop="requestSummary" />
+              <el-table-column label="请求摘要" min-width="260" show-overflow-tooltip prop="requestSummary" />
               <el-table-column label="返回条数" prop="resultCount" width="100" />
               <el-table-column prop="createTime" label="时间" width="170" />
             </el-table>

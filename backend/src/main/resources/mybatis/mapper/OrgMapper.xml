@@ -16,4 +16,40 @@
         <if test="excludeId != null">AND id != #{excludeId}</if>
     </select>
 
+    <!-- 分页拉取组织当前数据：不过滤 status（app-sync-drop-changelog change design.md
+         Decision 1，停用/已删除记录原样返回），按 update_time ASC, id ASC 排序；
+         updateTimeFrom/updateTimeTo/ids/codes 均为可选过滤条件；allowedOrgIds 为 null
+         表示不限制，非 null 时按其展开的组织 id 全集过滤，为空集合时用恒假条件兜底
+         （design.md Decision 4）。 -->
+    <select id="selectSyncPullPage" resultType="cn.nihility.rbac.org.entity.OrgEntity">
+        SELECT * FROM tab_org
+        <where>
+            <if test="updateTimeFrom != null">AND update_time &gt;= #{updateTimeFrom}</if>
+            <if test="updateTimeTo != null">AND update_time &lt;= #{updateTimeTo}</if>
+            <if test="ids != null">
+                <if test="ids.isEmpty()">AND id = -1</if>
+                <if test="!ids.isEmpty()">
+                    AND id IN
+                    <foreach collection="ids" item="itemId" open="(" separator="," close=")">#{itemId}</foreach>
+                </if>
+            </if>
+            <if test="codes != null">
+                <if test="codes.isEmpty()">AND 1 = 0</if>
+                <if test="!codes.isEmpty()">
+                    AND code IN
+                    <foreach collection="codes" item="itemCode" open="(" separator="," close=")">#{itemCode}</foreach>
+                </if>
+            </if>
+            <if test="allowedOrgIds != null">
+                <if test="allowedOrgIds.isEmpty()">AND id = -1</if>
+                <if test="!allowedOrgIds.isEmpty()">
+                    AND id IN
+                    <foreach collection="allowedOrgIds" item="orgId" open="(" separator="," close=")">#{orgId}</foreach>
+                </if>
+            </if>
+        </where>
+        ORDER BY update_time ASC, id ASC
+        LIMIT #{offset}, #{limit}
+    </select>
+
 </mapper>

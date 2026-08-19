@@ -76,7 +76,6 @@ class AppNotifyRecordServiceImplTest {
     void page_shouldConvertEntitiesToVO() {
         AppNotifyRecordEntity entity = AppNotifyRecordEntity.builder()
                 .id(1L)
-                .changeLogId(100L)
                 .appRefId(1L)
                 .dataType("ORG")
                 .bizId(88L)

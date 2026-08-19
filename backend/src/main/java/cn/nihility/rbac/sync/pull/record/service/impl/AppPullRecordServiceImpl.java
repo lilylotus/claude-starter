@@ -35,11 +35,10 @@ public class AppPullRecordServiceImpl implements AppPullRecordService {
      * {@inheritDoc}
      */
     @Override
-    public void record(Long appRefId, String pullMode, String dataType, String requestSummary, int resultCount) {
+    public void record(Long appRefId, String dataType, String requestSummary, int resultCount) {
         LocalDateTime now = LocalDateTime.now();
         AppPullRecordEntity entity = AppPullRecordEntity.builder()
                 .appRefId(appRefId)
-                .pullMode(pullMode)
                 .dataType(dataType)
                 .requestSummary(requestSummary)
                 .resultCount(resultCount)

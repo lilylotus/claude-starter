@@ -40,11 +40,13 @@ public final class SyncDomain {
     public static final Set<String> FIELD_MAPPING_DOMAINS = Set.of(ORG, USER, POSITION, APP, ROLE);
 
     /**
-     * 参与数据变更同步事件的 5 个数据域（不含字典），供 {@code app-sync-notify-pull} 能力
-     * 校验拉取接口请求的 {@code dataType} 参数合法性（app-sync-notify-pull-api change
-     * design.md Decision 1/6/9）。
+     * 参与数据变更同步事件、支持分页拉取的 6 个数据域（含字典），供
+     * {@code app-sync-notify-pull} 能力校验拉取接口请求的 {@code dataType} 参数合法性
+     * （app-sync-notify-pull-api change design.md Decision 1/6/9；拉取改为直接分页查询业务表
+     * 当前数据后由 {@code CHANGE_LOG_DOMAINS} 更名而来，见 app-sync-drop-changelog change
+     * design.md Decision 3；字典拉取的是字典项而非字典类型，见 design.md Decision 7）。
      */
-    public static final Set<String> CHANGE_LOG_DOMAINS = Set.of(ORG, USER, POSITION, APP, ROLE);
+    public static final Set<String> SYNC_PULL_DOMAINS = Set.of(ORG, USER, POSITION, APP, ROLE, DICT);
 
     /**
      * 支持按应用配置同步范围（全部数据/指定组织范围）的 3 个数据域，供接口层校验组织范围

@@ -23,10 +23,6 @@ public class AppNotifyRecordVO {
     @Schema(description = "主键 id")
     private Long id;
 
-    /** 关联的变更记录 id。 */
-    @Schema(description = "关联的变更记录 id")
-    private Long changeLogId;
-
     /** 应用 id。 */
     @Schema(description = "应用 id")
     private Long appRefId;

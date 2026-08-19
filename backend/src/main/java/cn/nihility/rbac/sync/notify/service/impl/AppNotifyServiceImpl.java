@@ -7,14 +7,15 @@ import cn.nihility.rbac.app.mapper.AppConfigMapper;
 import cn.nihility.rbac.common.util.HttpClientUtils;
 import cn.nihility.rbac.common.util.JacksonUtils;
 import cn.nihility.rbac.common.util.Sm4JdkUtils;
-import cn.nihility.rbac.sync.changelog.entity.AppDataChangeLogEntity;
 import cn.nihility.rbac.sync.constant.SyncOperationType;
+import cn.nihility.rbac.sync.event.DomainChangeEvent;
 import cn.nihility.rbac.sync.notify.constant.NotifyStatus;
 import cn.nihility.rbac.sync.notify.dto.NotifyPayload;
 import cn.nihility.rbac.sync.notify.entity.AppNotifyRecordEntity;
 import cn.nihility.rbac.sync.notify.mapper.AppNotifyRecordMapper;
 import cn.nihility.rbac.sync.notify.service.AppNotifyService;
 import cn.nihility.rbac.sync.sign.NotifySignatureAppender;
+import cn.nihility.rbac.sync.transform.BizSnapshotResolver;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
@@ -56,19 +57,22 @@ public class AppNotifyServiceImpl implements AppNotifyService {
     /** 应用对外接口凭证相关配置，提供 SM4 解密主密钥。 */
     private final AppSecretProperties appSecretProperties;
 
+    /** 业务对象当前快照解析器，用于现查被变更对象的业务编码字段（{@code bizCode}）。 */
+    private final BizSnapshotResolver bizSnapshotResolver;
+
     /**
      * {@inheritDoc}
      */
     @Override
-    public void notifyIfConfigured(AppDataChangeLogEntity changeLog) {
+    public void notifyIfConfigured(DomainChangeEvent event, Long appRefId) {
         AppConfigEntity target = appConfigMapper.selectOne(new LambdaQueryWrapper<AppConfigEntity>()
-                .eq(AppConfigEntity::getAppRefId, changeLog.getAppRefId()));
+                .eq(AppConfigEntity::getAppRefId, appRefId));
         if (target == null || !SyncMode.NOTIFY.equals(target.getSyncMode())) {
             return;
         }
 
         try {
-            notifyOneApp(changeLog, target);
+            notifyOneApp(event, target);
         } catch (Exception e) {
             // 单个应用通知异常不应影响处理领域变更事件的调用方（app-sync-notify-pull
             // spec"一个应用通知失败不影响其他应用"场景），此处兜底捕获，notifyOneApp 内部
@@ -80,16 +84,17 @@ public class AppNotifyServiceImpl implements AppNotifyService {
     /**
      * 向单个应用发起一次通知请求，并把结果写入 {@code tab_app_notify_record}。
      *
-     * @param changeLog 变更记录
-     * @param target    目标应用对外接口凭证配置
+     * @param event  领域变更事件
+     * @param target 目标应用对外接口凭证配置
      */
-    private void notifyOneApp(AppDataChangeLogEntity changeLog, AppConfigEntity target) {
+    private void notifyOneApp(DomainChangeEvent event, AppConfigEntity target) {
+        String bizCode = bizSnapshotResolver.resolveBizCode(event.getDataType(), event.getBizId());
         NotifyPayload payload = NotifyPayload.builder()
-                .sequence(changeLog.getId())
-                .dataType(changeLog.getDataType())
-                .operationType(SyncOperationType.code(changeLog.getOperationType()))
-                .bizId(changeLog.getBizId())
-                .occurredAt(changeLog.getCreateTime())
+                .dataType(event.getDataType())
+                .operationType(SyncOperationType.code(event.getOperationType()))
+                .bizId(event.getBizId())
+                .bizCode(bizCode)
+                .occurredAt(event.getOccurredAt())
                 .extra(parseNotifyParams(target.getNotifyParams()))
                 .build();
         String requestBody = JacksonUtils.toJson(payload);
@@ -122,7 +127,7 @@ public class AppNotifyServiceImpl implements AppNotifyService {
                     ERROR_MSG_MAX_LENGTH);
         }
 
-        saveNotifyRecord(changeLog, target.getAppRefId(), notifyStatus, httpStatus, errorMsg, notifyUrl);
+        saveNotifyRecord(event, target.getAppRefId(), notifyStatus, httpStatus, errorMsg, notifyUrl);
     }
 
     /**
@@ -131,21 +136,20 @@ public class AppNotifyServiceImpl implements AppNotifyService {
      * 不影响本次通知请求已经发起、已经拿到结果这一事实（add-app-sync-notify-pull-logs
      * change spec"日志写入失败不影响通知主流程"场景）。
      *
-     * @param changeLog    触发本次通知的变更记录，用于回填 {@code dataType}/{@code bizId}
+     * @param event        触发本次通知的领域变更事件，用于回填 {@code dataType}/{@code bizId}
      * @param appRefId     应用 id
      * @param notifyStatus 通知状态
      * @param httpStatus   外部接口返回的 HTTP 状态码，失败且未收到响应时为 {@code null}
      * @param errorMsg     失败原因摘要，成功时为 {@code null}
      * @param notifyUrl    本次回调实际使用的地址快照
      */
-    private void saveNotifyRecord(AppDataChangeLogEntity changeLog, Long appRefId, int notifyStatus,
-            Integer httpStatus, String errorMsg, String notifyUrl) {
+    private void saveNotifyRecord(DomainChangeEvent event, Long appRefId, int notifyStatus, Integer httpStatus,
+            String errorMsg, String notifyUrl) {
         LocalDateTime now = LocalDateTime.now();
         AppNotifyRecordEntity record = AppNotifyRecordEntity.builder()
-                .changeLogId(changeLog.getId())
                 .appRefId(appRefId)
-                .dataType(changeLog.getDataType())
-                .bizId(changeLog.getBizId())
+                .dataType(event.getDataType())
+                .bizId(event.getBizId())
                 .notifyStatus(notifyStatus)
                 .httpStatus(httpStatus)
                 .errorMsg(errorMsg)

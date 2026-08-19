@@ -129,4 +129,39 @@ class BizSnapshotResolverTest {
 
         assertThat(snapshot).isNull();
     }
+
+    /**
+     * {@code resolveBizCode} 应复用 {@code resolve} 的现查逻辑，取业务表的 {@code code} 属性。
+     */
+    @Test
+    void resolveBizCode_shouldReturnCodeFromResolvedSnapshot() {
+        when(orgMapper.selectById(1L)).thenReturn(OrgEntity.builder().id(1L).code("ORG001").build());
+
+        String bizCode = resolver.resolveBizCode(SyncDomain.ORG, 1L);
+
+        assertThat(bizCode).isEqualTo("ORG001");
+    }
+
+    /**
+     * POSITION 数据域没有业务编码字段，应恒返回 {@code null}，且不应发起任何业务表查询。
+     */
+    @Test
+    void resolveBizCode_shouldReturnNullForPositionDomain() {
+        String bizCode = resolver.resolveBizCode(SyncDomain.POSITION, 3L);
+
+        assertThat(bizCode).isNull();
+        verify(userPositionMapper, org.mockito.Mockito.never()).selectById(org.mockito.ArgumentMatchers.any());
+    }
+
+    /**
+     * 业务表查不到对应行时，{@code resolveBizCode} 应返回 {@code null}。
+     */
+    @Test
+    void resolveBizCode_shouldReturnNullWhenRowNotFound() {
+        when(orgMapper.selectById(99L)).thenReturn(null);
+
+        String bizCode = resolver.resolveBizCode(SyncDomain.ORG, 99L);
+
+        assertThat(bizCode).isNull();
+    }
 }

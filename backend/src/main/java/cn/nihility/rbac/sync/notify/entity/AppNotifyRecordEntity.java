@@ -13,7 +13,9 @@ import lombok.Setter;
 /**
  * 应用通知发送记录持久化实体，对应表 {@code tab_app_notify_record}
  * （app-sync-notify-pull-api change design.md Decision 7）。仅用于问题排查/展示，
- * 不驱动任何自动重试逻辑。
+ * 不驱动任何自动重试逻辑。{@code changeLogId} 字段随变更记录表一并删除，本表已有的
+ * {@code dataType}/{@code bizId} 两列足以定位一条通知记录（app-sync-drop-changelog
+ * change design.md Decision 6）。
  */
 @Getter
 @Setter
@@ -26,9 +28,6 @@ public class AppNotifyRecordEntity {
     /** 主键 id。 */
     @TableId(type = IdType.AUTO)
     private Long id;
-
-    /** 关联 {@code tab_app_data_change_log.id}。 */
-    private Long changeLogId;
 
     /** 关联 {@code tab_app.id}。 */
     private Long appRefId;

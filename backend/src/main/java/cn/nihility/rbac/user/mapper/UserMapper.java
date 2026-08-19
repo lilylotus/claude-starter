@@ -4,14 +4,17 @@ import cn.nihility.rbac.user.dto.UserVO;
 import cn.nihility.rbac.user.entity.UserEntity;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Set;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 /**
  * 用户 MyBatis-Plus 数据访问接口，单表 CRUD 直接复用 {@link BaseMapper}，不在此处
- * 编写 SQL；{@link #countByColumnValue}、{@link #selectUserPage} 是例外，SQL 写在
- * {@code resources/mybatis/mapper/UserMapper.xml} 里。
+ * 编写 SQL；{@link #countByColumnValue}、{@link #selectUserPage}、
+ * {@link #selectSyncPullPage} 是例外，SQL 写在 {@code resources/mybatis/mapper/UserMapper.xml}
+ * 里。
  */
 @Mapper
 public interface UserMapper extends BaseMapper<UserEntity> {
@@ -64,4 +67,25 @@ public interface UserMapper extends BaseMapper<UserEntity> {
      */
     int countUsersInScope(@Param("allowedOrgIds") Set<Long> allowedOrgIds, @Param("deletedStatus") int deletedStatus,
             @Param("positionDeletedStatus") int positionDeletedStatus);
+
+    /**
+     * 分页拉取用户当前数据，不过滤 {@code status}（停用/已删除记录原样返回），按
+     * {@code update_time ASC, id ASC} 排序，组织范围过滤通过存在至少一条未删除且所属组织
+     * 落在允许范围内的任职记录下推到 SQL（app-sync-drop-changelog change design.md
+     * Decision 1/2/4）。
+     *
+     * @param offset         偏移量
+     * @param limit          每页大小
+     * @param updateTimeFrom 更新时间范围起点（含），可为空
+     * @param updateTimeTo   更新时间范围终点（含），可为空
+     * @param ids            主键 id 列表精确过滤，{@code null} 表示不过滤
+     * @param codes          用户编码列表精确过滤，{@code null} 表示不过滤
+     * @param mobile         手机号精确过滤，{@code null}/空串表示不过滤
+     * @param allowedOrgIds  组织范围过滤下推的允许组织 id 全集，{@code null} 表示不限制
+     * @return 查询结果列表
+     */
+    List<UserEntity> selectSyncPullPage(@Param("offset") int offset, @Param("limit") int limit,
+            @Param("updateTimeFrom") LocalDateTime updateTimeFrom, @Param("updateTimeTo") LocalDateTime updateTimeTo,
+            @Param("ids") List<Long> ids, @Param("codes") List<String> codes, @Param("mobile") String mobile,
+            @Param("allowedOrgIds") Set<Long> allowedOrgIds);
 }

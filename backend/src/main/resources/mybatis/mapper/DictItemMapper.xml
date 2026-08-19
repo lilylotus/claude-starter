@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 字典项的分页拉取查询：不过滤 status（app-sync-drop-changelog change design.md
+     Decision 1，停用/已删除记录原样返回），按 update_time ASC, id ASC 排序，不做组织范围
+     过滤（design.md Decision 7）；updateTimeFrom/updateTimeTo/ids/codes 均为可选过滤条件，
+     codes 按字典项自身 code 过滤（同一 code 在不同 dictTypeId 下可能命中多条记录）。 -->
+<mapper namespace="cn.nihility.rbac.dict.mapper.DictItemMapper">
+
+    <select id="selectSyncPullPage" resultType="cn.nihility.rbac.dict.entity.DictItemEntity">
+        SELECT * FROM tab_dict_item
+        <where>
+            <if test="updateTimeFrom != null">AND update_time &gt;= #{updateTimeFrom}</if>
+            <if test="updateTimeTo != null">AND update_time &lt;= #{updateTimeTo}</if>
+            <if test="ids != null">
+                <if test="ids.isEmpty()">AND id = -1</if>
+                <if test="!ids.isEmpty()">
+                    AND id IN
+                    <foreach collection="ids" item="itemId" open="(" separator="," close=")">#{itemId}</foreach>
+                </if>
+            </if>
+            <if test="codes != null">
+                <if test="codes.isEmpty()">AND 1 = 0</if>
+                <if test="!codes.isEmpty()">
+                    AND code IN
+                    <foreach collection="codes" item="itemCode" open="(" separator="," close=")">#{itemCode}</foreach>
+                </if>
+            </if>
+        </where>
+        ORDER BY update_time ASC, id ASC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+</mapper>

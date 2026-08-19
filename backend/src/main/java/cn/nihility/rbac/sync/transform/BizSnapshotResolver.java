@@ -41,16 +41,46 @@ public class BizSnapshotResolver {
     /**
      * 按数据域和业务主键现查对应业务表，返回该行当前的字段快照。
      *
-     * @param dataType 数据域，取值范围为 {@link SyncDomain#CHANGE_LOG_DOMAINS}
-     *                 （ORG/USER/POSITION/APP/ROLE），由调用方（{@code SyncPullServiceImpl
-     *                 #assertValidDataType}）保证合法，{@code default} 分支仅作穷尽性兜底，
-     *                 不会在正常业务路径上被触发
+     * @param dataType 数据域，取值范围为 {@link SyncDomain#SYNC_PULL_DOMAINS}
+     *                 （ORG/USER/POSITION/APP/ROLE），由调用方保证合法，{@code default}
+     *                 分支仅作穷尽性兜底，不会在正常业务路径上被触发
      * @param bizId    业务主键 id
      * @return 该行当前的字段快照 Map（key 为实体属性名），业务表查不到该行时返回
      *         {@code null}（四张业务表均为逻辑删除，理论上不会物理消失，此处仅作防御性兜底）
      */
     public Map<String, Object> resolve(String dataType, Long bizId) {
-        Object entity = switch (dataType) {
+        Object entity = selectEntity(dataType, bizId);
+        return entity == null ? null : DomainSnapshotSupport.snapshot(entity);
+    }
+
+    /**
+     * 按数据域和业务主键现查对应业务表，返回该行当前的业务编码字段（{@code code}）
+     * （app-sync-drop-changelog change design.md Decision 6：通知 payload 新增
+     * {@code bizCode}，复用本组件现有的按 id 现查 dispatch 逻辑取值）。
+     *
+     * @param dataType 数据域，取值范围为 {@link SyncDomain#SYNC_PULL_DOMAINS}
+     * @param bizId    业务主键 id
+     * @return 该行当前的业务编码，POSITION 数据域没有业务编码字段恒为 {@code null}，
+     *         业务表查不到该行时也返回 {@code null}
+     */
+    public String resolveBizCode(String dataType, Long bizId) {
+        if (SyncDomain.POSITION.equals(dataType)) {
+            return null;
+        }
+        Map<String, Object> snapshot = resolve(dataType, bizId);
+        Object code = snapshot != null ? snapshot.get("code") : null;
+        return code != null ? code.toString() : null;
+    }
+
+    /**
+     * 按数据域分发到对应业务表的 {@code selectById}。
+     *
+     * @param dataType 数据域
+     * @param bizId    业务主键 id
+     * @return 业务表实体，查不到时返回 {@code null}
+     */
+    private Object selectEntity(String dataType, Long bizId) {
+        return switch (dataType) {
             case SyncDomain.ORG -> orgMapper.selectById(bizId);
             case SyncDomain.USER -> userMapper.selectById(bizId);
             case SyncDomain.POSITION -> userPositionMapper.selectById(bizId);
@@ -58,6 +88,5 @@ public class BizSnapshotResolver {
             case SyncDomain.ROLE -> roleMapper.selectById(bizId);
             default -> null;
         };
-        return entity == null ? null : DomainSnapshotSupport.snapshot(entity);
     }
 }

@@ -6,15 +6,13 @@ import lombok.Builder;
 import lombok.Getter;
 
 /**
- * 出站通知请求体（app-sync-notify-pull-api change design.md Decision 8）：只传"指针"，
- * 不传完整数据，外部应用收到通知后应主动调用拉取接口获取真正数据。
+ * 出站通知请求体（app-sync-notify-pull-api change design.md Decision 8；字段随变更记录表
+ * 删除而调整，见 app-sync-drop-changelog change design.md Decision 6）：只传"指针"，不传
+ * 完整数据，外部应用收到通知后应主动调用拉取接口获取真正数据。
  */
 @Getter
 @Builder
 public class NotifyPayload {
-
-    /** 本次变更的序列号（{@code tab_app_data_change_log.id}）。 */
-    private final Long sequence;
 
     /** 数据类型：ORG/USER/POSITION/APP/ROLE。 */
     private final String dataType;
@@ -24,6 +22,9 @@ public class NotifyPayload {
 
     /** 被变更对象 id。 */
     private final Long bizId;
+
+    /** 被变更对象的业务编码，POSITION 数据类型没有业务编码字段时为空。 */
+    private final String bizCode;
 
     /** 变更发生时间。 */
     private final LocalDateTime occurredAt;

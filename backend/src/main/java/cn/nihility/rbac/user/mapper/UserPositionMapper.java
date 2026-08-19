@@ -4,6 +4,9 @@ import cn.nihility.rbac.user.dto.PositionVO;
 import cn.nihility.rbac.user.entity.UserPositionEntity;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Set;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -48,4 +51,21 @@ public interface UserPositionMapper extends BaseMapper<UserPositionEntity> {
      */
     int countByColumnValue(@Param("column") String column, @Param("value") String value,
             @Param("excludeId") Long excludeId);
+
+    /**
+     * 分页拉取任职当前数据，不过滤 {@code status}（停用/已删除记录原样返回），按
+     * {@code update_time ASC, id ASC} 排序（app-sync-drop-changelog change design.md
+     * Decision 1/2/4）。任职数据域没有业务编码字段，不支持 {@code codes} 过滤。
+     *
+     * @param offset         偏移量
+     * @param limit          每页大小
+     * @param updateTimeFrom 更新时间范围起点（含），可为空
+     * @param updateTimeTo   更新时间范围终点（含），可为空
+     * @param ids            主键 id 列表精确过滤，{@code null} 表示不过滤
+     * @param allowedOrgIds  组织范围过滤下推的允许组织 id 全集，{@code null} 表示不限制
+     * @return 查询结果列表
+     */
+    List<UserPositionEntity> selectSyncPullPage(@Param("offset") int offset, @Param("limit") int limit,
+            @Param("updateTimeFrom") LocalDateTime updateTimeFrom, @Param("updateTimeTo") LocalDateTime updateTimeTo,
+            @Param("ids") List<Long> ids, @Param("allowedOrgIds") Set<Long> allowedOrgIds);
 }

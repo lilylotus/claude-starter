@@ -1,21 +1,22 @@
 package cn.nihility.rbac.sync.notify.service;
 
-import cn.nihility.rbac.sync.changelog.entity.AppDataChangeLogEntity;
+import cn.nihility.rbac.sync.event.DomainChangeEvent;
 
 /**
- * 应用通知发送业务逻辑接口：给定一条已落库、归属明确（{@code appRefId} 已知）的变更记录，
- * 若该应用当前同步方式为 {@code NOTIFY} 则发起一次通知请求，并把结果写入
- * {@code tab_app_notify_record}。变更记录落库时已经完成"这条记录该不该给这个应用看"的判定
- * （见 {@code AppDataChangeLogService#record}），本接口不再需要重新查询匹配应用列表
- * （app-sync-org-scope-and-app-change-log change design.md Decision 6，原
- * {@code notifyMatchedApps} 语义变更）。
+ * 应用通知发送业务逻辑接口：给定一条领域变更事件与一个已判定匹配的目标应用 id，若该应用
+ * 当前同步方式为 {@code NOTIFY} 则发起一次通知请求，并把结果写入
+ * {@code tab_app_notify_record}。候选应用判定（数据域启用+总开关开启+组织范围匹配+同步
+ * 方式为通知）由调用方（{@code NotifyCandidateResolver}）完成，本接口不再需要重新判定
+ * （app-sync-drop-changelog change design.md Decision 6：不再依赖已落库的变更记录实体，
+ * 直接从事件本身取值）。
  */
 public interface AppNotifyService {
 
     /**
-     * 若该记录归属的应用当前同步方式为 {@code NOTIFY}，则向其发起一次通知；否则不做任何事。
+     * 若目标应用当前同步方式为 {@code NOTIFY}，则向其发起一次通知；否则不做任何事。
      *
-     * @param changeLog 已落库的变更记录
+     * @param event    领域变更事件
+     * @param appRefId 目标应用 id（{@code tab_app.id}）
      */
-    void notifyIfConfigured(AppDataChangeLogEntity changeLog);
+    void notifyIfConfigured(DomainChangeEvent event, Long appRefId);
 }
