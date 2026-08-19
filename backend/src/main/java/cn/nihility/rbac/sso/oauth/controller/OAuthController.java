@@ -3,7 +3,6 @@ package cn.nihility.rbac.sso.oauth.controller;
 import cn.nihility.rbac.app.config.AppSecretProperties;
 import cn.nihility.rbac.app.entity.AppConfigEntity;
 import cn.nihility.rbac.common.util.Sm4JdkUtils;
-import cn.nihility.rbac.sso.config.RbacSsoProperties;
 import cn.nihility.rbac.sso.oauth.dto.IssuedToken;
 import cn.nihility.rbac.sso.oauth.dto.OAuthCodePayload;
 import cn.nihility.rbac.sso.oauth.dto.OAuthRefreshPayload;
@@ -60,9 +59,6 @@ public class OAuthController {
     /** SSO 浏览器会话业务逻辑接口。 */
     private final SsoSessionService ssoSessionService;
 
-    /** SSO 相关配置：{@code refresh_token} 授权分支响应体 {@code expires_in} 取值。 */
-    private final RbacSsoProperties ssoProperties;
-
     /** 应用对外接口凭证相关配置，提供 SM4 解密主密钥（校验 client_secret 时复用）。 */
     private final AppSecretProperties appSecretProperties;
 
@@ -113,7 +109,7 @@ public class OAuthController {
             return;
         }
 
-        String code = oAuthTokenService.issueCode(clientId, redirectUri, userIdOpt.get(), scope);
+        String code = oAuthTokenService.issueCode(clientId, redirectUri, userIdOpt.get(), scope, sessionToken);
         String separator = redirectUri.contains("?") ? "&" : "?";
         String location = redirectUri + separator + "code=" + code + (StringUtils.hasText(state) ? "&state=" + state : "");
         ProtocolResponseWriter.redirect(response, location);
@@ -134,7 +130,8 @@ public class OAuthController {
      */
     @Operation(summary = "OAuth2 令牌签发/刷新",
             description = "grant_type=authorization_code 签发 access token 与 refresh token；"
-                    + "grant_type=refresh_token 只签发新的 access token，refresh token 本身不轮转")
+                    + "grant_type=refresh_token 轮转刷新：旧 refresh token 立即一次性消费失效，"
+                    + "签发新的 access token 与新的 refresh token（拥有完整有效期），响应体新增返回 refresh_token")
     @PostMapping("/api/authn/oauth/token")
     public void token(@RequestParam(name = "client_id", required = false) String clientId,
             @RequestParam(name = "client_secret", required = false) String clientSecret,
@@ -247,7 +244,7 @@ public class OAuthController {
 
         OAuthCodePayload payload = payloadOpt.get();
         IssuedToken issuedToken = oAuthTokenService.issueAccessTokenWithRefresh(tokenRequest.getClientId(),
-                payload.userId(), payload.scope());
+                payload.userId(), payload.scope(), payload.ssoSessionToken());
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("access_token", issuedToken.accessToken());
         body.put("token_type", OAuthTokenService.TOKEN_TYPE_BEARER);
@@ -259,7 +256,11 @@ public class OAuthController {
     /**
      * 处理 {@code grant_type=refresh_token} 分支：只要求 {@code refresh_token}/
      * {@code grant_type} 两个参数，不校验 {@code client_id}/{@code client_secret}
-     * （design.md Decision 6/Risks 已说明这是按用户明确给出的参数列表实现的结果）。
+     * （design.md Decision 6/Risks 已说明这是按用户明确给出的参数列表实现的结果）。校验通过
+     * 后按"轮转"模式刷新：旧 {@code refresh_token} 立即一次性消费失效，签发新的 access token
+     * 与新的 {@code refresh_token}（拥有完整的配置有效期），响应体新增返回
+     * {@code refresh_token} 字段，调用方 SHALL 用该新值替换本地保存的旧值（**BREAKING**，
+     * add-sso-single-logout change design.md Decision 6）。
      *
      * @param tokenRequest 令牌请求参数
      * @param response     当前响应
@@ -279,11 +280,13 @@ public class OAuthController {
         }
 
         OAuthRefreshPayload payload = payloadOpt.get();
-        String accessToken = oAuthTokenService.issueAccessTokenOnly(payload.clientId(), payload.userId(), payload.scope());
+        IssuedToken issuedToken = oAuthTokenService.rotateAccessAndRefreshToken(tokenRequest.getRefreshToken(),
+                payload.clientId(), payload.userId(), payload.scope());
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("access_token", accessToken);
+        body.put("access_token", issuedToken.accessToken());
         body.put("token_type", OAuthTokenService.TOKEN_TYPE_BEARER);
-        body.put("expires_in", ssoProperties.getOauthTokenExpireSeconds());
+        body.put("expires_in", issuedToken.expiresIn());
+        body.put("refresh_token", issuedToken.refreshToken());
         ProtocolResponseWriter.json(response, HttpServletResponse.SC_OK, body);
     }
 

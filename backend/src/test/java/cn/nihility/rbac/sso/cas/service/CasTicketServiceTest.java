@@ -12,7 +12,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 
 /**
  * {@link CasTicketService} 的测试，起真实 Redis 连接，覆盖签发/一次性消费/重复消费失败/
- * 过期失败（tasks.md 7.2）。
+ * 过期失败（tasks.md 7.2），以及签发时同步登记会话-应用凭证映射
+ * （add-sso-single-logout change tasks.md 2.2）。
  */
 @SpringBootTest
 class CasTicketServiceTest {
@@ -30,7 +31,7 @@ class CasTicketServiceTest {
      */
     @Test
     void issue_shouldStartWithTicketPrefix() {
-        String ticket = casTicketService.issue("app-1", "https://partner.example.com/cb", 10L);
+        String ticket = casTicketService.issue("app-1", "https://partner.example.com/cb", 10L, "session-token-1");
 
         assertThat(ticket).startsWith("ST-");
         casTicketService.consume(ticket);
@@ -41,7 +42,7 @@ class CasTicketServiceTest {
      */
     @Test
     void consume_shouldSucceedOnce_thenFailOnSecondConsume() {
-        String ticket = casTicketService.issue("app-1", "https://partner.example.com/cb", 10L);
+        String ticket = casTicketService.issue("app-1", "https://partner.example.com/cb", 10L, "session-token-2");
 
         Optional<CasTicketPayload> first = casTicketService.consume(ticket);
         assertThat(first).isPresent();
@@ -66,10 +67,27 @@ class CasTicketServiceTest {
      */
     @Test
     void consume_shouldReturnEmpty_afterExpire() throws InterruptedException {
-        String ticket = casTicketService.issue("app-1", "https://partner.example.com/cb", 10L);
+        String ticket = casTicketService.issue("app-1", "https://partner.example.com/cb", 10L, "session-token-3");
         stringRedisTemplate.expire("cas:st:" + ticket, 50, TimeUnit.MILLISECONDS);
         Thread.sleep(200);
 
         assertThat(casTicketService.consume(ticket)).isEmpty();
+    }
+
+    /**
+     * 签发票据后，应在会话-应用凭证映射 Hash 中登记该应用最后一次签发的票据
+     * （add-sso-single-logout change design.md Decision 1）。
+     */
+    @Test
+    void issue_shouldRecordAppCredential_inSessionAppsHash() {
+        String sessionToken = "session-token-4";
+        String ticket = casTicketService.issue("app-1", "https://partner.example.com/cb", 10L, sessionToken);
+
+        Object raw = stringRedisTemplate.opsForHash().get("sso:session:" + sessionToken + ":apps", "app-1");
+        assertThat(raw).isNotNull();
+        assertThat(raw.toString()).contains("CAS").contains(ticket);
+
+        casTicketService.consume(ticket);
+        stringRedisTemplate.delete("sso:session:" + sessionToken + ":apps");
     }
 }

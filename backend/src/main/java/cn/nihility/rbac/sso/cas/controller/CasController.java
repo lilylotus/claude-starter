@@ -4,11 +4,11 @@ import cn.nihility.rbac.sso.cas.dto.CasTicketPayload;
 import cn.nihility.rbac.sso.cas.service.CasTicketService;
 import cn.nihility.rbac.sso.cas.support.CasJsonResponses;
 import cn.nihility.rbac.sso.cas.support.CasXmlResponses;
-import cn.nihility.rbac.sso.config.RbacSsoProperties;
 import cn.nihility.rbac.sso.session.SsoSessionCookieUtils;
 import cn.nihility.rbac.sso.session.SsoSessionService;
 import cn.nihility.rbac.sso.support.AppProtocolGuard;
 import cn.nihility.rbac.sso.support.ProtocolResponseWriter;
+import cn.nihility.rbac.sso.support.SsoLogoutExecutor;
 import cn.nihility.rbac.sso.support.SsoProtocolException;
 import cn.nihility.rbac.sso.support.SsoUserinfoAttributesResolver;
 import cn.nihility.rbac.user.entity.UserEntity;
@@ -22,8 +22,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpHeaders;
-import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -54,8 +52,8 @@ public class CasController {
     /** SSO 浏览器会话业务逻辑接口。 */
     private final SsoSessionService ssoSessionService;
 
-    /** SSO 相关配置：会话 Cookie 是否要求 Secure。 */
-    private final RbacSsoProperties ssoProperties;
+    /** 单点登出主流程公共执行组件，登出接口复用其撤销会话/清 Cookie/触发通知/302 重定向逻辑。 */
+    private final SsoLogoutExecutor ssoLogoutExecutor;
 
     /** 用户数据访问接口，票据验证成功后按用户 id 查询用户标识/姓名。 */
     private final UserMapper userMapper;
@@ -91,7 +89,7 @@ public class CasController {
             return;
         }
 
-        String ticket = casTicketService.issue(appId, service, userIdOpt.get());
+        String ticket = casTicketService.issue(appId, service, userIdOpt.get(), sessionToken);
         String separator = service.contains("?") ? "&" : "?";
         ProtocolResponseWriter.redirect(response, service + separator + "ticket=" + ticket);
     }
@@ -159,22 +157,27 @@ public class CasController {
     }
 
     /**
-     * CAS 单点登出：清除当前浏览器持有的 SSO 会话，幂等（未持有会话时同样返回成功提示）。
+     * CAS 单点登出（**BREAKING**：新增必填 {@code service} 参数，不再直接返回登出成功文本）：
+     * {@code service} 校验通过后，撤销当前浏览器持有的 SSO 会话、清除会话 Cookie、触发一次
+     * 单点登出后端回调通知（fire-and-forget，不等待结果，通知本次会话实际登录过的全部应用），
+     * 最终 302 重定向到 {@code service}（add-sso-single-logout change design.md Decision 4）。
      *
-     * @param appId    应用对外标识（路径变量，登出不区分应用，仅用于保持路径结构一致）
+     * @param appId    应用对外标识（路径变量）
+     * @param service  CAS {@code service} 参数，须匹配该应用配置的 service ANT 匹配列表
      * @param request  当前请求
      * @param response 当前响应
      * @throws IOException 写响应失败
      */
-    @Operation(summary = "CAS 单点登出", description = "清除当前浏览器持有的 SSO 会话，不做 back-channel 通知")
+    @Operation(summary = "CAS 单点登出", description = "校验 service 白名单，撤销会话、清除 Cookie、触发登出后端回调通知后 302 重定向到 service")
     @GetMapping("/api/authn/cas/{appId}/logout")
-    public void logout(@PathVariable String appId, HttpServletRequest request, HttpServletResponse response)
-            throws IOException {
-        String sessionToken = SsoSessionCookieUtils.extractSessionToken(request);
-        if (StringUtils.hasText(sessionToken)) {
-            ssoSessionService.revoke(sessionToken);
+    public void logout(@PathVariable String appId, @RequestParam String service, HttpServletRequest request,
+            HttpServletResponse response) throws IOException {
+        try {
+            appProtocolGuard.assertCasServiceAllowed(appId, service);
+        } catch (SsoProtocolException e) {
+            ProtocolResponseWriter.text(response, HttpServletResponse.SC_BAD_REQUEST, e.getMessage());
+            return;
         }
-        response.addHeader(HttpHeaders.SET_COOKIE, SsoSessionCookieUtils.buildClearCookieHeader(ssoProperties.isCookieSecure()));
-        ProtocolResponseWriter.text(response, HttpServletResponse.SC_OK, "已登出");
+        ssoLogoutExecutor.execute(request, response, service);
     }
 }

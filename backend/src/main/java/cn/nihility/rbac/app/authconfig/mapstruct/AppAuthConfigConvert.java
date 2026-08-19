@@ -8,10 +8,10 @@ import org.mapstruct.factory.Mappers;
 
 /**
  * 应用单点登录协议配置实体与视图对象之间的 MapStruct 转换器，不接入 Spring 容器，
- * 通过 {@link #INSTANCE} 静态创建单例调用。{@code casServicePatterns}/
- * {@code oauth2RedirectUriPatterns}（JSON 文本 -&gt; List）与 6 个只读协议接口地址由
- * {@code AppAuthConfigServiceImpl} 在 {@link #toVO} 之后手动回填，本转换器显式忽略这些字段
- * （同 {@code AppConfigConvert} 对 {@code notifyParams} 的既有处理方式）。
+ * 通过 {@link #INSTANCE} 静态创建单例调用。{@code servicePatterns}（JSON 文本 -&gt; List）
+ * 与 6 个只读协议接口地址由 {@code AppAuthConfigServiceImpl} 在 {@link #toVO} 之后手动
+ * 回填，本转换器显式忽略这些字段（同 {@code AppConfigConvert} 对 {@code notifyParams}
+ * 的既有处理方式）。
  */
 @Mapper
 public interface AppAuthConfigConvert {
@@ -25,8 +25,7 @@ public interface AppAuthConfigConvert {
      * @param entity 应用单点登录协议配置实体
      * @return 应用单点登录协议配置视图对象
      */
-    @Mapping(target = "casServicePatterns", ignore = true)
-    @Mapping(target = "oauth2RedirectUriPatterns", ignore = true)
+    @Mapping(target = "servicePatterns", ignore = true)
     @Mapping(target = "casLoginUrl", ignore = true)
     @Mapping(target = "casServiceValidateUrl", ignore = true)
     @Mapping(target = "casLogoutUrl", ignore = true)

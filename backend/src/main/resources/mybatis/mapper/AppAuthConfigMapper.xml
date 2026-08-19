@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 已启用单点登录协议的应用查询：tab_app_auth_config INNER JOIN tab_app_config，取登出
+     通知回调地址与对外接口凭证签名参数，供 SsoLogoutNotifyService 登出时按 appId 匹配回调
+     目标（add-sso-single-logout change tasks.md 3.1）。联表条件写在 ON 后，业务过滤条件
+     （auth_protocol != NONE）写在 WHERE 后。 -->
+<mapper namespace="cn.nihility.rbac.app.authconfig.mapper.AppAuthConfigMapper">
+
+    <select id="selectActiveProtocolApps" resultType="cn.nihility.rbac.app.authconfig.dto.AppProtocolInfo">
+        SELECT
+        c.open_app_id AS appId,
+        ac.auth_protocol AS authProtocol,
+        ac.logout_notify_url AS logoutNotifyUrl,
+        c.access_key AS accessKey,
+        c.secret_key AS secretKey,
+        c.sign_algorithm AS signAlgorithm,
+        c.need_sign AS needSign
+        FROM tab_app_auth_config ac
+        INNER JOIN tab_app_config c ON c.app_id = ac.app_id
+        WHERE ac.auth_protocol != 'NONE'
+    </select>
+
+</mapper>

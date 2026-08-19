@@ -1,6 +1,7 @@
 package cn.nihility.rbac.sso.support;
 
 import cn.nihility.rbac.app.authconfig.constant.AuthProtocol;
+import cn.nihility.rbac.app.authconfig.dto.AppProtocolInfo;
 import cn.nihility.rbac.app.authconfig.entity.AppAuthConfigEntity;
 import cn.nihility.rbac.app.authconfig.mapper.AppAuthConfigMapper;
 import cn.nihility.rbac.app.entity.AppConfigEntity;
@@ -51,7 +52,7 @@ public class AppProtocolGuard {
         if (!StringUtils.hasText(service)) {
             throw new SsoProtocolException("service 参数不能为空");
         }
-        List<String> patterns = parsePatterns(authConfig.getCasServicePatterns());
+        List<String> patterns = parsePatterns(authConfig.getServicePatterns());
         if (patterns.stream().noneMatch(pattern -> PATH_MATCHER.match(pattern, service))) {
             throw new SsoProtocolException("service 不匹配任何已配置的规则");
         }
@@ -75,11 +76,50 @@ public class AppProtocolGuard {
         if (!StringUtils.hasText(redirectUri)) {
             throw new SsoProtocolException("redirect_uri 参数不能为空");
         }
-        List<String> patterns = parsePatterns(authConfig.getOauth2RedirectUriPatterns());
+        List<String> patterns = parsePatterns(authConfig.getServicePatterns());
         if (patterns.stream().noneMatch(pattern -> PATH_MATCHER.match(pattern, redirectUri))) {
             throw new SsoProtocolException("redirect_uri 不匹配任何已配置的规则");
         }
         return authConfig;
+    }
+
+    /**
+     * 校验 {@code appId} 对应应用存在且已开启单点登录协议（CAS 或 OAuth2.0），且
+     * {@code service} 匹配已配置的回跳地址匹配列表（{@code servicePatterns}，CAS/OAuth2.0
+     * 共用同一份存储）中的至少一条规则；应用不存在、协议类型为 {@code NONE} 或不匹配任何
+     * 规则时均抛出 {@link SsoProtocolException} 拒绝（add-sso-single-logout change design.md
+     * Decision 5，全局登出接口复用；unify-app-auth-service-patterns change 合并为统一读取
+     * {@code servicePatterns}，不再按协议类型分支选列）。
+     *
+     * @param appId   对外应用标识
+     * @param service 待校验的回跳地址（CAS 场景语义等同 service，OAuth2.0 场景语义等同
+     *                redirect_uri）
+     * @return 校验通过的应用单点登录协议配置
+     */
+    public AppAuthConfigEntity assertLogoutServiceAllowed(String appId, String service) {
+        AppAuthConfigEntity authConfig = resolveAuthConfig(appId);
+        if (!StringUtils.hasText(service)) {
+            throw new SsoProtocolException("service 参数不能为空");
+        }
+        if (AuthProtocol.NONE.equals(authConfig.getAuthProtocol())) {
+            throw new SsoProtocolException("该应用未开启单点登录协议");
+        }
+        List<String> patterns = parsePatterns(authConfig.getServicePatterns());
+        if (patterns.stream().noneMatch(pattern -> PATH_MATCHER.match(pattern, service))) {
+            throw new SsoProtocolException("service 不匹配任何已配置的规则");
+        }
+        return authConfig;
+    }
+
+    /**
+     * 查询全部已启用单点登录协议（{@code authProtocol != NONE}）的应用，携带登出通知回调
+     * 地址与对外接口凭证签名参数，供 {@link SsoLogoutNotifyService} 登出时按 {@code appId}
+     * 匹配回调目标使用（add-sso-single-logout change tasks.md 3.1）。
+     *
+     * @return 已启用单点登录协议的应用列表
+     */
+    public List<AppProtocolInfo> listActiveProtocolApps() {
+        return appAuthConfigMapper.selectActiveProtocolApps();
     }
 
     /**

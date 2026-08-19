@@ -13,10 +13,11 @@ import lombok.Setter;
 
 /**
  * 应用单点登录协议配置持久化实体，对应表 {@code tab_app_auth_config}，与 {@code tab_app}
- * 一对一（app-auth-protocol-config change design.md Decision 1）。{@code casServicePatterns}/
- * {@code oauth2RedirectUriPatterns} 落库为 JSON 字符串数组文本，读写时经 {@code JacksonUtils}
- * 与 {@code List<String>} 互转，本字段本身只存储原始 JSON 文本（同
- * {@code AppConfigEntity#notifyParams} 的既有模式）。
+ * 一对一（app-auth-protocol-config change design.md Decision 1）。{@code servicePatterns}
+ * 落库为 JSON 字符串数组文本，读写时经 {@code JacksonUtils} 与 {@code List<String>} 互转，
+ * 本字段本身只存储原始 JSON 文本（同 {@code AppConfigEntity#notifyParams} 的既有模式）。
+ * CAS/OAuth2.0 及未来新增的单点登录协议共用同一份存储，不再按协议类型分别维护独立列
+ * （unify-app-auth-service-patterns change design.md Decision 1）。
  */
 @Getter
 @Setter
@@ -37,11 +38,18 @@ public class AppAuthConfigEntity {
     /** 单点登录协议类型：NONE/CAS/OAUTH2。 */
     private String authProtocol;
 
-    /** CAS service 参数 ANT 匹配规则列表，JSON 字符串数组文本，authProtocol=NONE 时为空。 */
-    private String casServicePatterns;
+    /**
+     * 回跳地址 ANT 匹配规则列表，JSON 字符串数组文本，CAS/OAuth2.0 等协议共用同一份存储，
+     * authProtocol=NONE 时为空。
+     */
+    private String servicePatterns;
 
-    /** OAuth2 redirect_uri ANT 匹配规则列表，JSON 字符串数组文本，authProtocol=NONE 时为空。 */
-    private String oauth2RedirectUriPatterns;
+    /**
+     * 登出通知回调地址：单点登出触发登出主流程时，系统按此地址以 POST +
+     * {@code application/x-www-form-urlencoded} 方式回调通知该应用登出事件（add-sso-single-logout
+     * change design.md Decision 2/3），未配置（{@code null}）时登出不通知该应用。
+     */
+    private String logoutNotifyUrl;
 
     /** 创建人。 */
     private String createBy;

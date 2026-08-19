@@ -219,8 +219,13 @@ export const AUTH_PROTOCOL_OPTIONS: Array<{ value: AuthProtocol; label: string }
 // 为何都会返回，方便管理员提前查看/复制
 export interface AppAuthConfigVO {
   authProtocol: AuthProtocol
-  casServicePatterns: string[]
-  oauth2RedirectUriPatterns: string[]
+  // 回跳地址 ANT 匹配规则列表，CAS/OAuth2.0 及未来新增协议共用同一份存储，语义为
+  // "当前生效协议下允许的回跳地址匹配列表"（不是多协议的并集）
+  servicePatterns: string[]
+  // 登出通知回调地址：单点登出发生时，后端以 POST 表单方式回调该地址通知本应用登出
+  // （CAS 协议回传 ticket，OAuth2.0 协议回传 access_token），可为空，非空时须为合法
+  // http/https URL；随协议类型/匹配列表一并读写，不单独提供保存接口
+  logoutNotifyUrl: string
   casLoginUrl: string
   casServiceValidateUrl: string
   casLogoutUrl: string
@@ -230,11 +235,12 @@ export interface AppAuthConfigVO {
 }
 
 // 修改认证配置请求体，对应 PUT /api/apps/{id}/config/auth；协议类型为 CAS/OAuth2.0 时
-// 对应的匹配列表不能为空，协议类型为无时两个列表都会被后端清空（不保留旧值）
+// servicePatterns 不能为空，协议类型为无时会被后端清空（不保留旧值）；
+// logoutNotifyUrl 可留空，非空时须为合法 http/https URL
 export interface AppAuthConfigUpdateRequest {
   authProtocol: AuthProtocol
-  casServicePatterns: string[]
-  oauth2RedirectUriPatterns: string[]
+  servicePatterns: string[]
+  logoutNotifyUrl: string
 }
 
 // ---- 认证管理·用户信息响应字段映射：每个应用一份，CAS 票据验证/OAuth2 userinfo 接口共用，

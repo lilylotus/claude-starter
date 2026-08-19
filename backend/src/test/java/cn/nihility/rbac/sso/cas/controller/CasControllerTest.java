@@ -128,8 +128,7 @@ class CasControllerTest {
         AppAuthConfigEntity authConfig = AppAuthConfigEntity.builder()
                 .appRefId(appRefId)
                 .authProtocol(AuthProtocol.CAS)
-                .casServicePatterns(JacksonUtils.toJson(List.of("https://partner.example.com/**")))
-                .oauth2RedirectUriPatterns(JacksonUtils.toJson(List.of()))
+                .servicePatterns(JacksonUtils.toJson(List.of("https://partner.example.com/**")))
                 .createBy("test")
                 .createTime(now)
                 .updateBy("test")
@@ -292,16 +291,74 @@ class CasControllerTest {
     }
 
     /**
-     * 登出后应清除浏览器持有的 SSO 会话，后续该会话校验失效（spec.md "登出后原会话失效" Scenario）。
+     * service 校验通过且浏览器持有有效 SSO 会话时，登出后应清除该会话（后续该会话校验失效），
+     * 并 302 重定向到 {@code service}（**BREAKING**：不再直接返回登出成功文本，
+     * add-sso-single-logout change spec.md "登出后原会话失效并跳回 service" Scenario）。
      */
     @Test
-    void logout_shouldClearSession() throws Exception {
+    void logout_shouldClearSession_andRedirectToService() throws Exception {
         String sessionToken = ssoSessionService.issue(userId);
         Cookie cookie = new Cookie("sso_session", sessionToken);
 
-        mockMvc.perform(get("/api/authn/cas/{appId}/logout", appId).cookie(cookie))
-                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/authn/cas/{appId}/logout", appId).param("service", ALLOWED_SERVICE).cookie(cookie))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", ALLOWED_SERVICE));
 
+        assertThat(ssoSessionService.verify(sessionToken)).isEmpty();
+    }
+
+    /**
+     * 未持有会话时登出接口仍应正常 302 重定向到 {@code service}，不报错（幂等）。
+     */
+    @Test
+    void logout_shouldRedirect_evenWithoutSession() throws Exception {
+        mockMvc.perform(get("/api/authn/cas/{appId}/logout", appId).param("service", ALLOWED_SERVICE))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", ALLOWED_SERVICE));
+    }
+
+    /**
+     * service 未匹配任何已配置规则时，登出接口应拒绝且不发生任何重定向、不清除会话
+     * （add-sso-single-logout change spec.md "service 未匹配任何规则被拒绝" Scenario）。
+     */
+    @Test
+    void logout_shouldReject_andNotRedirect_whenServiceNotWhitelisted() throws Exception {
+        String sessionToken = ssoSessionService.issue(userId);
+        Cookie cookie = new Cookie("sso_session", sessionToken);
+
+        mockMvc.perform(get("/api/authn/cas/{appId}/logout", appId)
+                        .param("service", "https://evil.example.com/callback").cookie(cookie))
+                .andExpect(status().isBadRequest())
+                .andExpect(header().doesNotExist("Location"));
+
+        assertThat(ssoSessionService.verify(sessionToken)).contains(userId);
+    }
+
+    /**
+     * 本次会话登录过的应用配置了登出通知回调地址，但该地址不可达（超时/连接失败）时，登出
+     * 接口仍应正常、快速地完成会话失效与 302 重定向，不因通知失败而报错或延迟响应
+     * （通知为 fire-and-forget，不等待 HTTP 响应，spec.md "回调通知失败不阻塞登出流程"
+     * Scenario）。
+     */
+    @Test
+    void logout_shouldCompletePromptly_whenNotifyTargetUnreachable() throws Exception {
+        AppAuthConfigEntity authConfig = appAuthConfigMapper.selectOne(
+                new LambdaQueryWrapper<AppAuthConfigEntity>().eq(AppAuthConfigEntity::getAppRefId, appRefId));
+        authConfig.setLogoutNotifyUrl("http://127.0.0.1:1/unreachable-logout-notify");
+        appAuthConfigMapper.updateById(authConfig);
+
+        String sessionToken = ssoSessionService.issue(userId);
+        Cookie cookie = new Cookie("sso_session", sessionToken);
+        mockMvc.perform(get("/api/authn/cas/{appId}/login", appId).param("service", ALLOWED_SERVICE).cookie(cookie))
+                .andExpect(status().isFound());
+
+        long start = System.currentTimeMillis();
+        mockMvc.perform(get("/api/authn/cas/{appId}/logout", appId).param("service", ALLOWED_SERVICE).cookie(cookie))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", ALLOWED_SERVICE));
+        long elapsedMillis = System.currentTimeMillis() - start;
+
+        assertThat(elapsedMillis).isLessThan(2000L);
         assertThat(ssoSessionService.verify(sessionToken)).isEmpty();
     }
 }

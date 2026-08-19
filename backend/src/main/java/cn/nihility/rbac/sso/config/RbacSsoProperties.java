@@ -34,6 +34,10 @@ public class RbacSsoProperties {
     /** OAuth2 access token 有效期（秒），默认 7200 秒（2 小时）。 */
     private long oauthTokenExpireSeconds = 7200;
 
-    /** OAuth2 refresh token 有效期（秒），默认 1209600 秒（14 天），明显长于 access token。 */
-    private long oauthRefreshTokenExpireSeconds = 1209600;
+    /**
+     * OAuth2 refresh token 有效期（秒），默认 86400 秒（1 天，add-sso-single-logout change
+     * design.md Decision 6，原 1209600 秒/14 天）。刷新时按轮转模式签发新值，接入方须保证
+     * 至少每天刷新一次，否则需重新走一遍完整授权流程。
+     */
+    private long oauthRefreshTokenExpireSeconds = 86400;
 }

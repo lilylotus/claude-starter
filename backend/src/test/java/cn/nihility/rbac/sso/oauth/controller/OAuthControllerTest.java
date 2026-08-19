@@ -154,8 +154,7 @@ class OAuthControllerTest {
         AppAuthConfigEntity authConfig = AppAuthConfigEntity.builder()
                 .appRefId(appRefId)
                 .authProtocol(AuthProtocol.OAUTH2)
-                .casServicePatterns(JacksonUtils.toJson(List.of()))
-                .oauth2RedirectUriPatterns(JacksonUtils.toJson(List.of("https://partner.example.com/**")))
+                .servicePatterns(JacksonUtils.toJson(List.of("https://partner.example.com/**")))
                 .createBy("test")
                 .createTime(now)
                 .updateBy("test")
@@ -322,12 +321,14 @@ class OAuthControllerTest {
     }
 
     /**
-     * 合法 {@code refresh_token} 刷新成功，签发新的 access token（只传
+     * 合法 {@code refresh_token} 刷新成功，签发新的 access token 与新的 refresh token（只传
      * {@code refresh_token}/{@code grant_type} 两个参数，不要求 {@code client_id}/
-     * {@code client_secret}，spec.md "合法 refresh_token 刷新成功" Scenario）。
+     * {@code client_secret}）；旧 refresh token 应被立即消费失效，再次用旧值请求刷新应被拒绝
+     * （add-sso-single-logout change spec.md "合法 refresh_token 刷新成功且旧值被消费"
+     * Scenario）。
      */
     @Test
-    void token_refreshToken_shouldSucceed() throws Exception {
+    void token_refreshToken_shouldSucceed_andRotateRefreshToken() throws Exception {
         String code = issueAuthorizationCode();
         String tokenResponseBody = mockMvc.perform(post("/api/authn/oauth/token")
                         .param("grant_type", "authorization_code")
@@ -347,7 +348,14 @@ class OAuthControllerTest {
         Map<String, Object> refreshed = JacksonUtils.toObj(refreshedBody, JacksonUtils.MAP_OBJECT_TYPE_REFERENCE);
         assertThat(refreshed.get("access_token")).isNotNull();
         assertThat(refreshed.get("access_token")).isNotEqualTo(issued.get("access_token"));
-        assertThat(refreshed).doesNotContainKey("refresh_token");
+        assertThat(refreshed.get("refresh_token")).isNotNull();
+        assertThat(refreshed.get("refresh_token")).isNotEqualTo(refreshToken);
+
+        // 旧 refresh token 已一次性消费失效，再次使用应被拒绝
+        mockMvc.perform(post("/api/authn/oauth/token")
+                        .param("grant_type", "refresh_token")
+                        .param("refresh_token", refreshToken))
+                .andExpect(status().isBadRequest());
     }
 
     /**

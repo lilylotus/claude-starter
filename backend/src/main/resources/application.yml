@@ -94,5 +94,6 @@ rbac:
     oauth-code-expire-seconds: 300
     # OAuth2 access token 有效期（秒），默认 7200 秒（2 小时）。
     oauth-token-expire-seconds: 7200
-    # OAuth2 refresh token 有效期（秒），默认 1209600 秒（14 天）。
-    oauth-refresh-token-expire-seconds: 1209600
+    # OAuth2 refresh token 有效期（秒），默认 86400 秒（1 天，add-sso-single-logout change
+    # design.md Decision 6，刷新时轮转签发新值，接入方须保证至少每天刷新一次）。
+    oauth-refresh-token-expire-seconds: 86400

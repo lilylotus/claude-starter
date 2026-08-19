@@ -32,6 +32,8 @@ import cn.nihility.rbac.metadata.mapper.MetadataFieldMapper;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -85,8 +87,7 @@ public class AppAuthConfigServiceImpl implements AppAuthConfigService {
         AppAuthConfigEntity entity = AppAuthConfigEntity.builder()
                 .appRefId(appRefId)
                 .authProtocol(AuthProtocol.NONE)
-                .casServicePatterns(JacksonUtils.toJson(List.of()))
-                .oauth2RedirectUriPatterns(JacksonUtils.toJson(List.of()))
+                .servicePatterns(JacksonUtils.toJson(List.of()))
                 .createBy(operator)
                 .createTime(now)
                 .updateBy(operator)
@@ -107,7 +108,10 @@ public class AppAuthConfigServiceImpl implements AppAuthConfigService {
     /**
      * {@inheritDoc}
      * <p>
-     * 协议类型与两个匹配列表的关联校验、去重规则见 {@link #assertAndNormalize}。
+     * 协议类型与匹配列表的关联校验、去重规则见 {@link #assertProtocolPatternsValid}/
+     * {@link #normalize}。CAS 与 OAuth2.0（及未来新增协议）共用同一份 {@code servicePatterns}
+     * 存储，切换协议类型时以本次提交的新列表整体替换，不做新旧列表合并
+     * （unify-app-auth-service-patterns change design.md Decision 1/Non-Goals）。
      */
     @Override
     public AppAuthConfigVO updateConfig(Long appRefId, AppAuthConfigUpdateRequest request) {
@@ -115,15 +119,16 @@ public class AppAuthConfigServiceImpl implements AppAuthConfigService {
         AppAuthConfigEntity entity = findOrCreateByAppRefId(appRefId);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
-        List<String> casServicePatterns = normalize(request.getCasServicePatterns());
-        List<String> oauth2RedirectUriPatterns = normalize(request.getOauth2RedirectUriPatterns());
-        assertProtocolPatternsValid(request.getAuthProtocol(), casServicePatterns, oauth2RedirectUriPatterns);
+        List<String> servicePatterns = normalize(request.getServicePatterns());
+        assertProtocolPatternsValid(request.getAuthProtocol(), servicePatterns);
+        String logoutNotifyUrl = StringUtils.hasText(request.getLogoutNotifyUrl())
+                ? request.getLogoutNotifyUrl().trim() : null;
+        assertValidLogoutNotifyUrl(logoutNotifyUrl);
 
         entity.setAuthProtocol(request.getAuthProtocol());
-        entity.setCasServicePatterns(JacksonUtils.toJson(
-                AuthProtocol.CAS.equals(request.getAuthProtocol()) ? casServicePatterns : List.of()));
-        entity.setOauth2RedirectUriPatterns(JacksonUtils.toJson(
-                AuthProtocol.OAUTH2.equals(request.getAuthProtocol()) ? oauth2RedirectUriPatterns : List.of()));
+        entity.setServicePatterns(JacksonUtils.toJson(
+                AuthProtocol.NONE.equals(request.getAuthProtocol()) ? List.of() : servicePatterns));
+        entity.setLogoutNotifyUrl(logoutNotifyUrl);
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         appAuthConfigMapper.updateById(entity);
@@ -134,20 +139,39 @@ public class AppAuthConfigServiceImpl implements AppAuthConfigService {
     }
 
     /**
-     * 按协议类型校验匹配列表：CAS/OAUTH2 要求各自对应的匹配列表非空，NONE 不校验（两个列表
-     * 保存时统一清空，见调用方）。
+     * 校验匹配列表：协议类型为 CAS 或 OAUTH2 时 {@code servicePatterns} 至少一条规则，
+     * 否则拒绝；协议类型为 NONE 时不校验（保存时统一清空，见调用方）。
      *
-     * @param authProtocol              协议类型
-     * @param casServicePatterns        去重去空白后的 CAS 匹配列表
-     * @param oauth2RedirectUriPatterns 去重去空白后的 OAuth2 匹配列表
+     * @param authProtocol    协议类型
+     * @param servicePatterns 去重去空白后的回跳地址匹配列表
      */
-    private void assertProtocolPatternsValid(String authProtocol, List<String> casServicePatterns,
-            List<String> oauth2RedirectUriPatterns) {
-        if (AuthProtocol.CAS.equals(authProtocol) && casServicePatterns.isEmpty()) {
-            throw new BusinessException("协议类型为 CAS 时，service 匹配列表至少需要一条规则");
+    private void assertProtocolPatternsValid(String authProtocol, List<String> servicePatterns) {
+        boolean requiresPatterns = AuthProtocol.CAS.equals(authProtocol) || AuthProtocol.OAUTH2.equals(authProtocol);
+        if (requiresPatterns && servicePatterns.isEmpty()) {
+            throw new BusinessException("协议类型为 CAS 或 OAuth2.0 时，回跳地址匹配列表至少需要一条规则");
         }
-        if (AuthProtocol.OAUTH2.equals(authProtocol) && oauth2RedirectUriPatterns.isEmpty()) {
-            throw new BusinessException("协议类型为 OAuth2.0 时，redirect_uri 匹配列表至少需要一条规则");
+    }
+
+    /**
+     * 校验登出通知回调地址非空时为合法的 http/https URL（对齐
+     * {@code AppConfigServiceImpl#assertValidNotifyUrl} 的既有实现），为空时跳过校验
+     * （允许留空，见 add-sso-single-logout change spec.md"登出通知回调地址格式校验"）。
+     *
+     * @param logoutNotifyUrl 登出通知回调地址，可能为空
+     */
+    private void assertValidLogoutNotifyUrl(String logoutNotifyUrl) {
+        if (!StringUtils.hasText(logoutNotifyUrl)) {
+            return;
+        }
+        try {
+            URI uri = new URI(logoutNotifyUrl);
+            String scheme = uri.getScheme();
+            boolean validScheme = "http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme);
+            if (!validScheme || !StringUtils.hasText(uri.getHost())) {
+                throw new BusinessException("登出通知回调地址格式不正确，必须是 http/https 开头的合法 URL");
+            }
+        } catch (URISyntaxException e) {
+            throw new BusinessException("登出通知回调地址格式不正确，必须是 http/https 开头的合法 URL");
         }
     }
 
@@ -189,7 +213,7 @@ public class AppAuthConfigServiceImpl implements AppAuthConfigService {
     }
 
     /**
-     * 实体转视图对象：MapStruct 映射 {@code authProtocol}，两个匹配列表由 JSON 文本解析
+     * 实体转视图对象：MapStruct 映射 {@code authProtocol}，匹配列表由 JSON 文本解析
      * 回填，6 个只读协议接口地址按该应用的 AppId 实时计算回填。
      *
      * @param appRefId 应用 id
@@ -198,8 +222,7 @@ public class AppAuthConfigServiceImpl implements AppAuthConfigService {
      */
     private AppAuthConfigVO toVO(Long appRefId, AppAuthConfigEntity entity) {
         AppAuthConfigVO vo = AppAuthConfigConvert.INSTANCE.toVO(entity);
-        vo.setCasServicePatterns(parsePatterns(entity.getCasServicePatterns()));
-        vo.setOauth2RedirectUriPatterns(parsePatterns(entity.getOauth2RedirectUriPatterns()));
+        vo.setServicePatterns(parsePatterns(entity.getServicePatterns()));
 
         String appId = resolveAppId(appRefId);
         vo.setCasLoginUrl("/api/authn/cas/" + appId + "/login");
@@ -245,8 +268,8 @@ public class AppAuthConfigServiceImpl implements AppAuthConfigService {
     private Map<String, Object> toLogSnapshot(AppAuthConfigEntity entity) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("协议类型", entity.getAuthProtocol());
-        snapshot.put("CAS service 匹配列表", entity.getCasServicePatterns());
-        snapshot.put("OAuth2 redirect_uri 匹配列表", entity.getOauth2RedirectUriPatterns());
+        snapshot.put("回跳地址匹配列表", entity.getServicePatterns());
+        snapshot.put("登出通知回调地址", entity.getLogoutNotifyUrl());
         return snapshot;
     }
 

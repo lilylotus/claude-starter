@@ -96,8 +96,11 @@ AppManagement（应用管理，/application/list）
   用户/任职/应用/角色五个数据域的字段级同步映射配置，以及组织/用户/任职三个数据域按应用
   配置的同步范围——全部数据或指定组织范围（可选含子孙组织））
 - AppManagement:app:config:editAuth          修改认证管理配置（单点登录协议类型：无/CAS/
-  OAuth2.0，CAS service 参数 ANT 匹配列表，OAuth2 redirect_uri ANT 匹配列表；仅做协议
-  接入前置配置维护，不含协议运行时鉴权逻辑，见 openspec/changes/app-auth-protocol-config）
+  OAuth2.0，回跳地址匹配列表 servicePatterns（CAS/OAuth2.0 等协议共用同一份存储），登出
+  通知回调地址；仅做协议接入前置配置维护，不含协议运行时鉴权逻辑，见
+  openspec/changes/archive/2026-08-17-app-auth-protocol-config、
+  openspec/changes/archive/2026-08-19-add-sso-single-logout、
+  openspec/changes/archive/2026-08-19-unify-app-auth-service-patterns）
 
 
 权限管理

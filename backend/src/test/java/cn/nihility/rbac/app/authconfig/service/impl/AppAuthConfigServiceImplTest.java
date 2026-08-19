@@ -106,9 +106,7 @@ class AppAuthConfigServiceImplTest {
 
         assertThat(captured.getAppRefId()).isEqualTo(10L);
         assertThat(captured.getAuthProtocol()).isEqualTo(AuthProtocol.NONE);
-        assertThat(JacksonUtils.toObj(captured.getCasServicePatterns(), JacksonUtils.LIST_STRING_TYPE_REFERENCE))
-                .isEmpty();
-        assertThat(JacksonUtils.toObj(captured.getOauth2RedirectUriPatterns(), JacksonUtils.LIST_STRING_TYPE_REFERENCE))
+        assertThat(JacksonUtils.toObj(captured.getServicePatterns(), JacksonUtils.LIST_STRING_TYPE_REFERENCE))
                 .isEmpty();
         assertThat(captured.getCreateBy()).isEqualTo("1");
         assertThat(captured.getUpdateBy()).isEqualTo("1");
@@ -120,15 +118,13 @@ class AppAuthConfigServiceImplTest {
      */
     @Test
     void getByAppId_shouldReturnConfig_withComputedUrls() {
-        AppAuthConfigEntity entity = buildEntity(10L, AuthProtocol.CAS, List.of("https://partner.example.com/**"),
-                List.of());
+        AppAuthConfigEntity entity = buildEntity(10L, AuthProtocol.CAS, List.of("https://partner.example.com/**"));
         when(appAuthConfigMapper.selectOne(any())).thenReturn(entity);
 
         AppAuthConfigVO vo = service.getByAppId(10L);
 
         assertThat(vo.getAuthProtocol()).isEqualTo(AuthProtocol.CAS);
-        assertThat(vo.getCasServicePatterns()).containsExactly("https://partner.example.com/**");
-        assertThat(vo.getOauth2RedirectUriPatterns()).isEmpty();
+        assertThat(vo.getServicePatterns()).containsExactly("https://partner.example.com/**");
         assertThat(vo.getCasLoginUrl()).isEqualTo("/api/authn/cas/open-app-id-10/login");
         assertThat(vo.getCasServiceValidateUrl()).isEqualTo("/api/authn/cas/open-app-id-10/p3/serviceValidate");
         assertThat(vo.getCasLogoutUrl()).isEqualTo("/api/authn/cas/open-app-id-10/logout");
@@ -143,7 +139,7 @@ class AppAuthConfigServiceImplTest {
      */
     @Test
     void getByAppId_shouldLazyCreateDefault_whenNotFound() {
-        AppAuthConfigEntity defaultEntity = buildEntity(10L, AuthProtocol.NONE, List.of(), List.of());
+        AppAuthConfigEntity defaultEntity = buildEntity(10L, AuthProtocol.NONE, List.of());
         when(appAuthConfigMapper.selectOne(any())).thenReturn(null, defaultEntity);
 
         AppAuthConfigVO vo = service.getByAppId(10L);
@@ -176,17 +172,17 @@ class AppAuthConfigServiceImplTest {
     @Test
     void updateConfig_shouldRecordOperationLog_onSuccess() {
         when(appMapper.selectById(10L)).thenReturn(buildAppEntity(10L, 100L));
-        AppAuthConfigEntity entity = buildEntity(10L, AuthProtocol.NONE, List.of(), List.of());
+        AppAuthConfigEntity entity = buildEntity(10L, AuthProtocol.NONE, List.of());
         when(appAuthConfigMapper.selectOne(any())).thenReturn(entity);
 
         AppAuthConfigUpdateRequest request = new AppAuthConfigUpdateRequest();
         request.setAuthProtocol(AuthProtocol.CAS);
-        request.setCasServicePatterns(List.of("https://partner.example.com/**"));
+        request.setServicePatterns(List.of("https://partner.example.com/**"));
 
         AppAuthConfigVO vo = service.updateConfig(10L, request);
 
         assertThat(vo.getAuthProtocol()).isEqualTo(AuthProtocol.CAS);
-        assertThat(vo.getCasServicePatterns()).containsExactly("https://partner.example.com/**");
+        assertThat(vo.getServicePatterns()).containsExactly("https://partner.example.com/**");
         verify(appAuthConfigMapper).updateById(any(AppAuthConfigEntity.class));
         verify(operationLogRecorder).recordUpdate(org.mockito.ArgumentMatchers.eq("app"),
                 org.mockito.ArgumentMatchers.eq(10L), org.mockito.ArgumentMatchers.eq("测试应用"),
@@ -199,11 +195,11 @@ class AppAuthConfigServiceImplTest {
     @Test
     void updateConfig_shouldRejectCasWithoutPatterns() {
         when(appMapper.selectById(10L)).thenReturn(buildAppEntity(10L, 100L));
-        when(appAuthConfigMapper.selectOne(any())).thenReturn(buildEntity(10L, AuthProtocol.NONE, List.of(), List.of()));
+        when(appAuthConfigMapper.selectOne(any())).thenReturn(buildEntity(10L, AuthProtocol.NONE, List.of()));
 
         AppAuthConfigUpdateRequest request = new AppAuthConfigUpdateRequest();
         request.setAuthProtocol(AuthProtocol.CAS);
-        request.setCasServicePatterns(List.of());
+        request.setServicePatterns(List.of());
 
         assertThatThrownBy(() -> service.updateConfig(10L, request))
                 .isInstanceOf(BusinessException.class)
@@ -217,7 +213,7 @@ class AppAuthConfigServiceImplTest {
     @Test
     void updateConfig_shouldRejectOauth2WithoutPatterns() {
         when(appMapper.selectById(10L)).thenReturn(buildAppEntity(10L, 100L));
-        when(appAuthConfigMapper.selectOne(any())).thenReturn(buildEntity(10L, AuthProtocol.NONE, List.of(), List.of()));
+        when(appAuthConfigMapper.selectOne(any())).thenReturn(buildEntity(10L, AuthProtocol.NONE, List.of()));
 
         AppAuthConfigUpdateRequest request = new AppAuthConfigUpdateRequest();
         request.setAuthProtocol(AuthProtocol.OAUTH2);
@@ -234,8 +230,7 @@ class AppAuthConfigServiceImplTest {
     @Test
     void updateConfig_shouldClearPatterns_whenProtocolNone() {
         when(appMapper.selectById(10L)).thenReturn(buildAppEntity(10L, 100L));
-        AppAuthConfigEntity entity = buildEntity(10L, AuthProtocol.CAS, List.of("https://partner.example.com/**"),
-                List.of());
+        AppAuthConfigEntity entity = buildEntity(10L, AuthProtocol.CAS, List.of("https://partner.example.com/**"));
         when(appAuthConfigMapper.selectOne(any())).thenReturn(entity);
 
         AppAuthConfigUpdateRequest request = new AppAuthConfigUpdateRequest();
@@ -244,8 +239,86 @@ class AppAuthConfigServiceImplTest {
         AppAuthConfigVO vo = service.updateConfig(10L, request);
 
         assertThat(vo.getAuthProtocol()).isEqualTo(AuthProtocol.NONE);
-        assertThat(vo.getCasServicePatterns()).isEmpty();
-        assertThat(vo.getOauth2RedirectUriPatterns()).isEmpty();
+        assertThat(vo.getServicePatterns()).isEmpty();
+    }
+
+    /**
+     * 协议类型从 CAS 切换为 OAuth2.0 时，应沿用同一份 {@code servicePatterns} 存储，用本次
+     * 提交的新列表整体替换，不存在"旧 CAS 列表"与"新 OAuth2.0 列表"并存或混淆的情况
+     * （unify-app-auth-service-patterns change spec.md "协议类型从 CAS 切换为 OAuth2.0 时
+     * 沿用同一份匹配列表存储" Scenario）。
+     */
+    @Test
+    void updateConfig_shouldReplacePatterns_whenSwitchingCasToOauth2() {
+        when(appMapper.selectById(10L)).thenReturn(buildAppEntity(10L, 100L));
+        AppAuthConfigEntity entity = buildEntity(10L, AuthProtocol.CAS, List.of("https://cas.example.com/**"));
+        when(appAuthConfigMapper.selectOne(any())).thenReturn(entity);
+
+        AppAuthConfigUpdateRequest request = new AppAuthConfigUpdateRequest();
+        request.setAuthProtocol(AuthProtocol.OAUTH2);
+        request.setServicePatterns(List.of("https://oauth.example.com/**"));
+
+        AppAuthConfigVO vo = service.updateConfig(10L, request);
+
+        assertThat(vo.getAuthProtocol()).isEqualTo(AuthProtocol.OAUTH2);
+        assertThat(vo.getServicePatterns()).containsExactly("https://oauth.example.com/**");
+        assertThat(entity.getServicePatterns())
+                .isEqualTo(JacksonUtils.toJson(List.of("https://oauth.example.com/**")));
+    }
+
+    /**
+     * 登出通知回调地址非法（非 http/https URL）时应拒绝保存，不落库（add-sso-single-logout
+     * change spec.md "非法地址格式被拒绝" Scenario）。
+     */
+    @Test
+    void updateConfig_shouldRejectInvalidLogoutNotifyUrl() {
+        when(appMapper.selectById(10L)).thenReturn(buildAppEntity(10L, 100L));
+        when(appAuthConfigMapper.selectOne(any())).thenReturn(buildEntity(10L, AuthProtocol.NONE, List.of()));
+
+        AppAuthConfigUpdateRequest request = new AppAuthConfigUpdateRequest();
+        request.setAuthProtocol(AuthProtocol.NONE);
+        request.setLogoutNotifyUrl("not-a-valid-url");
+
+        assertThatThrownBy(() -> service.updateConfig(10L, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("登出通知回调地址格式不正确");
+        verify(appAuthConfigMapper, never()).updateById(any(AppAuthConfigEntity.class));
+    }
+
+    /**
+     * 登出通知回调地址留空时应正常保存成功（add-sso-single-logout change spec.md "登出通知
+     * 回调地址留空时保存成功" Scenario）。
+     */
+    @Test
+    void updateConfig_shouldSaveSuccessfully_whenLogoutNotifyUrlBlank() {
+        when(appMapper.selectById(10L)).thenReturn(buildAppEntity(10L, 100L));
+        when(appAuthConfigMapper.selectOne(any())).thenReturn(buildEntity(10L, AuthProtocol.NONE, List.of()));
+
+        AppAuthConfigUpdateRequest request = new AppAuthConfigUpdateRequest();
+        request.setAuthProtocol(AuthProtocol.NONE);
+        request.setLogoutNotifyUrl("  ");
+
+        AppAuthConfigVO vo = service.updateConfig(10L, request);
+
+        assertThat(vo.getLogoutNotifyUrl()).isNull();
+        verify(appAuthConfigMapper).updateById(any(AppAuthConfigEntity.class));
+    }
+
+    /**
+     * 提交一个合法的登出通知回调地址时应正常保存并回填到视图对象。
+     */
+    @Test
+    void updateConfig_shouldSaveLogoutNotifyUrl_whenValid() {
+        when(appMapper.selectById(10L)).thenReturn(buildAppEntity(10L, 100L));
+        when(appAuthConfigMapper.selectOne(any())).thenReturn(buildEntity(10L, AuthProtocol.NONE, List.of()));
+
+        AppAuthConfigUpdateRequest request = new AppAuthConfigUpdateRequest();
+        request.setAuthProtocol(AuthProtocol.NONE);
+        request.setLogoutNotifyUrl("https://partner.example.com/sso/logout-notify");
+
+        AppAuthConfigVO vo = service.updateConfig(10L, request);
+
+        assertThat(vo.getLogoutNotifyUrl()).isEqualTo("https://partner.example.com/sso/logout-notify");
     }
 
     /**
@@ -254,15 +327,15 @@ class AppAuthConfigServiceImplTest {
     @Test
     void updateConfig_shouldTrimAndDedupePatterns() {
         when(appMapper.selectById(10L)).thenReturn(buildAppEntity(10L, 100L));
-        when(appAuthConfigMapper.selectOne(any())).thenReturn(buildEntity(10L, AuthProtocol.NONE, List.of(), List.of()));
+        when(appAuthConfigMapper.selectOne(any())).thenReturn(buildEntity(10L, AuthProtocol.NONE, List.of()));
 
         AppAuthConfigUpdateRequest request = new AppAuthConfigUpdateRequest();
         request.setAuthProtocol(AuthProtocol.CAS);
-        request.setCasServicePatterns(List.of(" https://a.example.com/** ", "https://a.example.com/**", "  "));
+        request.setServicePatterns(List.of(" https://a.example.com/** ", "https://a.example.com/**", "  "));
 
         AppAuthConfigVO vo = service.updateConfig(10L, request);
 
-        assertThat(vo.getCasServicePatterns()).containsExactly("https://a.example.com/**");
+        assertThat(vo.getServicePatterns()).containsExactly("https://a.example.com/**");
     }
 
     private AppEntity buildAppEntity(long id, long orgId) {
@@ -286,15 +359,13 @@ class AppAuthConfigServiceImplTest {
                 .build();
     }
 
-    private AppAuthConfigEntity buildEntity(long appRefId, String authProtocol, List<String> casServicePatterns,
-            List<String> oauth2RedirectUriPatterns) {
+    private AppAuthConfigEntity buildEntity(long appRefId, String authProtocol, List<String> servicePatterns) {
         LocalDateTime now = LocalDateTime.now();
         return AppAuthConfigEntity.builder()
                 .id(1L)
                 .appRefId(appRefId)
                 .authProtocol(authProtocol)
-                .casServicePatterns(JacksonUtils.toJson(casServicePatterns))
-                .oauth2RedirectUriPatterns(JacksonUtils.toJson(oauth2RedirectUriPatterns))
+                .servicePatterns(JacksonUtils.toJson(servicePatterns))
                 .createBy("1")
                 .createTime(now)
                 .updateBy("1")

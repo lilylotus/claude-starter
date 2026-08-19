@@ -25,13 +25,13 @@ public class AppAuthConfigVO {
     @Schema(description = "单点登录协议类型：NONE/CAS/OAUTH2")
     private String authProtocol;
 
-    /** CAS service 参数 ANT 匹配规则列表。 */
-    @Schema(description = "CAS service 参数 ANT 匹配规则列表")
-    private List<String> casServicePatterns;
+    /** 回跳地址 ANT 匹配规则列表，CAS/OAuth2.0 等协议共用同一份存储。 */
+    @Schema(description = "回跳地址 ANT 匹配规则列表，CAS/OAuth2.0 等协议共用同一份存储")
+    private List<String> servicePatterns;
 
-    /** OAuth2 redirect_uri ANT 匹配规则列表。 */
-    @Schema(description = "OAuth2 redirect_uri ANT 匹配规则列表")
-    private List<String> oauth2RedirectUriPatterns;
+    /** 登出通知回调地址，未配置时为空。 */
+    @Schema(description = "登出通知回调地址，单点登出时系统按此地址回调通知该应用，未配置时为空")
+    private String logoutNotifyUrl;
 
     /** CAS 单点登录接口地址（路径部分）。 */
     @Schema(description = "CAS 单点登录接口地址")

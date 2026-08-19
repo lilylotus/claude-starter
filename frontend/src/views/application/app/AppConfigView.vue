@@ -507,10 +507,12 @@ async function saveFieldMappings() {
 const authConfigLoading = ref(false)
 const savingAuthConfig = ref(false)
 const authProtocol = ref<AuthProtocol>('NONE')
-// service/redirect_uri 匹配规则用"单值行数组 + 增删按钮"编辑，与 notifyParamRows 的
-// key-value 两列不同，这里每行只有一个 ANT 表达式字符串
-const casPatternRows = ref<string[]>([])
-const oauth2PatternRows = ref<string[]>([])
+// 回跳地址 ANT 匹配规则用"单值行数组 + 增删按钮"编辑，与 notifyParamRows 的
+// key-value 两列不同，这里每行只有一个 ANT 表达式字符串；CAS/OAuth2.0 及未来新增协议
+// 共用同一份 servicePatternRows，语义为"当前生效协议下允许的回跳地址匹配列表"
+const servicePatternRows = ref<string[]>([])
+// 登出通知回调地址：随协议类型/匹配列表一并读写，不区分协议类型都可填写，留空表示不通知
+const logoutNotifyUrl = ref('')
 // 6 个只读协议接口地址（路径部分），由后端按当前应用的 AppId 计算返回
 const authUrls = reactive({
   casLoginUrl: '',
@@ -532,8 +534,8 @@ const OAUTH_AUTHORIZE_PARAMS = [
 
 function applyAuthConfig(data: AppAuthConfigVO) {
   authProtocol.value = data.authProtocol
-  casPatternRows.value = [...data.casServicePatterns]
-  oauth2PatternRows.value = [...data.oauth2RedirectUriPatterns]
+  servicePatternRows.value = [...data.servicePatterns]
+  logoutNotifyUrl.value = data.logoutNotifyUrl ?? ''
   authUrls.casLoginUrl = data.casLoginUrl
   authUrls.casServiceValidateUrl = data.casServiceValidateUrl
   authUrls.casLogoutUrl = data.casLogoutUrl
@@ -552,32 +554,40 @@ async function fetchAuthConfig() {
   }
 }
 
-function addCasPatternRow() {
-  casPatternRows.value.push('')
+function addServicePatternRow() {
+  servicePatternRows.value.push('')
 }
 
-function removeCasPatternRow(index: number) {
-  casPatternRows.value.splice(index, 1)
+function removeServicePatternRow(index: number) {
+  servicePatternRows.value.splice(index, 1)
 }
 
-function addOauth2PatternRow() {
-  oauth2PatternRows.value.push('')
-}
-
-function removeOauth2PatternRow(index: number) {
-  oauth2PatternRows.value.splice(index, 1)
-}
-
-// 前端做一次快速校验（协议为 CAS/OAuth2.0 时至少一条非空规则），避免明显不合法的输入还要
-// 走一次网络请求才被后端拒绝；后端仍会做同样的校验兜底
-function validateAuthConfig(): string {
-  if (authProtocol.value === 'CAS' && casPatternRows.value.every((row) => !row.trim())) {
-    return '协议类型为 CAS 时，service 匹配列表至少需要一条规则'
-  }
-  if (authProtocol.value === 'OAUTH2' && oauth2PatternRows.value.every((row) => !row.trim())) {
-    return '协议类型为 OAuth2.0 时，redirect_uri 匹配列表至少需要一条规则'
+// 登出通知回调地址允许留空，非空时必须是 http/https 开头的合法 URL；与 validateNotifyUrl
+// 校验逻辑一致（复用同步配置“接口地址”的写法），仅去掉“必填”这一条
+function validateLogoutNotifyUrl(): string {
+  const url = logoutNotifyUrl.value.trim()
+  if (!url) return ''
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return '登出通知回调地址格式不正确，必须是 http/https 开头的合法 URL'
+    }
+  } catch {
+    return '登出通知回调地址格式不正确，必须是 http/https 开头的合法 URL'
   }
   return ''
+}
+
+// 前端做一次快速校验（协议为 CAS/OAuth2.0 时至少一条非空规则、登出通知回调地址格式），
+// 避免明显不合法的输入还要走一次网络请求才被后端拒绝；后端仍会做同样的校验兜底
+function validateAuthConfig(): string {
+  if (
+    (authProtocol.value === 'CAS' || authProtocol.value === 'OAUTH2') &&
+    servicePatternRows.value.every((row) => !row.trim())
+  ) {
+    return '协议类型为 CAS/OAuth2.0 时，回跳地址匹配列表至少需要一条规则'
+  }
+  return validateLogoutNotifyUrl()
 }
 
 async function saveAuthConfig() {
@@ -590,8 +600,8 @@ async function saveAuthConfig() {
   try {
     const data = await appApi.updateAppAuthConfig(appId.value, {
       authProtocol: authProtocol.value,
-      casServicePatterns: casPatternRows.value.map((row) => row.trim()).filter(Boolean),
-      oauth2RedirectUriPatterns: oauth2PatternRows.value.map((row) => row.trim()).filter(Boolean),
+      servicePatterns: servicePatternRows.value.map((row) => row.trim()).filter(Boolean),
+      logoutNotifyUrl: logoutNotifyUrl.value.trim(),
     })
     applyAuthConfig(data)
     ElMessage.success('保存成功')
@@ -1046,17 +1056,28 @@ async function saveUserinfoFieldMappings() {
               </el-select>
             </el-form-item>
 
-            <template v-if="authProtocol === 'CAS'">
-              <el-form-item label="service 匹配列表">
-                <div class="app-config__param-rows">
-                  <div v-for="(_, index) in casPatternRows" :key="index" class="app-config__auth-pattern-row">
-                    <el-input v-model="casPatternRows[index]" placeholder="ANT 表达式，如 https://partner.example.com/**" />
-                    <el-button link :icon="Delete" type="danger" @click="removeCasPatternRow(index)" />
-                  </div>
-                  <el-button link :icon="Plus" @click="addCasPatternRow">添加匹配规则</el-button>
-                </div>
-              </el-form-item>
+            <el-form-item label="登出通知回调地址">
+              <el-input
+                v-model="logoutNotifyUrl"
+                style="width: 420px"
+                placeholder="可选，单点登出时通知该地址，如 https://partner.example.com/sso/logout-notify"
+              />
+            </el-form-item>
 
+            <el-form-item label="回跳地址匹配列表">
+              <div class="app-config__param-rows">
+                <div v-for="(_, index) in servicePatternRows" :key="index" class="app-config__auth-pattern-row">
+                  <el-input
+                    v-model="servicePatternRows[index]"
+                    placeholder="ANT 表达式，如 https://partner.example.com/**"
+                  />
+                  <el-button link :icon="Delete" type="danger" @click="removeServicePatternRow(index)" />
+                </div>
+                <el-button link :icon="Plus" @click="addServicePatternRow">添加匹配规则</el-button>
+              </div>
+            </el-form-item>
+
+            <template v-if="authProtocol === 'CAS'">
               <el-form-item v-if="hasPermission('AppManagement:app:config:editAuth')">
                 <el-button type="primary" :loading="savingAuthConfig" @click="saveAuthConfig">保存</el-button>
               </el-form-item>
@@ -1080,19 +1101,6 @@ async function saveUserinfoFieldMappings() {
             </template>
 
             <template v-else-if="authProtocol === 'OAUTH2'">
-              <el-form-item label="redirect_uri 匹配列表">
-                <div class="app-config__param-rows">
-                  <div v-for="(_, index) in oauth2PatternRows" :key="index" class="app-config__auth-pattern-row">
-                    <el-input
-                      v-model="oauth2PatternRows[index]"
-                      placeholder="ANT 表达式，如 https://partner.example.com/callback"
-                    />
-                    <el-button link :icon="Delete" type="danger" @click="removeOauth2PatternRow(index)" />
-                  </div>
-                  <el-button link :icon="Plus" @click="addOauth2PatternRow">添加匹配规则</el-button>
-                </div>
-              </el-form-item>
-
               <el-form-item v-if="hasPermission('AppManagement:app:config:editAuth')">
                 <el-button type="primary" :loading="savingAuthConfig" @click="saveAuthConfig">保存</el-button>
               </el-form-item>
