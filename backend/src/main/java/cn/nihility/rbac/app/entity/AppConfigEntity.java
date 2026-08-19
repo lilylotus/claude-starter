@@ -63,6 +63,16 @@ public class AppConfigEntity {
      */
     private Boolean needSign;
 
+    /**
+     * 同步总开关，默认开启：关闭后该应用不再产生任何新的 {@code tab_app_data_change_log}
+     * 记录（不区分组织/用户/任职/应用/角色/字典六个数据域各自是否允许同步，总开关与数据域
+     * 开关是"与"的关系）、不再发送通知（因为没有变更记录可供触发，是总开关生效的自然结果）、
+     * 拉取接口（按 id / 按序列号）一律返回空结果，即使总开关关闭之前已经产生历史变更记录也
+     * 一律屏蔽；历史记录本身不删除，重新打开后自动恢复正常同步能力（app-sync-master-switch
+     * change design.md Decision 1/2）。
+     */
+    private Boolean syncMasterEnabled;
+
     /** 通知回调接口地址（http/https），{@code syncMode} 为 {@code NOTIFY} 时必填。 */
     private String notifyUrl;
 

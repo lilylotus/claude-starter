@@ -7,10 +7,12 @@ import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.app.entity.AppConfigEntity;
+import cn.nihility.rbac.app.mapper.AppConfigMapper;
 import cn.nihility.rbac.app.sync.constant.SyncDomain;
 import cn.nihility.rbac.app.sync.entity.AppSyncDomainConfigEntity;
 import cn.nihility.rbac.app.sync.mapper.AppSyncDomainConfigMapper;
@@ -47,6 +49,9 @@ class SyncPullServiceImplTest {
     private AppSyncDomainConfigMapper appSyncDomainConfigMapper;
 
     @Mock
+    private AppConfigMapper appConfigMapper;
+
+    @Mock
     private AppDataChangeLogService appDataChangeLogService;
 
     @Mock
@@ -62,9 +67,13 @@ class SyncPullServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service = new SyncPullServiceImpl(appSyncDomainConfigMapper, appDataChangeLogService,
+        service = new SyncPullServiceImpl(appSyncDomainConfigMapper, appConfigMapper, appDataChangeLogService,
                 fieldMappingTransformer, bizSnapshotResolver, appPullRecordService);
         OpenApiCallerContext.set(AppConfigEntity.builder().appRefId(1L).build());
+        // 同步总开关默认桩为开启，不影响既有场景；关闭场景在下方单独用例中覆盖
+        // （app-sync-master-switch change tasks.md 8.1）。
+        lenient().when(appConfigMapper.selectOne(any())).thenReturn(
+                AppConfigEntity.builder().appRefId(1L).syncMasterEnabled(true).build());
     }
 
     @AfterEach
@@ -271,5 +280,56 @@ class SyncPullServiceImplTest {
 
         verify(appPullRecordService).record(eq(1L), eq(PullMode.BY_SEQUENCE), eq(SyncDomain.ORG),
                 eq("fromSequence=1000, limit=5"), eq(0));
+    }
+
+    /**
+     * 应用同步总开关关闭时，按 id 拉取应直接返回空结果，即使该 id 存在归属该应用的历史变更
+     * 记录也不返回，且不查询变更记录表；拉取日志仍照常记录本次调用尝试
+     * （app-sync-master-switch change design.md Decision 2）。
+     */
+    @Test
+    void pullByBizIds_shouldReturnEmpty_whenSyncMasterDisabled() {
+        when(appConfigMapper.selectOne(any())).thenReturn(
+                AppConfigEntity.builder().appRefId(1L).syncMasterEnabled(false).build());
+
+        List<SyncPullRecordVO> result = service.pullByBizIds(SyncDomain.ORG, List.of(88L));
+
+        assertThat(result).isEmpty();
+        verify(appDataChangeLogService, org.mockito.Mockito.never()).selectLatestByBizIds(any(), any(), any());
+        verify(appPullRecordService).record(eq(1L), eq(PullMode.BY_ID), eq(SyncDomain.ORG),
+                eq("请求了 1 个 bizId"), eq(0));
+    }
+
+    /**
+     * 应用同步总开关关闭时，按序列号拉取应直接返回空结果，即使起始序列号之后存在归属该应用
+     * 的历史变更记录也不返回，且不查询数据域配置或变更记录表；拉取日志仍照常记录本次调用尝试
+     * （app-sync-master-switch change design.md Decision 2）。
+     */
+    @Test
+    void pullBySequence_shouldReturnEmpty_whenSyncMasterDisabled() {
+        when(appConfigMapper.selectOne(any())).thenReturn(
+                AppConfigEntity.builder().appRefId(1L).syncMasterEnabled(false).build());
+
+        List<SyncPullRecordVO> result = service.pullBySequence(SyncDomain.ORG, 1000L, null);
+
+        assertThat(result).isEmpty();
+        verify(appSyncDomainConfigMapper, org.mockito.Mockito.never()).selectList(any());
+        verify(appDataChangeLogService, org.mockito.Mockito.never()).selectBySequence(any(), any(), any(), anyInt());
+        verify(appPullRecordService).record(eq(1L), eq(PullMode.BY_SEQUENCE), eq(SyncDomain.ORG),
+                eq("fromSequence=1000, limit=null"), eq(0));
+    }
+
+    /**
+     * 应用对外接口配置查不到（防御性场景，理论上因一对一不变式不会发生）时，应保守视为总开关
+     * 关闭，返回空结果，而不是抛异常或视为开启。
+     */
+    @Test
+    void pullByBizIds_shouldReturnEmpty_whenAppConfigNotFound() {
+        when(appConfigMapper.selectOne(any())).thenReturn(null);
+
+        List<SyncPullRecordVO> result = service.pullByBizIds(SyncDomain.ORG, List.of(88L));
+
+        assertThat(result).isEmpty();
+        verify(appDataChangeLogService, org.mockito.Mockito.never()).selectLatestByBizIds(any(), any(), any());
     }
 }

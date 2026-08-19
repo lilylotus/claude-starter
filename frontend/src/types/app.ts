@@ -84,6 +84,10 @@ export interface AppConfigVO {
   notifyParams: Record<string, string>
   // 是否需要签名/验签校验：出站"通知"请求携带签名参数、入站"拉取"请求做验签校验
   needSign: boolean
+  // 同步总开关：整个应用一份，默认开启。关闭后该应用不再产生新的数据变更记录、不再收到
+  // 通知、拉取接口（按 id / 按序列号）一律返回空结果；已产生的历史变更记录不会被清空，
+  // 重新打开后可继续访问，不做补偿/追溯发送
+  syncMasterEnabled: boolean
   createBy: string
   createTime: string
   updateBy: string
@@ -102,6 +106,8 @@ export interface SyncConfigUpdateRequest {
   notifyUrl: string
   notifyParams: Record<string, string>
   needSign: boolean
+  // 同步总开关：必填，语义同 AppConfigVO.syncMasterEnabled
+  syncMasterEnabled: boolean
 }
 
 // 重置 SecretKey 响应，对应 POST /api/apps/{id}/config/secret-key/reset；

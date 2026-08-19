@@ -134,6 +134,7 @@ class AppConfigServiceImplTest {
         assertThat(captured.getSignAlgorithm()).isEqualTo(SignAlgorithm.SHA256);
         assertThat(captured.getNeedSign()).isFalse();
         assertThat(captured.getSyncMode()).isEqualTo(SyncMode.PULL);
+        assertThat(captured.getSyncMasterEnabled()).isTrue();
         assertThat(captured.getCreateBy()).isEqualTo("1");
         assertThat(captured.getUpdateBy()).isEqualTo("1");
         assertThat(captured.getCreateTime()).isNotNull();
@@ -344,7 +345,22 @@ class AppConfigServiceImplTest {
         SyncConfigUpdateRequest request = new SyncConfigUpdateRequest();
         request.setSyncMode(SyncMode.PULL);
         request.setNeedSign(false);
+        request.setSyncMasterEnabled(true);
         return request;
+    }
+
+    /**
+     * 同步总开关字段（{@code @NotNull}）缺失时应被 Bean Validation 拒绝。
+     */
+    @Test
+    void syncConfigUpdateRequest_shouldRejectMissingSyncMasterEnabled() {
+        try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
+            Validator validator = factory.getValidator();
+
+            SyncConfigUpdateRequest missing = validSyncConfigUpdateRequest();
+            missing.setSyncMasterEnabled(null);
+            assertThat(validator.validate(missing)).isNotEmpty();
+        }
     }
 
     /**
@@ -366,6 +382,30 @@ class AppConfigServiceImplTest {
 
         assertThat(vo.getSyncMode()).isEqualTo(SyncMode.PULL);
         verify(appConfigMapper).updateById(configEntity);
+    }
+
+    /**
+     * 修改同步配置时，应把请求携带的同步总开关取值持久化到实体，回显在返回视图对象中
+     * （app-sync-master-switch change tasks.md 3.2）。
+     */
+    @Test
+    void updateSyncConfig_shouldUpdateSyncMasterEnabled() {
+        AppEntity appEntity = buildAppEntity(10L, 100L, AppStatus.ENABLED);
+        AppConfigEntity configEntity = buildConfigEntity(10L);
+        configEntity.setSyncMasterEnabled(true);
+        when(appMapper.selectById(10L)).thenReturn(appEntity);
+        when(appConfigMapper.selectOne(any())).thenReturn(configEntity);
+
+        SyncConfigUpdateRequest request = new SyncConfigUpdateRequest();
+        request.setSyncMode(SyncMode.PULL);
+        request.setSyncMasterEnabled(false);
+
+        AppConfigVO vo = appConfigService.updateSyncConfig(10L, request);
+
+        assertThat(vo.getSyncMasterEnabled()).isFalse();
+        ArgumentCaptor<AppConfigEntity> captor = ArgumentCaptor.forClass(AppConfigEntity.class);
+        verify(appConfigMapper).updateById(captor.capture());
+        assertThat(captor.getValue().getSyncMasterEnabled()).isFalse();
     }
 
     /**

@@ -1,5 +1,7 @@
 package cn.nihility.rbac.sync.openapi.service.impl;
 
+import cn.nihility.rbac.app.entity.AppConfigEntity;
+import cn.nihility.rbac.app.mapper.AppConfigMapper;
 import cn.nihility.rbac.app.sync.constant.SyncDomain;
 import cn.nihility.rbac.app.sync.entity.AppSyncDomainConfigEntity;
 import cn.nihility.rbac.app.sync.mapper.AppSyncDomainConfigMapper;
@@ -39,6 +41,12 @@ public class SyncPullServiceImpl implements SyncPullService {
     /** 应用同步数据域配置数据访问接口。 */
     private final AppSyncDomainConfigMapper appSyncDomainConfigMapper;
 
+    /**
+     * 应用对外接口配置数据访问接口，用于判断应用同步总开关是否开启
+     * （app-sync-master-switch change design.md Decision 2）。
+     */
+    private final AppConfigMapper appConfigMapper;
+
     /** 应用数据变更记录业务逻辑接口。 */
     private final AppDataChangeLogService appDataChangeLogService;
 
@@ -60,7 +68,8 @@ public class SyncPullServiceImpl implements SyncPullService {
         Long appRefId = OpenApiCallerContext.getAppRefId();
 
         List<SyncPullRecordVO> result;
-        if (bizIds == null || bizIds.isEmpty() || !isDomainEnabled(appRefId, dataType)) {
+        if (bizIds == null || bizIds.isEmpty() || !isSyncMasterEnabled(appRefId) || !isDomainEnabled(appRefId,
+                dataType)) {
             result = List.of();
         } else {
             List<AppDataChangeLogEntity> logs =
@@ -99,6 +108,9 @@ public class SyncPullServiceImpl implements SyncPullService {
      */
     private List<SyncPullRecordVO> doPullBySequence(Long appRefId, String dataType, Long fromSequence,
             Integer limit) {
+        if (!isSyncMasterEnabled(appRefId)) {
+            return List.of();
+        }
         List<AppSyncDomainConfigEntity> enabledConfigs = listEnabledDomainConfigs(appRefId);
 
         if (StringUtils.hasText(dataType)) {
@@ -163,6 +175,20 @@ public class SyncPullServiceImpl implements SyncPullService {
         if (!SyncDomain.CHANGE_LOG_DOMAINS.contains(dataType)) {
             throw new BusinessException("非法的数据类型：" + dataType);
         }
+    }
+
+    /**
+     * 判断给定应用当前同步总开关是否开启。应用对外接口配置理论上因一对一不变式必然存在，
+     * 查不到时按防御性写法保守返回 {@code false}（视同关闭，不放行拉取），风格与
+     * {@link #isDomainEnabled} 一致（app-sync-master-switch change design.md Decision 2）。
+     *
+     * @param appRefId 应用 id
+     * @return 同步总开关是否开启
+     */
+    private boolean isSyncMasterEnabled(Long appRefId) {
+        AppConfigEntity config = appConfigMapper.selectOne(
+                new LambdaQueryWrapper<AppConfigEntity>().eq(AppConfigEntity::getAppRefId, appRefId));
+        return config != null && Boolean.TRUE.equals(config.getSyncMasterEnabled());
     }
 
     /**

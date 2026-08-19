@@ -46,4 +46,12 @@ public class SyncConfigUpdateRequest {
     @NotNull(message = "是否需要签名/验签校验不能为空")
     @Schema(description = "是否需要签名/验签校验")
     private Boolean needSign;
+
+    /**
+     * 同步总开关，必填，与 {@link #syncMode}/{@link #needSign} 一样是整个应用一份的基础
+     * 配置项（app-sync-master-switch change design.md Decision 3）。
+     */
+    @NotNull(message = "同步总开关不能为空")
+    @Schema(description = "同步总开关：关闭后该应用不再产生新的变更记录、不再收到通知、拉取接口返回空结果")
+    private Boolean syncMasterEnabled;
 }

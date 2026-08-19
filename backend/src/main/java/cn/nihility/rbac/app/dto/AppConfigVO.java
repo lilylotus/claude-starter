@@ -42,6 +42,10 @@ public class AppConfigVO {
     @Schema(description = "同步方式：NOTIFY（通知）或 PULL（拉取）")
     private String syncMode;
 
+    /** 同步总开关：关闭后不再产生变更记录、不再通知、拉取接口返回空结果。 */
+    @Schema(description = "同步总开关：关闭后该应用不再产生新的变更记录、不再收到通知、拉取接口返回空结果")
+    private Boolean syncMasterEnabled;
+
     /** 通知回调接口地址，同步方式为 NOTIFY 时必填。 */
     @Schema(description = "通知回调接口地址，同步方式为 NOTIFY 时必填")
     private String notifyUrl;

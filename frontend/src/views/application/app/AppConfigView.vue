@@ -79,6 +79,9 @@ const syncForm = ref({
   syncMode: 'PULL' as SyncMode,
   notifyUrl: '',
   needSign: false,
+  // 同步总开关：整个应用一份，默认开启；关闭后不再产生新的变更记录/通知，拉取接口
+  // 返回空结果，历史记录不清空（见 openspec/changes/app-sync-master-switch）
+  syncMasterEnabled: true,
 })
 const notifyParamRows = ref<{ key: string; value: string }[]>([])
 // 签名算法与基础同步配置合并为一次保存点击（两次既有接口调用），共用一个 loading
@@ -113,6 +116,7 @@ function applyConfig(data: AppConfigVO) {
     syncMode: data.syncMode,
     notifyUrl: data.notifyUrl,
     needSign: data.needSign,
+    syncMasterEnabled: data.syncMasterEnabled,
   }
   notifyParamRows.value = notifyParamsToRows(data.notifyParams)
 }
@@ -965,6 +969,13 @@ function handlePullLogSizeChange(newSize: number) {
         >
           <el-tab-pane label="基础同步配置" name="basicSync">
             <el-form label-width="110px">
+              <el-form-item label="同步总开关">
+                <el-switch v-model="syncForm.syncMasterEnabled" />
+                <div class="app-config__form-item-hint">
+                  关闭后该应用不再产生新的数据变更记录、不再收到通知、拉取接口返回空结果；
+                  已产生的历史记录不会被清空，重新打开后可继续访问。
+                </div>
+              </el-form-item>
               <el-form-item label="同步方式">
                 <el-radio-group v-model="syncForm.syncMode">
                   <el-radio value="NOTIFY">通知</el-radio>
@@ -1642,6 +1653,15 @@ function handlePullLogSizeChange(newSize: number) {
   .el-input {
     max-width: 220px;
   }
+}
+
+// 表单项内的补充说明小字，如"同步总开关"旁的效果说明，和 .el-form-item__error 的行高
+// 视觉呼应但不占用校验错误的展示位
+.app-config__form-item-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
 }
 
 // “同步配置”一级 tab 内部的子级 tabs：基础同步配置/数据范围/通知日志/拉取日志，顶部横排，
