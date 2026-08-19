@@ -10,14 +10,20 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import * as appApi from '@/api/app'
 import * as metadataFieldApi from '@/api/metadataField'
 import * as orgApi from '@/api/org'
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import {
   AUTH_PROTOCOL_OPTIONS,
+  NOTIFY_STATUS_OPTIONS,
+  NOTIFY_STATUS_SUCCESS,
+  PULL_MODE_LABELS,
   SYNC_DOMAIN_FIELD_MAPPING_DOMAINS,
   SYNC_DOMAIN_OPTIONS,
   SYNC_DOMAIN_ORG_SCOPE_DOMAINS,
   TRANSFORM_TYPE_OPTIONS,
   type AppAuthConfigVO,
   type AppConfigVO,
+  type AppNotifyRecordRow,
+  type AppPullRecordRow,
   type AppUserinfoFieldMappingSaveRequest,
   type AppUserinfoFieldMappingVO,
   type AuthProtocol,
@@ -43,9 +49,15 @@ const loading = ref(false)
 const loadError = ref('')
 const config = ref<AppConfigVO | null>(null)
 
-// 三个分区（基础信息/同步配置/认证管理）用 el-tabs 切换展示，而不是纵向堆叠；原“接口配置”
-// tab（只有签名算法一项）已合并进“同步配置”tab 的“基础同步配置”表单
-const activeTab = ref<'basic' | 'sync' | 'auth'>('basic')
+// 五个分区（基础信息/同步配置/认证管理/通知日志/拉取日志）用 el-tabs 切换展示，而不是纵向
+// 堆叠；原“接口配置” tab（只有签名算法一项）已合并进“同步配置”tab 的“基础同步配置”表单
+const activeTab = ref<'basic' | 'sync' | 'auth' | 'notifyLog' | 'pullLog'>('basic')
+
+// 切到“通知日志”“拉取日志”标签页时按需触发首次加载，不在页面 onMounted 里一起拉取
+function handleActiveTabChange() {
+  if (activeTab.value === 'notifyLog') ensureNotifyLogLoaded()
+  else if (activeTab.value === 'pullLog') ensurePullLogLoaded()
+}
 
 // 签名算法的本地可编辑副本，与 config.signAlgorithm 分离，未点“保存”前不影响已加载的
 // 展示态；模板位置在“同步配置”tab 的“基础同步配置”表单里，紧跟“签名校验”开关之后，
@@ -192,8 +204,10 @@ function validateNotifyUrl(): string {
 }
 
 // 基础同步配置 + 签名算法合并保存：先做前端校验，通过后并发提交两个既有接口（接口契约
-// 不变，语义独立——一个改签名算法，一个改同步方式/通知配置/签名校验开关），成功后用任一
-// 响应刷新展示态；失败不吞异常，交由全局响应拦截器统一提示
+// 不变，语义独立——一个改签名算法，一个改同步方式/通知配置/签名校验开关）。两个请求各自
+// 在后端独立读-改-写同一条 AppConfigEntity，并发执行时任一响应都可能读到另一个请求提交前
+// 的旧值（例如签名算法接口的响应里 syncMode 还是旧值），不能直接拿其中一个响应回显；
+// 两个请求都成功后重新 fetchConfig() 拉取合并后的最终状态再回显，避免界面被过期响应覆盖
 async function saveBasicSyncConfig() {
   const validationError = validateNotifyUrl()
   if (validationError) {
@@ -202,14 +216,14 @@ async function saveBasicSyncConfig() {
   }
   savingBasicSync.value = true
   try {
-    const [data] = await Promise.all([
+    await Promise.all([
       appApi.updateAppSignAlgorithm(appId.value, { signAlgorithm: signAlgorithmForm.value }),
       appApi.updateAppSyncConfig(appId.value, {
         ...syncForm.value,
         notifyParams: notifyParamRowsToRecord(),
       }),
     ])
-    applyConfig(data)
+    await fetchConfig()
     ElMessage.success('保存成功')
   } finally {
     savingBasicSync.value = false
@@ -766,6 +780,133 @@ async function saveUserinfoFieldMappings() {
     savingUserinfoFieldMapping.value = false
   }
 }
+
+// ---- 通知日志：数据类型/bizId/状态/HTTP 状态码/回调地址/错误摘要/时间，历史记录部分列
+// 可能为空（见 openspec/changes/add-app-sync-notify-pull-logs），首次激活标签页才加载，
+// 交互模式参照 OperationLogManagementView.vue（过滤表单 + 分页表格） ----
+
+const notifyLogLoaded = ref(false)
+const notifyLogLoading = ref(false)
+const notifyLogList = ref<AppNotifyRecordRow[]>([])
+const notifyLogFilters = reactive({
+  notifyStatus: undefined as number | undefined,
+})
+// datetimerange 选择器绑定值：未选择时为 null
+const notifyLogDateRange = ref<[string, string] | null>(null)
+const notifyLogPage = ref(1)
+const notifyLogPageSize = ref(DEFAULT_PAGE_SIZE)
+const notifyLogTotal = ref(0)
+
+async function fetchNotifyLogList() {
+  notifyLogLoading.value = true
+  try {
+    const result = await appApi.getAppNotifyRecordPage(appId.value, {
+      notifyStatus: notifyLogFilters.notifyStatus,
+      startTime: notifyLogDateRange.value?.[0],
+      endTime: notifyLogDateRange.value?.[1],
+      page: notifyLogPage.value,
+      pageSize: notifyLogPageSize.value,
+    })
+    notifyLogList.value = result.records
+    notifyLogTotal.value = result.total
+    notifyLogPage.value = result.page
+    notifyLogPageSize.value = result.pageSize
+  } finally {
+    notifyLogLoading.value = false
+  }
+}
+
+function ensureNotifyLogLoaded() {
+  if (notifyLogLoaded.value) return
+  notifyLogLoaded.value = true
+  fetchNotifyLogList()
+}
+
+function handleNotifyLogSearch() {
+  notifyLogPage.value = 1
+  fetchNotifyLogList()
+}
+
+function handleNotifyLogReset() {
+  notifyLogFilters.notifyStatus = undefined
+  notifyLogDateRange.value = null
+  notifyLogPage.value = 1
+  fetchNotifyLogList()
+}
+
+function handleNotifyLogPageChange(targetPage: number) {
+  notifyLogPage.value = targetPage
+  fetchNotifyLogList()
+}
+
+function handleNotifyLogSizeChange(newSize: number) {
+  notifyLogPageSize.value = newSize
+  notifyLogPage.value = 1
+  fetchNotifyLogList()
+}
+
+// 取值为空（null/undefined/空字符串）时统一展示为空占位符“-”
+function displayOrDash(value: string | number | null | undefined): string | number {
+  return value === null || value === undefined || value === '' ? '-' : value
+}
+
+// ---- 拉取日志：拉取方式/数据类型/请求摘要/返回条数/时间，dataType 按序列号拉取未传时
+// 可能为空，首次激活标签页才加载 ----
+
+const pullLogLoaded = ref(false)
+const pullLogLoading = ref(false)
+const pullLogList = ref<AppPullRecordRow[]>([])
+// datetimerange 选择器绑定值：未选择时为 null
+const pullLogDateRange = ref<[string, string] | null>(null)
+const pullLogPage = ref(1)
+const pullLogPageSize = ref(DEFAULT_PAGE_SIZE)
+const pullLogTotal = ref(0)
+
+async function fetchPullLogList() {
+  pullLogLoading.value = true
+  try {
+    const result = await appApi.getAppPullRecordPage(appId.value, {
+      startTime: pullLogDateRange.value?.[0],
+      endTime: pullLogDateRange.value?.[1],
+      page: pullLogPage.value,
+      pageSize: pullLogPageSize.value,
+    })
+    pullLogList.value = result.records
+    pullLogTotal.value = result.total
+    pullLogPage.value = result.page
+    pullLogPageSize.value = result.pageSize
+  } finally {
+    pullLogLoading.value = false
+  }
+}
+
+function ensurePullLogLoaded() {
+  if (pullLogLoaded.value) return
+  pullLogLoaded.value = true
+  fetchPullLogList()
+}
+
+function handlePullLogSearch() {
+  pullLogPage.value = 1
+  fetchPullLogList()
+}
+
+function handlePullLogReset() {
+  pullLogDateRange.value = null
+  pullLogPage.value = 1
+  fetchPullLogList()
+}
+
+function handlePullLogPageChange(targetPage: number) {
+  pullLogPage.value = targetPage
+  fetchPullLogList()
+}
+
+function handlePullLogSizeChange(newSize: number) {
+  pullLogPageSize.value = newSize
+  pullLogPage.value = 1
+  fetchPullLogList()
+}
 </script>
 
 <template>
@@ -784,7 +925,13 @@ async function saveUserinfoFieldMappings() {
       :closable="false"
     />
 
-    <el-tabs v-else v-model="activeTab" class="app-config__tabs" v-loading="loading">
+    <el-tabs
+      v-else
+      v-model="activeTab"
+      class="app-config__tabs"
+      v-loading="loading"
+      @tab-change="handleActiveTabChange"
+    >
       <el-tab-pane label="基础信息" name="basic">
         <div class="app-config__row">
           <span class="app-config__label">AppId</span>
@@ -1226,6 +1373,111 @@ async function saveUserinfoFieldMappings() {
           </div>
         </div>
       </el-tab-pane>
+
+      <el-tab-pane label="通知日志" name="notifyLog">
+        <el-form class="app-config__log-filter-form" inline @submit.prevent>
+          <el-form-item label="状态">
+            <el-select v-model="notifyLogFilters.notifyStatus" placeholder="全部状态" clearable style="width: 140px">
+              <el-option v-for="opt in NOTIFY_STATUS_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="通知时间">
+            <el-date-picker
+              v-model="notifyLogDateRange"
+              type="datetimerange"
+              range-separator="至"
+              start-placeholder="开始时间"
+              end-placeholder="结束时间"
+              value-format="YYYY-MM-DDTHH:mm:ss"
+            />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" @click="handleNotifyLogSearch">查询</el-button>
+            <el-button @click="handleNotifyLogReset">重置</el-button>
+          </el-form-item>
+        </el-form>
+
+        <el-table v-loading="notifyLogLoading" :data="notifyLogList" empty-text="暂无通知日志">
+          <el-table-column label="数据类型" width="100">
+            <template #default="{ row }">{{ displayOrDash((row as AppNotifyRecordRow).dataType) }}</template>
+          </el-table-column>
+          <el-table-column label="bizId" width="100">
+            <template #default="{ row }">{{ displayOrDash((row as AppNotifyRecordRow).bizId) }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="90">
+            <template #default="{ row }">
+              <el-tag :type="(row as AppNotifyRecordRow).notifyStatus === NOTIFY_STATUS_SUCCESS ? 'success' : 'danger'">
+                {{ (row as AppNotifyRecordRow).notifyStatus === NOTIFY_STATUS_SUCCESS ? '成功' : '失败' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="HTTP 状态码" width="110">
+            <template #default="{ row }">{{ displayOrDash((row as AppNotifyRecordRow).httpStatus) }}</template>
+          </el-table-column>
+          <el-table-column label="回调地址" min-width="200" show-overflow-tooltip>
+            <template #default="{ row }">{{ displayOrDash((row as AppNotifyRecordRow).notifyUrl) }}</template>
+          </el-table-column>
+          <el-table-column label="错误摘要" min-width="180" show-overflow-tooltip>
+            <template #default="{ row }">{{ displayOrDash((row as AppNotifyRecordRow).errorMsg) }}</template>
+          </el-table-column>
+          <el-table-column prop="createTime" label="时间" width="170" />
+        </el-table>
+
+        <el-pagination
+          class="app-config__log-pagination"
+          background
+          layout="sizes, prev, pager, next, total"
+          :page-sizes="[...PAGE_SIZE_OPTIONS]"
+          :current-page="notifyLogPage"
+          :page-size="notifyLogPageSize"
+          :total="notifyLogTotal"
+          @current-change="handleNotifyLogPageChange"
+          @size-change="handleNotifyLogSizeChange"
+        />
+      </el-tab-pane>
+
+      <el-tab-pane label="拉取日志" name="pullLog">
+        <el-form class="app-config__log-filter-form" inline @submit.prevent>
+          <el-form-item label="拉取时间">
+            <el-date-picker
+              v-model="pullLogDateRange"
+              type="datetimerange"
+              range-separator="至"
+              start-placeholder="开始时间"
+              end-placeholder="结束时间"
+              value-format="YYYY-MM-DDTHH:mm:ss"
+            />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" @click="handlePullLogSearch">查询</el-button>
+            <el-button @click="handlePullLogReset">重置</el-button>
+          </el-form-item>
+        </el-form>
+
+        <el-table v-loading="pullLogLoading" :data="pullLogList" empty-text="暂无拉取日志">
+          <el-table-column label="拉取方式" width="120">
+            <template #default="{ row }">{{ PULL_MODE_LABELS[(row as AppPullRecordRow).pullMode] }}</template>
+          </el-table-column>
+          <el-table-column label="数据类型" width="100">
+            <template #default="{ row }">{{ displayOrDash((row as AppPullRecordRow).dataType) }}</template>
+          </el-table-column>
+          <el-table-column label="请求摘要" min-width="220" show-overflow-tooltip prop="requestSummary" />
+          <el-table-column label="返回条数" prop="resultCount" width="100" />
+          <el-table-column prop="createTime" label="时间" width="170" />
+        </el-table>
+
+        <el-pagination
+          class="app-config__log-pagination"
+          background
+          layout="sizes, prev, pager, next, total"
+          :page-sizes="[...PAGE_SIZE_OPTIONS]"
+          :current-page="pullLogPage"
+          :page-size="pullLogPageSize"
+          :total="pullLogTotal"
+          @current-change="handlePullLogPageChange"
+          @size-change="handlePullLogSizeChange"
+        />
+      </el-tab-pane>
     </el-tabs>
 
     <el-dialog
@@ -1506,5 +1758,20 @@ async function saveUserinfoFieldMappings() {
 .app-config__auth-param-table {
   width: 100%;
   margin: 8px 0 4px;
+}
+
+// 通知日志/拉取日志：过滤表单 + 分页，交互模式与 OperationLogManagementView.vue 保持一致
+.app-config__log-filter-form {
+  margin-bottom: 8px;
+
+  :deep(.el-form-item) {
+    margin-bottom: 12px;
+  }
+}
+
+.app-config__log-pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
 }
 </style>

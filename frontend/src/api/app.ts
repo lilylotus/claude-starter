@@ -4,6 +4,10 @@ import type {
   AppAuthConfigVO,
   AppConfigVO,
   AppFormRequest,
+  AppNotifyRecordQueryParams,
+  AppNotifyRecordRow,
+  AppPullRecordQueryParams,
+  AppPullRecordRow,
   AppRow,
   AppSyncDomainConfigUpdateRequest,
   AppSyncDomainConfigVO,
@@ -153,4 +157,24 @@ export function replaceAppUserinfoFieldMappings(
   data: AppUserinfoFieldMappingSaveRequest[],
 ): Promise<AppUserinfoFieldMappingVO[]> {
   return request.put(`/apps/${id}/config/auth/userinfo-field-mappings`, data)
+}
+
+// ---- 同步配置·通知/拉取日志：只读分页查询，无新增/编辑/删除接口 ----
+
+// 分页查询该应用的通知日志，支持按通知状态、时间范围筛选，全部筛选参数可选；
+// page/pageSize 不传时后端分别默认 1、10
+export function getAppNotifyRecordPage(
+  id: number,
+  params: AppNotifyRecordQueryParams,
+): Promise<PageResult<AppNotifyRecordRow>> {
+  return request.get(`/apps/${id}/config/sync/notify-records`, { params })
+}
+
+// 分页查询该应用的拉取日志，支持按时间范围筛选，全部筛选参数可选；
+// page/pageSize 不传时后端分别默认 1、10
+export function getAppPullRecordPage(
+  id: number,
+  params: AppPullRecordQueryParams,
+): Promise<PageResult<AppPullRecordRow>> {
+  return request.get(`/apps/${id}/config/sync/pull-records`, { params })
 }

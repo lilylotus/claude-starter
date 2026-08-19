@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 拉取日志的动态条件分页查询：单表查询，app_ref_id 精确匹配为必填条件，create_time
+     时间范围过滤可选，按拉取发起时间（create_time）降序排列（add-app-sync-notify-pull-logs
+     change design.md Decision 3）。 -->
+<mapper namespace="cn.nihility.rbac.sync.pull.record.mapper.AppPullRecordMapper">
+
+    <select id="selectPullRecordPage" resultType="cn.nihility.rbac.sync.pull.record.entity.AppPullRecordEntity">
+        SELECT *
+        FROM tab_app_pull_record
+        <where>
+            AND app_ref_id = #{query.appRefId}
+            <if test="query.startTime != null">
+                AND create_time &gt;= #{query.startTime}
+            </if>
+            <if test="query.endTime != null">
+                AND create_time &lt;= #{query.endTime}
+            </if>
+        </where>
+        ORDER BY create_time DESC, id DESC
+    </select>
+
+</mapper>

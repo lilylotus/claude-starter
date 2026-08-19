@@ -1,6 +1,8 @@
 package cn.nihility.rbac.sync.notify.service.impl;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -150,6 +152,9 @@ class AppNotifyServiceImplTest {
         assertThat(record.getAppRefId()).isEqualTo(1L);
         assertThat(record.getNotifyStatus()).isEqualTo(NotifyStatus.SUCCESS);
         assertThat(record.getHttpStatus()).isEqualTo(200);
+        assertThat(record.getDataType()).isEqualTo("ORG");
+        assertThat(record.getBizId()).isEqualTo(88L);
+        assertThat(record.getNotifyUrl()).isEqualTo(successUrl);
     }
 
     /**
@@ -184,6 +189,40 @@ class AppNotifyServiceImplTest {
         verify(appNotifyRecordMapper).insert(captor.capture());
         assertThat(captor.getValue().getAppRefId()).isEqualTo(2L);
         assertThat(captor.getValue().getNotifyStatus()).isEqualTo(NotifyStatus.FAILURE);
+    }
+
+    /**
+     * 通知回调成功后即便落库通知日志时发生异常，本次通知也应视为已正常完成，不向调用方
+     * 抛出异常（add-app-sync-notify-pull-logs change spec"日志写入失败不影响通知主流程"
+     * 场景）。
+     */
+    @Test
+    void notifyIfConfigured_shouldCompleteNormally_whenSaveRecordFails() {
+        AppConfigEntity target = AppConfigEntity.builder()
+                .appRefId(5L)
+                .appId("open-app-5")
+                .accessKey("access-key-5")
+                .secretKey(Sm4JdkUtils.encrypt("secret", appSecretProperties.getSm4Key()))
+                .signAlgorithm(SignAlgorithm.SHA256)
+                .syncMode(SyncMode.NOTIFY)
+                .needSign(false)
+                .notifyUrl(successUrl)
+                .build();
+        when(appConfigMapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(target);
+        doThrow(new RuntimeException("db down")).when(appNotifyRecordMapper)
+                .insert(org.mockito.ArgumentMatchers.any(AppNotifyRecordEntity.class));
+
+        AppDataChangeLogEntity changeLog = AppDataChangeLogEntity.builder()
+                .id(1028L)
+                .appRefId(5L)
+                .dataType("ORG")
+                .bizId(92L)
+                .operationType(OperationType.CREATE)
+                .createTime(LocalDateTime.now())
+                .build();
+
+        assertThatCode(() -> service.notifyIfConfigured(changeLog)).doesNotThrowAnyException();
+        assertThat(lastReceivedBody).isNotNull();
     }
 
     /**

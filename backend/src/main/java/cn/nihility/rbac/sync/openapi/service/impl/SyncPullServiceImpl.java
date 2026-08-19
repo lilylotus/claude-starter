@@ -10,6 +10,8 @@ import cn.nihility.rbac.sync.constant.SyncOperationType;
 import cn.nihility.rbac.sync.openapi.OpenApiCallerContext;
 import cn.nihility.rbac.sync.openapi.dto.SyncPullRecordVO;
 import cn.nihility.rbac.sync.openapi.service.SyncPullService;
+import cn.nihility.rbac.sync.pull.record.constant.PullMode;
+import cn.nihility.rbac.sync.pull.record.service.AppPullRecordService;
 import cn.nihility.rbac.sync.transform.BizSnapshotResolver;
 import cn.nihility.rbac.sync.transform.FieldMappingTransformer;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -46,6 +48,9 @@ public class SyncPullServiceImpl implements SyncPullService {
     /** 业务对象当前快照解析器，按数据域现查组织/用户/任职/应用/角色业务表当前数据。 */
     private final BizSnapshotResolver bizSnapshotResolver;
 
+    /** 拉取日志写入业务逻辑接口，记录外部应用调用两个拉取接口的请求，仅用于问题排查/展示。 */
+    private final AppPullRecordService appPullRecordService;
+
     /**
      * {@inheritDoc}
      */
@@ -53,13 +58,20 @@ public class SyncPullServiceImpl implements SyncPullService {
     public List<SyncPullRecordVO> pullByBizIds(String dataType, List<Long> bizIds) {
         assertValidDataType(dataType);
         Long appRefId = OpenApiCallerContext.getAppRefId();
+
+        List<SyncPullRecordVO> result;
         if (bizIds == null || bizIds.isEmpty() || !isDomainEnabled(appRefId, dataType)) {
-            return List.of();
+            result = List.of();
+        } else {
+            List<AppDataChangeLogEntity> logs =
+                    appDataChangeLogService.selectLatestByBizIds(appRefId, dataType, bizIds);
+            result = logs.stream().map(changeLog -> toVO(appRefId, changeLog)).filter(Optional::isPresent)
+                    .map(Optional::get).toList();
         }
 
-        List<AppDataChangeLogEntity> logs = appDataChangeLogService.selectLatestByBizIds(appRefId, dataType, bizIds);
-        return logs.stream().map(changeLog -> toVO(appRefId, changeLog)).filter(Optional::isPresent)
-                .map(Optional::get).toList();
+        int requestedBizIdCount = bizIds == null ? 0 : bizIds.size();
+        recordPull(appRefId, PullMode.BY_ID, dataType, "请求了 " + requestedBizIdCount + " 个 bizId", result.size());
+        return result;
     }
 
     /**
@@ -68,6 +80,25 @@ public class SyncPullServiceImpl implements SyncPullService {
     @Override
     public List<SyncPullRecordVO> pullBySequence(String dataType, Long fromSequence, Integer limit) {
         Long appRefId = OpenApiCallerContext.getAppRefId();
+        List<SyncPullRecordVO> result = doPullBySequence(appRefId, dataType, fromSequence, limit);
+
+        recordPull(appRefId, PullMode.BY_SEQUENCE, StringUtils.hasText(dataType) ? dataType : null,
+                "fromSequence=" + fromSequence + ", limit=" + limit, result.size());
+        return result;
+    }
+
+    /**
+     * {@link #pullBySequence} 的实际查询逻辑，抽成独立方法便于在外层统一记录拉取日志
+     * （add-app-sync-notify-pull-logs change tasks.md 3.3）。
+     *
+     * @param appRefId     调用方应用 id
+     * @param dataType     数据类型，可为空
+     * @param fromSequence 起始序列号
+     * @param limit        单次最多返回条数，可为空
+     * @return 变更记录列表，按序列号升序排列
+     */
+    private List<SyncPullRecordVO> doPullBySequence(Long appRefId, String dataType, Long fromSequence,
+            Integer limit) {
         List<AppSyncDomainConfigEntity> enabledConfigs = listEnabledDomainConfigs(appRefId);
 
         if (StringUtils.hasText(dataType)) {
@@ -100,6 +131,25 @@ public class SyncPullServiceImpl implements SyncPullService {
                 effectiveLimit);
         return logs.stream().map(changeLog -> toVO(appRefId, changeLog)).filter(Optional::isPresent)
                 .map(Optional::get).toList();
+    }
+
+    /**
+     * 写入一条拉取日志，写入异常只记 WARN 日志，不影响本次拉取请求的响应结果
+     * （add-app-sync-notify-pull-logs change spec"日志写入失败不影响拉取主流程"场景）。
+     *
+     * @param appRefId       调用方应用 id
+     * @param pullMode       拉取方式：BY_ID/BY_SEQUENCE
+     * @param dataType       请求的数据类型，可为空
+     * @param requestSummary 请求参数摘要
+     * @param resultCount    本次返回的记录条数
+     */
+    private void recordPull(Long appRefId, String pullMode, String dataType, String requestSummary,
+            int resultCount) {
+        try {
+            appPullRecordService.record(appRefId, pullMode, dataType, requestSummary, resultCount);
+        } catch (Exception e) {
+            log.warn("写入拉取日志失败：appRefId={}, pullMode={}", appRefId, pullMode, e);
+        }
     }
 
     /**

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 通知日志的动态条件分页查询：单表查询，app_ref_id 精确匹配为必填条件，notify_status
+     精确匹配、create_time 时间范围过滤均可选，按通知发起时间（create_time）降序排列
+     （add-app-sync-notify-pull-logs change design.md Decision 3）。 -->
+<mapper namespace="cn.nihility.rbac.sync.notify.mapper.AppNotifyRecordMapper">
+
+    <select id="selectNotifyRecordPage" resultType="cn.nihility.rbac.sync.notify.entity.AppNotifyRecordEntity">
+        SELECT *
+        FROM tab_app_notify_record
+        <where>
+            AND app_ref_id = #{query.appRefId}
+            <if test="query.notifyStatus != null">
+                AND notify_status = #{query.notifyStatus}
+            </if>
+            <if test="query.startTime != null">
+                AND create_time &gt;= #{query.startTime}
+            </if>
+            <if test="query.endTime != null">
+                AND create_time &lt;= #{query.endTime}
+            </if>
+        </where>
+        ORDER BY create_time DESC, id DESC
+    </select>
+
+</mapper>

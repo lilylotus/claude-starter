@@ -41,6 +41,8 @@ import org.apache.hc.core5.http.message.BasicNameValuePair;
 import org.apache.hc.core5.net.URIBuilder;
 import org.apache.hc.core5.ssl.SSLContextBuilder;
 import org.apache.hc.core5.util.Timeout;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 统一的 HTTP 客户端工具类（backend-common-utilities change design.md Decision 11），
@@ -53,6 +55,8 @@ import org.apache.hc.core5.util.Timeout;
  * {@code @PostConstruct} 阶段调用 {@link #configure} 用真实配置覆盖默认值。
  */
 public final class HttpClientUtils {
+
+    private static final Logger log = LoggerFactory.getLogger(HttpClientUtils.class);
 
     /** 用于保护单例客户端懒加载/重建过程的锁对象。 */
     private static final Object LOCK = new Object();
@@ -327,7 +331,8 @@ public final class HttpClientUtils {
                         .build();
             });
         } catch (IOException e) {
-            throw new IllegalStateException("HTTP 请求失败：" + request.getMethod() + " " + request.getRequestUri(), e);
+            log.error("HTTP请求[{}]-[{}]失败", request.getMethod(), request.getRequestUri(), e);
+            throw new IllegalStateException("HTTP 请求失败：[" + request.getMethod() + " " + request.getRequestUri() + "][" + e.getMessage() + "]", e);
         }
     }
 

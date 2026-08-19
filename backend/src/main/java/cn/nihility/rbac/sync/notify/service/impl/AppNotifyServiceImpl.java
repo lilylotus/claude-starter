@@ -38,6 +38,12 @@ public class AppNotifyServiceImpl implements AppNotifyService {
     /** 通知/落库场景下审计字段的固定操作人标识：变更事件消费发生在后台线程，无登录用户上下文。 */
     private static final String SYSTEM_OPERATOR = "system";
 
+    /** {@code tab_app_notify_record.error_msg} 列的长度上限。 */
+    private static final int ERROR_MSG_MAX_LENGTH = 500;
+
+    /** {@code tab_app_notify_record.notify_url} 列的长度上限。 */
+    private static final int NOTIFY_URL_MAX_LENGTH = 255;
+
     /** 应用对外接口凭证配置数据访问接口，按 {@code appRefId} 查询目标应用当前的同步方式与通知配置。 */
     private final AppConfigMapper appConfigMapper;
 
@@ -88,6 +94,10 @@ public class AppNotifyServiceImpl implements AppNotifyService {
                 .build();
         String requestBody = JacksonUtils.toJson(payload);
 
+        // 发起请求前读取一次回调地址并固定下来，作为本次通知记录的地址快照，避免管理员在通知
+        // 发起后改了配置值导致历史记录被误导（add-app-sync-notify-pull-logs change design.md
+        // Decision 1）。
+        String notifyUrl = target.getNotifyUrl();
         Integer httpStatus = null;
         String errorMsg = null;
         int notifyStatus;
@@ -97,41 +107,49 @@ public class AppNotifyServiceImpl implements AppNotifyService {
                     Boolean.TRUE.equals(target.getNeedSign()), target.getSignAlgorithm(), target.getAccessKey(),
                     secretKey, requestBody);
 
-            HttpClientUtils.HttpResult result = HttpClientUtils.postBinary(target.getNotifyUrl(), headers,
+            HttpClientUtils.HttpResult result = HttpClientUtils.postBinary(notifyUrl, headers,
                     requestBody.getBytes(StandardCharsets.UTF_8), "application/json;charset=UTF-8",
                     NOTIFY_RESPONSE_TIMEOUT_MILLIS);
 
             httpStatus = result.getStatusCode();
             notifyStatus = httpStatus >= 200 && httpStatus < 300 ? NotifyStatus.SUCCESS : NotifyStatus.FAILURE;
             if (notifyStatus == NotifyStatus.FAILURE) {
-                errorMsg = truncate("通知回调返回非成功状态码：" + httpStatus);
+                errorMsg = truncate("通知回调返回非成功状态码：" + httpStatus, ERROR_MSG_MAX_LENGTH);
             }
         } catch (Exception e) {
             notifyStatus = NotifyStatus.FAILURE;
-            errorMsg = truncate(e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
+            errorMsg = truncate(e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName(),
+                    ERROR_MSG_MAX_LENGTH);
         }
 
-        saveNotifyRecord(changeLog.getId(), target.getAppRefId(), notifyStatus, httpStatus, errorMsg);
+        saveNotifyRecord(changeLog, target.getAppRefId(), notifyStatus, httpStatus, errorMsg, notifyUrl);
     }
 
     /**
-     * 把通知发送结果写入 {@code tab_app_notify_record}。
+     * 把通知发送结果写入 {@code tab_app_notify_record}。落库发生在实际回调之后，
+     * 本方法内的任何异常都只会被调用方 {@code notifyIfConfigured} 的兜底 catch 吞掉，
+     * 不影响本次通知请求已经发起、已经拿到结果这一事实（add-app-sync-notify-pull-logs
+     * change spec"日志写入失败不影响通知主流程"场景）。
      *
-     * @param changeLogId  关联的变更记录 id
+     * @param changeLog    触发本次通知的变更记录，用于回填 {@code dataType}/{@code bizId}
      * @param appRefId     应用 id
      * @param notifyStatus 通知状态
      * @param httpStatus   外部接口返回的 HTTP 状态码，失败且未收到响应时为 {@code null}
      * @param errorMsg     失败原因摘要，成功时为 {@code null}
+     * @param notifyUrl    本次回调实际使用的地址快照
      */
-    private void saveNotifyRecord(Long changeLogId, Long appRefId, int notifyStatus, Integer httpStatus,
-            String errorMsg) {
+    private void saveNotifyRecord(AppDataChangeLogEntity changeLog, Long appRefId, int notifyStatus,
+            Integer httpStatus, String errorMsg, String notifyUrl) {
         LocalDateTime now = LocalDateTime.now();
         AppNotifyRecordEntity record = AppNotifyRecordEntity.builder()
-                .changeLogId(changeLogId)
+                .changeLogId(changeLog.getId())
                 .appRefId(appRefId)
+                .dataType(changeLog.getDataType())
+                .bizId(changeLog.getBizId())
                 .notifyStatus(notifyStatus)
                 .httpStatus(httpStatus)
                 .errorMsg(errorMsg)
+                .notifyUrl(truncate(notifyUrl, NOTIFY_URL_MAX_LENGTH))
                 .createBy(SYSTEM_OPERATOR)
                 .createTime(now)
                 .updateBy(SYSTEM_OPERATOR)
@@ -158,15 +176,16 @@ public class AppNotifyServiceImpl implements AppNotifyService {
     }
 
     /**
-     * 把失败原因摘要截断到 {@code tab_app_notify_record.error_msg} 列的长度上限（500）。
+     * 把文本截断到给定长度上限，防止超出对应数据库列的长度限制。
      *
-     * @param message 原始失败原因
-     * @return 截断后的失败原因
+     * @param text      原始文本
+     * @param maxLength 长度上限
+     * @return 截断后的文本
      */
-    private String truncate(String message) {
-        if (message == null) {
+    private String truncate(String text, int maxLength) {
+        if (text == null) {
             return null;
         }
-        return message.length() > 500 ? message.substring(0, 500) : message;
+        return text.length() > maxLength ? text.substring(0, maxLength) : text;
     }
 }

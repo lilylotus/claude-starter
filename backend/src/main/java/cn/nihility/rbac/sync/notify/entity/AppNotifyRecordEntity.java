@@ -33,6 +33,12 @@ public class AppNotifyRecordEntity {
     /** 关联 {@code tab_app.id}。 */
     private Long appRefId;
 
+    /** 数据类型：ORG/USER/POSITION/APP/ROLE，取自触发本次通知的变更记录，历史数据为空。 */
+    private String dataType;
+
+    /** 被变更对象 id，取自触发本次通知的变更记录，历史数据为空。 */
+    private Long bizId;
+
     /** 通知状态：1=成功，2=失败。 */
     private Integer notifyStatus;
 
@@ -41,6 +47,12 @@ public class AppNotifyRecordEntity {
 
     /** 失败原因摘要。 */
     private String errorMsg;
+
+    /**
+     * 本次回调实际使用的地址快照（发起请求前读取的地址，不是查询时的当前配置值），
+     * 历史数据为空（add-app-sync-notify-pull-logs change design.md Decision 1）。
+     */
+    private String notifyUrl;
 
     /** 创建人。 */
     private String createBy;

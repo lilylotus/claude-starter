@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -18,6 +19,8 @@ import cn.nihility.rbac.sync.changelog.entity.AppDataChangeLogEntity;
 import cn.nihility.rbac.sync.changelog.service.AppDataChangeLogService;
 import cn.nihility.rbac.sync.openapi.OpenApiCallerContext;
 import cn.nihility.rbac.sync.openapi.dto.SyncPullRecordVO;
+import cn.nihility.rbac.sync.pull.record.constant.PullMode;
+import cn.nihility.rbac.sync.pull.record.service.AppPullRecordService;
 import cn.nihility.rbac.sync.transform.BizSnapshotResolver;
 import cn.nihility.rbac.sync.transform.FieldMappingTransformer;
 import java.time.LocalDateTime;
@@ -52,12 +55,15 @@ class SyncPullServiceImplTest {
     @Mock
     private BizSnapshotResolver bizSnapshotResolver;
 
+    @Mock
+    private AppPullRecordService appPullRecordService;
+
     private SyncPullServiceImpl service;
 
     @BeforeEach
     void setUp() {
         service = new SyncPullServiceImpl(appSyncDomainConfigMapper, appDataChangeLogService,
-                fieldMappingTransformer, bizSnapshotResolver);
+                fieldMappingTransformer, bizSnapshotResolver, appPullRecordService);
         OpenApiCallerContext.set(AppConfigEntity.builder().appRefId(1L).build());
     }
 
@@ -188,5 +194,82 @@ class SyncPullServiceImplTest {
         service.pullBySequence(SyncDomain.ORG, 1000L, 5);
 
         verify(appDataChangeLogService).selectBySequence(eq(1L), eq(List.of(SyncDomain.ORG)), eq(1000L), eq(5));
+    }
+
+    /**
+     * 按 id 拉取应写入一条拉取日志，拉取方式为 {@code BY_ID}，返回记录条数与实际返回结果
+     * 一致（add-app-sync-notify-pull-logs change spec"按 id 拉取产生一条拉取日志"场景）。
+     */
+    @Test
+    void pullByBizIds_shouldRecordPullLog() {
+        when(appSyncDomainConfigMapper.selectOne(any())).thenReturn(
+                AppSyncDomainConfigEntity.builder().syncEnabled(true).build());
+        AppDataChangeLogEntity changeLog = AppDataChangeLogEntity.builder()
+                .id(1024L)
+                .dataType(SyncDomain.ORG)
+                .bizId(88L)
+                .operationType(1)
+                .createTime(LocalDateTime.now())
+                .build();
+        when(appDataChangeLogService.selectLatestByBizIds(1L, SyncDomain.ORG, List.of(1L, 2L, 88L)))
+                .thenReturn(List.of(changeLog));
+        when(bizSnapshotResolver.resolve(SyncDomain.ORG, 88L)).thenReturn(Map.of("code", "ORG001"));
+        when(fieldMappingTransformer.transform(eq(1L), eq(SyncDomain.ORG), any()))
+                .thenReturn(Map.of("orgCode", "ORG001"));
+
+        service.pullByBizIds(SyncDomain.ORG, List.of(1L, 2L, 88L));
+
+        verify(appPullRecordService).record(eq(1L), eq(PullMode.BY_ID), eq(SyncDomain.ORG),
+                eq("请求了 3 个 bizId"), eq(1));
+    }
+
+    /**
+     * 按 id 拉取时，写入拉取日志发生异常不应影响本次拉取请求的响应结果
+     * （add-app-sync-notify-pull-logs change spec"日志写入失败不影响拉取主流程"场景）。
+     */
+    @Test
+    void pullByBizIds_shouldReturnNormally_whenRecordPullLogFails() {
+        when(appSyncDomainConfigMapper.selectOne(any())).thenReturn(
+                AppSyncDomainConfigEntity.builder().syncEnabled(false).build());
+        org.mockito.Mockito.doThrow(new RuntimeException("db down"))
+                .when(appPullRecordService).record(any(), any(), any(), any(), anyInt());
+
+        List<SyncPullRecordVO> result = service.pullByBizIds(SyncDomain.ORG, List.of(1L));
+
+        assertThat(result).isEmpty();
+    }
+
+    /**
+     * 按序列号拉取应写入一条拉取日志，拉取方式为 {@code BY_SEQUENCE}，未传数据类型时
+     * 数据类型记为空（add-app-sync-notify-pull-logs change spec"按序列号拉取产生一条拉取
+     * 日志"场景）。
+     */
+    @Test
+    void pullBySequence_shouldRecordPullLogWithNullDataType_whenDataTypeAbsent() {
+        when(appSyncDomainConfigMapper.selectList(any())).thenReturn(List.of(
+                AppSyncDomainConfigEntity.builder().syncDomain(SyncDomain.ORG).syncEnabled(true).pageSize(30).build()));
+        when(appDataChangeLogService.selectBySequence(eq(1L), anyCollection(), eq(1000L), eq(30)))
+                .thenReturn(List.of());
+
+        service.pullBySequence(null, 1000L, null);
+
+        verify(appPullRecordService).record(eq(1L), eq(PullMode.BY_SEQUENCE), isNull(),
+                eq("fromSequence=1000, limit=null"), eq(0));
+    }
+
+    /**
+     * 按序列号拉取时传了数据类型，拉取日志的数据类型应原样记录。
+     */
+    @Test
+    void pullBySequence_shouldRecordPullLogWithDataType_whenDataTypePresent() {
+        when(appSyncDomainConfigMapper.selectList(any())).thenReturn(List.of(
+                AppSyncDomainConfigEntity.builder().syncDomain(SyncDomain.ORG).syncEnabled(true).pageSize(30).build()));
+        when(appDataChangeLogService.selectBySequence(eq(1L), eq(List.of(SyncDomain.ORG)), eq(1000L), eq(5)))
+                .thenReturn(List.of());
+
+        service.pullBySequence(SyncDomain.ORG, 1000L, 5);
+
+        verify(appPullRecordService).record(eq(1L), eq(PullMode.BY_SEQUENCE), eq(SyncDomain.ORG),
+                eq("fromSequence=1000, limit=5"), eq(0));
     }
 }

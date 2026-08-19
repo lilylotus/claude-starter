@@ -273,3 +273,67 @@ export interface AppUserinfoFieldMappingSaveRequest {
   transformType: TransformType
   transformValue: string | null
 }
+
+// ---- 同步配置·通知/拉取日志：应用配置页"通知日志"“拉取日志”两个标签页，与后端
+// cn.nihility.rbac.app.sync.controller.AppSyncLogController 对齐（见
+// openspec/changes/add-app-sync-notify-pull-logs）。均为管理端只读分页查询，不提供
+// 新增/编辑/删除接口 ----
+
+// 通知状态：1=成功，2=失败，与后端 sync/notify/constant/NotifyStatus 对齐
+export const NOTIFY_STATUS_SUCCESS = 1
+export const NOTIFY_STATUS_FAILURE = 2
+
+export const NOTIFY_STATUS_OPTIONS: Array<{ value: number; label: string }> = [
+  { value: NOTIFY_STATUS_SUCCESS, label: '成功' },
+  { value: NOTIFY_STATUS_FAILURE, label: '失败' },
+]
+
+// 通知日志查询参数，对应 GET /api/apps/{id}/config/sync/notify-records 的 query 参数，
+// 全部可选；startTime/endTime 为 ISO-8601 时间，省略时不做时间范围限制
+export interface AppNotifyRecordQueryParams {
+  notifyStatus?: number
+  startTime?: string
+  endTime?: string
+  page?: number
+  pageSize?: number
+}
+
+// 通知日志列表行，来自 GET /api/apps/{id}/config/sync/notify-records 分页接口；
+// dataType/bizId/notifyUrl 三列历史记录可能为空（旧数据未落这三列，见 proposal.md），
+// httpStatus 未收到响应时为空，errorMsg 仅失败时有值
+export interface AppNotifyRecordRow {
+  dataType: string | null
+  bizId: number | null
+  notifyStatus: number
+  httpStatus: number | null
+  notifyUrl: string | null
+  errorMsg: string | null
+  createTime: string
+}
+
+// 拉取方式：按 id 拉取 / 按序列号批量拉取，与后端 sync/pull/record 相关常量对齐
+export type PullMode = 'BY_ID' | 'BY_SEQUENCE'
+
+export const PULL_MODE_LABELS: Record<PullMode, string> = {
+  BY_ID: '按 ID 拉取',
+  BY_SEQUENCE: '按序列号拉取',
+}
+
+// 拉取日志查询参数，对应 GET /api/apps/{id}/config/sync/pull-records 的 query 参数，
+// 全部可选；startTime/endTime 为 ISO-8601 时间，省略时不做时间范围限制
+export interface AppPullRecordQueryParams {
+  startTime?: string
+  endTime?: string
+  page?: number
+  pageSize?: number
+}
+
+// 拉取日志列表行，来自 GET /api/apps/{id}/config/sync/pull-records 分页接口；
+// dataType 按序列号拉取未传数据类型时为空，requestSummary 为可读的请求参数摘要文本
+export interface AppPullRecordRow {
+  pullMode: PullMode
+  dataType: string | null
+  requestSummary: string
+  resultCount: number
+  createTime: string
+}
