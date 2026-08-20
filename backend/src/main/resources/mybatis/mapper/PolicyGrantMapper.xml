@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 策略计算结果是否命中查询：tab_app_access_policy_grant 关联 tab_app_access_policy
+     校验策略当前状态为启用（2000），停用中的策略产生的记录 SHALL NOT 计入（spec.md
+     "最终生效权限计算规则"需求）。 -->
+<mapper namespace="cn.nihility.rbac.appaccess.policy.mapper.PolicyGrantMapper">
+
+    <select id="existsActiveGrant" resultType="int">
+        SELECT COUNT(*)
+        FROM tab_app_access_policy_grant g
+        INNER JOIN tab_app_access_policy p ON p.id = g.policy_id
+        WHERE g.user_id = #{userId}
+        AND g.app_id = #{appId}
+        AND p.status = 2000
+    </select>
+
+    <select id="selectActivePolicyIds" resultType="java.lang.Long">
+        SELECT DISTINCT g.policy_id
+        FROM tab_app_access_policy_grant g
+        INNER JOIN tab_app_access_policy p ON p.id = g.policy_id
+        WHERE g.user_id = #{userId}
+        AND g.app_id = #{appId}
+        AND p.status = 2000
+    </select>
+
+</mapper>

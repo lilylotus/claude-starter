@@ -31,6 +31,7 @@ export const MENU_GROUPS: MenuGroup[] = [
       { title: '角色管理', path: '/permission/roles', permissionKey: 'RoleManagement:role:view' },
       { title: '权限点管理', path: '/permission/points', permissionKey: 'PermissionManagement:permission:view' },
       { title: '管理员管理', path: '/permission/admins', permissionKey: 'AdminManagement:admin:view' },
+      { title: '应用访问授权', path: '/permission/app-access', permissionKey: 'AppAccessManagement:appAccess:view' },
     ],
   },
   {

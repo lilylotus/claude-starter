@@ -1,5 +1,6 @@
 package cn.nihility.rbac.loginlog.service.impl;
 
+import cn.nihility.rbac.common.util.ClientRequestUtils;
 import cn.nihility.rbac.loginlog.constant.LoginResult;
 import cn.nihility.rbac.loginlog.entity.LoginLogEntity;
 import cn.nihility.rbac.loginlog.mapper.LoginLogMapper;
@@ -17,9 +18,10 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 /**
  * {@link LoginLogRecorder} 的默认实现：通过 {@link RequestContextHolder} 获取当前
  * HTTP 请求解析登录 IP 与 User-Agent 相关信息（复用 {@code operationlog} 模块的
- * {@link UserAgentParser} 无状态工具类），最终写入 {@code tab_login_log}。IP 解析
- * 逻辑与 {@code OperationLogRecorderImpl#resolveIp} 相同，但本模块独立成一份私有
- * 方法，不跨模块引用其私有实现。
+ * {@link UserAgentParser} 无状态工具类），最终写入 {@code tab_login_log}。客户端 IP
+ * 解析逻辑已提炼为共享工具 {@link ClientRequestUtils#resolveClientIp}
+ * （app-access-request-control change design.md Decision 6），本类不再维护私有实现，
+ * 供该工具与 SSO 登录拦截请求控制校验共用同一份逻辑。
  */
 @Slf4j
 @Service
@@ -28,9 +30,6 @@ public class LoginLogRecorderImpl implements LoginLogRecorder {
 
     /** {@code createBy}/{@code loginAccount} 均为空时使用的兜底值。 */
     private static final String UNKNOWN_OPERATOR = "unknown";
-
-    /** 反向代理场景下客户端真实 IP 所在的请求头。 */
-    private static final String FORWARDED_FOR_HEADER = "X-Forwarded-For";
 
     /** 携带浏览器/操作系统/设备类型信息的请求头。 */
     private static final String USER_AGENT_HEADER = "User-Agent";
@@ -74,7 +73,7 @@ public class LoginLogRecorderImpl implements LoginLogRecorder {
                 .userName(userName)
                 .loginResult(loginResult)
                 .failReason(failReason)
-                .loginIp(resolveIp(request))
+                .loginIp(ClientRequestUtils.resolveClientIp(request))
                 .createBy(operator)
                 .createTime(now)
                 .updateBy(operator)
@@ -95,24 +94,6 @@ public class LoginLogRecorderImpl implements LoginLogRecorder {
             return null;
         }
         return attributes.getRequest();
-    }
-
-    /**
-     * 解析登录发起 IP：优先取 {@code X-Forwarded-For} 请求头的第一个 IP（兼容经反向代理/
-     * 网关的场景），否则取 {@code request.getRemoteAddr()}；请求不可用时返回 {@code null}。
-     *
-     * @param request 当前 HTTP 请求，可为 {@code null}
-     * @return 登录发起 IP，取不到时为 {@code null}
-     */
-    private String resolveIp(HttpServletRequest request) {
-        if (request == null) {
-            return null;
-        }
-        String forwardedFor = request.getHeader(FORWARDED_FOR_HEADER);
-        if (StringUtils.hasText(forwardedFor)) {
-            return forwardedFor.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
     }
 
     /**

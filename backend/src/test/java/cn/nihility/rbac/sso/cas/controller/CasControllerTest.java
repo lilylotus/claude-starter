@@ -15,6 +15,16 @@ import cn.nihility.rbac.app.entity.AppConfigEntity;
 import cn.nihility.rbac.app.entity.AppEntity;
 import cn.nihility.rbac.app.mapper.AppConfigMapper;
 import cn.nihility.rbac.app.mapper.AppMapper;
+import cn.nihility.rbac.appaccess.override.constant.OverrideType;
+import cn.nihility.rbac.appaccess.override.entity.ManualOverrideEntity;
+import cn.nihility.rbac.appaccess.override.mapper.ManualOverrideMapper;
+import cn.nihility.rbac.appaccess.policy.constant.PolicyStatus;
+import cn.nihility.rbac.appaccess.policy.entity.PolicyBrowserRuleEntity;
+import cn.nihility.rbac.appaccess.policy.entity.PolicyEntity;
+import cn.nihility.rbac.appaccess.policy.entity.PolicyGrantEntity;
+import cn.nihility.rbac.appaccess.policy.mapper.PolicyBrowserRuleMapper;
+import cn.nihility.rbac.appaccess.policy.mapper.PolicyGrantMapper;
+import cn.nihility.rbac.appaccess.policy.mapper.PolicyMapper;
 import cn.nihility.rbac.auth.entity.UserPasswordEntity;
 import cn.nihility.rbac.auth.mapper.UserPasswordMapper;
 import cn.nihility.rbac.auth.util.PasswordDigestUtils;
@@ -41,6 +51,13 @@ import org.springframework.test.web.servlet.MockMvc;
  * {@link CasController} 的测试（tasks.md 7.5），起真实 MySQL/Redis 连接，覆盖 spec.md 全部
  * CAS 场景：service 白名单匹配/不匹配、未登录跳转 SSO 登录页、已登录直接签发票据、票据一次性
  * 消费、service 不一致校验失败、登出清除会话。断言 {@code Location} 响应头与 XML 响应体内容。
+ * {@code setUp} 默认为测试用户+应用插入一条 GRANT 人工例外，模拟具备最终生效授权，让原有
+ * 覆盖登录成功场景的用例继续反映其本身要覆盖的分支；未授权场景由
+ * {@link #login_shouldReject_andNotIssueTicket_whenUserNotAuthorizedForApp} 单独覆盖
+ * （app-access-authorization change tasks.md 8.5）；身份命中但请求控制不满足/满足两种
+ * 场景由 {@link #login_shouldReject_whenPolicyRequestControlNotSatisfied}/
+ * {@link #login_shouldIssueTicket_whenPolicyRequestControlSatisfied} 覆盖
+ * （app-access-request-control change tasks.md 8.5）。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -77,6 +94,24 @@ class CasControllerTest {
     @Autowired
     private SsoSessionService ssoSessionService;
 
+    /** 人工例外数据访问接口（app-access-authorization change），测试内直接插入 GRANT
+     *  例外模拟测试用户对测试应用具备最终生效授权，覆盖"应用访问授权"接入后的默认拒绝。 */
+    @Autowired
+    private ManualOverrideMapper manualOverrideMapper;
+
+    /** 策略规则数据访问接口（app-access-request-control change），请求控制场景用例内
+     *  直接插入策略与浏览器白名单条件。 */
+    @Autowired
+    private PolicyMapper policyMapper;
+
+    /** 策略计算结果数据访问接口，请求控制场景用例内直接插入身份命中记录。 */
+    @Autowired
+    private PolicyGrantMapper policyGrantMapper;
+
+    /** 策略请求控制条件-浏览器白名单数据访问接口。 */
+    @Autowired
+    private PolicyBrowserRuleMapper policyBrowserRuleMapper;
+
     /** 本用例插入的应用 id。 */
     private Long appRefId;
 
@@ -85,6 +120,9 @@ class CasControllerTest {
 
     /** 本用例插入的测试用户 id。 */
     private Long userId;
+
+    /** 请求控制场景用例内插入的测试策略 id，未使用该场景时为 {@code null}。 */
+    private Long policyId;
 
     /**
      * 每个用例前插入一份独立的测试应用（CAS 协议，service 白名单为
@@ -161,6 +199,19 @@ class CasControllerTest {
                 .updateTime(now)
                 .build();
         userPasswordMapper.insert(password);
+
+        // app-access-authorization change 接入后，CAS 登录签发票据前新增最终生效权限校验：
+        // 默认插入一条 GRANT 人工例外，让本测试类原有覆盖"已登录即可签发票据"的用例继续
+        // 反映其本身要覆盖的场景，未授权场景由下方专门的用例单独覆盖（不预置该例外）。
+        manualOverrideMapper.insert(ManualOverrideEntity.builder()
+                .userId(userId)
+                .appId(appRefId)
+                .overrideType(OverrideType.GRANT)
+                .createBy("test")
+                .createTime(now)
+                .updateBy("test")
+                .updateTime(now)
+                .build());
     }
 
     /**
@@ -168,6 +219,10 @@ class CasControllerTest {
      */
     @AfterEach
     void tearDown() {
+        if (userId != null && appRefId != null) {
+            manualOverrideMapper.delete(new LambdaQueryWrapper<ManualOverrideEntity>()
+                    .eq(ManualOverrideEntity::getUserId, userId).eq(ManualOverrideEntity::getAppId, appRefId));
+        }
         if (appRefId != null) {
             appAuthConfigMapper.delete(new LambdaQueryWrapper<AppAuthConfigEntity>().eq(AppAuthConfigEntity::getAppRefId, appRefId));
             appConfigMapper.delete(new LambdaQueryWrapper<AppConfigEntity>().eq(AppConfigEntity::getAppRefId, appRefId));
@@ -176,6 +231,13 @@ class CasControllerTest {
         if (userId != null) {
             userPasswordMapper.delete(new LambdaQueryWrapper<UserPasswordEntity>().eq(UserPasswordEntity::getUserId, userId));
             userMapper.deleteById(userId);
+        }
+        if (policyId != null) {
+            policyBrowserRuleMapper.delete(new LambdaQueryWrapper<PolicyBrowserRuleEntity>()
+                    .eq(PolicyBrowserRuleEntity::getPolicyId, policyId));
+            policyGrantMapper.delete(new LambdaQueryWrapper<PolicyGrantEntity>()
+                    .eq(PolicyGrantEntity::getPolicyId, policyId));
+            policyMapper.deleteById(policyId);
         }
     }
 
@@ -213,6 +275,110 @@ class CasControllerTest {
         mockMvc.perform(get("/api/authn/cas/{appId}/login", appId).param("service", ALLOWED_SERVICE).cookie(cookie))
                 .andExpect(status().isFound())
                 .andExpect(header().string("Location", org.hamcrest.Matchers.startsWith(ALLOWED_SERVICE + "?ticket=ST-")));
+    }
+
+    /**
+     * service 校验通过且已登录，但当前用户不具备访问该应用的最终生效授权（没有任何人工
+     * 例外/策略授权）时，应拒绝且不签发服务票据、不发生重定向（app-access-authorization
+     * change spec.md "用户无最终生效授权时拒绝签发票据" Scenario）。
+     */
+    @Test
+    void login_shouldReject_andNotIssueTicket_whenUserNotAuthorizedForApp() throws Exception {
+        manualOverrideMapper.delete(new LambdaQueryWrapper<ManualOverrideEntity>()
+                .eq(ManualOverrideEntity::getUserId, userId).eq(ManualOverrideEntity::getAppId, appRefId));
+        String sessionToken = ssoSessionService.issue(userId);
+        Cookie cookie = new Cookie("sso_session", sessionToken);
+
+        String body = mockMvc.perform(
+                        get("/api/authn/cas/{appId}/login", appId).param("service", ALLOWED_SERVICE).cookie(cookie))
+                .andExpect(status().isForbidden())
+                .andExpect(header().doesNotExist("Location"))
+                .andReturn().getResponse().getContentAsString();
+        Map<String, Object> json = JacksonUtils.toObj(body, JacksonUtils.MAP_OBJECT_TYPE_REFERENCE);
+        assertThat(json.get("code")).isEqualTo(403);
+        assertThat(json.get("message")).isEqualTo("当前用户无权访问该应用");
+    }
+
+    /**
+     * 身份命中某启用中策略（配置了"仅允许 Chrome 浏览器访问"的请求控制条件），但当前请求的
+     * {@code User-Agent} 不是 Chrome，且不存在能覆盖此次访问的 GRANT 人工例外时，应拒绝且不
+     * 签发服务票据（app-access-request-control change spec.md "身份命中但当前请求不满足
+     * 命中策略的请求控制时拒绝签发票据" Scenario）。
+     */
+    @Test
+    void login_shouldReject_whenPolicyRequestControlNotSatisfied() throws Exception {
+        manualOverrideMapper.delete(new LambdaQueryWrapper<ManualOverrideEntity>()
+                .eq(ManualOverrideEntity::getUserId, userId).eq(ManualOverrideEntity::getAppId, appRefId));
+        insertChromeOnlyPolicyGrant();
+        String sessionToken = ssoSessionService.issue(userId);
+        Cookie cookie = new Cookie("sso_session", sessionToken);
+
+        String body = mockMvc.perform(get("/api/authn/cas/{appId}/login", appId).param("service", ALLOWED_SERVICE)
+                        .cookie(cookie))
+                .andExpect(status().isForbidden())
+                .andExpect(header().doesNotExist("Location"))
+                .andReturn().getResponse().getContentAsString();
+        Map<String, Object> json = JacksonUtils.toObj(body, JacksonUtils.MAP_OBJECT_TYPE_REFERENCE);
+        assertThat(json.get("code")).isEqualTo(403);
+    }
+
+    /**
+     * 身份命中某启用中策略（配置了"仅允许 Chrome 浏览器访问"的请求控制条件），当前请求的
+     * {@code User-Agent} 为 Chrome 时，应正常签发服务票据（app-access-request-control
+     * change spec.md "已登录且请求满足最终生效授权（含请求控制）时直接签发票据" Scenario）。
+     */
+    @Test
+    void login_shouldIssueTicket_whenPolicyRequestControlSatisfied() throws Exception {
+        manualOverrideMapper.delete(new LambdaQueryWrapper<ManualOverrideEntity>()
+                .eq(ManualOverrideEntity::getUserId, userId).eq(ManualOverrideEntity::getAppId, appRefId));
+        insertChromeOnlyPolicyGrant();
+        String sessionToken = ssoSessionService.issue(userId);
+        Cookie cookie = new Cookie("sso_session", sessionToken);
+        String chromeUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                + "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+        mockMvc.perform(get("/api/authn/cas/{appId}/login", appId).param("service", ALLOWED_SERVICE).cookie(cookie)
+                        .header("User-Agent", chromeUserAgent))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", org.hamcrest.Matchers.startsWith(ALLOWED_SERVICE + "?ticket=ST-")));
+    }
+
+    /**
+     * 插入一条启用中的策略，配置浏览器白名单仅允许 Chrome，并为测试用户+应用产生一条
+     * 身份命中的策略授权记录，供请求控制场景用例复用；插入的策略 id 记录到
+     * {@link #policyId} 供 {@link #tearDown} 清理。
+     */
+    private void insertChromeOnlyPolicyGrant() {
+        LocalDateTime now = LocalDateTime.now();
+        PolicyEntity policy = PolicyEntity.builder()
+                .name("CAS 请求控制测试策略")
+                .status(PolicyStatus.ENABLED)
+                .createBy("test")
+                .createTime(now)
+                .updateBy("test")
+                .updateTime(now)
+                .build();
+        policyMapper.insert(policy);
+        policyId = policy.getId();
+
+        policyBrowserRuleMapper.insert(PolicyBrowserRuleEntity.builder()
+                .policyId(policyId)
+                .browserCode("CHROME")
+                .createBy("test")
+                .createTime(now)
+                .updateBy("test")
+                .updateTime(now)
+                .build());
+
+        policyGrantMapper.insert(PolicyGrantEntity.builder()
+                .policyId(policyId)
+                .userId(userId)
+                .appId(appRefId)
+                .createBy("test")
+                .createTime(now)
+                .updateBy("test")
+                .updateTime(now)
+                .build());
     }
 
     /**

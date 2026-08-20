@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 最终生效权限查询：策略计算结果表与人工例外表物理隔离（design.md Decision 2），
+     用 LEFT JOIN 把同一 user_id+app_id 上可能存在的人工例外类型一并带出，供服务层应用
+     DENY 优先于 GRANT 优先于 POLICY 的合并判定规则；"仅人工例外、无策略授权"的应用/用户
+     单独用 NOT EXISTS 排除已被上面那条 JOIN 查询覆盖的行查出。不使用窗口函数/CTE/
+     GROUP_CONCAT 等厂商专属或版本相关写法，多条策略名称的聚合放到 Java 服务层完成
+     （目标数据库 MySQL 5.7）。策略命中行额外用 EXISTS 子查询计算 hasRequestControl
+     （该策略是否配置了浏览器/IP 白名单，app-access-request-control change design.md
+     Decision 5），供服务层在多条命中策略间取"任一配置了请求控制"聚合。 -->
+<mapper namespace="cn.nihility.rbac.appaccess.support.mapper.AppAccessEffectiveMapper">
+
+    <select id="selectActiveGrantRowsByUser" resultType="cn.nihility.rbac.appaccess.support.dto.EffectiveRawRow">
+        SELECT
+        g.user_id AS userId,
+        g.app_id AS appId,
+        a.name AS appName,
+        p.name AS policyName,
+        mo.override_type AS overrideType,
+        CASE WHEN EXISTS (SELECT 1 FROM tab_app_access_policy_browser_rule br WHERE br.policy_id = g.policy_id)
+        OR EXISTS (SELECT 1 FROM tab_app_access_policy_ip_rule ir WHERE ir.policy_id = g.policy_id)
+        THEN 1 ELSE 0 END AS hasRequestControl
+        FROM tab_app_access_policy_grant g
+        INNER JOIN tab_app_access_policy p ON p.id = g.policy_id AND p.status = 2000
+        INNER JOIN tab_app a ON a.id = g.app_id
+        LEFT JOIN tab_app_access_manual_override mo ON mo.user_id = g.user_id AND mo.app_id = g.app_id
+        WHERE g.user_id = #{userId}
+    </select>
+
+    <select id="selectManualOnlyRowsByUser" resultType="cn.nihility.rbac.appaccess.support.dto.EffectiveRawRow">
+        SELECT
+        mo.user_id AS userId,
+        mo.app_id AS appId,
+        a.name AS appName,
+        mo.override_type AS overrideType
+        FROM tab_app_access_manual_override mo
+        INNER JOIN tab_app a ON a.id = mo.app_id
+        WHERE mo.user_id = #{userId}
+        AND NOT EXISTS (
+            SELECT 1 FROM tab_app_access_policy_grant g2
+            INNER JOIN tab_app_access_policy p2 ON p2.id = g2.policy_id AND p2.status = 2000
+            WHERE g2.user_id = mo.user_id AND g2.app_id = mo.app_id
+        )
+    </select>
+
+    <select id="selectActiveGrantRowsByApp" resultType="cn.nihility.rbac.appaccess.support.dto.EffectiveRawRow">
+        SELECT
+        g.user_id AS userId,
+        u.name AS userName,
+        g.app_id AS appId,
+        p.name AS policyName,
+        mo.override_type AS overrideType,
+        CASE WHEN EXISTS (SELECT 1 FROM tab_app_access_policy_browser_rule br WHERE br.policy_id = g.policy_id)
+        OR EXISTS (SELECT 1 FROM tab_app_access_policy_ip_rule ir WHERE ir.policy_id = g.policy_id)
+        THEN 1 ELSE 0 END AS hasRequestControl
+        FROM tab_app_access_policy_grant g
+        INNER JOIN tab_app_access_policy p ON p.id = g.policy_id AND p.status = 2000
+        INNER JOIN tab_user u ON u.id = g.user_id
+        LEFT JOIN tab_app_access_manual_override mo ON mo.user_id = g.user_id AND mo.app_id = g.app_id
+        WHERE g.app_id = #{appId}
+    </select>
+
+    <select id="selectManualOnlyRowsByApp" resultType="cn.nihility.rbac.appaccess.support.dto.EffectiveRawRow">
+        SELECT
+        mo.user_id AS userId,
+        u.name AS userName,
+        mo.app_id AS appId,
+        mo.override_type AS overrideType
+        FROM tab_app_access_manual_override mo
+        INNER JOIN tab_user u ON u.id = mo.user_id
+        WHERE mo.app_id = #{appId}
+        AND NOT EXISTS (
+            SELECT 1 FROM tab_app_access_policy_grant g2
+            INNER JOIN tab_app_access_policy p2 ON p2.id = g2.policy_id AND p2.status = 2000
+            WHERE g2.user_id = mo.user_id AND g2.app_id = mo.app_id
+        )
+    </select>
+
+</mapper>

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 人工例外分页查询：tab_app_access_manual_override 关联 tab_user、tab_app 回填用户姓名、
+     应用名称。用 INNER JOIN 是有意为之：用户或应用若已被逻辑删除，对应的人工例外记录没有
+     展示价值，不返回（不影响其对最终生效权限计算的效力，计算逻辑不经过本查询）。 -->
+<mapper namespace="cn.nihility.rbac.appaccess.override.mapper.ManualOverrideMapper">
+
+    <select id="selectOverridePage" resultType="cn.nihility.rbac.appaccess.override.dto.ManualOverrideVO">
+        SELECT
+        mo.id AS id,
+        mo.user_id AS user_id,
+        u.name AS user_name,
+        mo.app_id AS app_id,
+        a.name AS app_name,
+        mo.override_type AS override_type,
+        mo.remark AS remark,
+        mo.create_time AS create_time,
+        mo.update_time AS update_time
+        FROM tab_app_access_manual_override mo
+        INNER JOIN tab_user u ON u.id = mo.user_id
+        INNER JOIN tab_app a ON a.id = mo.app_id
+        <where>
+            <if test="userId != null">AND mo.user_id = #{userId}</if>
+            <if test="appId != null">AND mo.app_id = #{appId}</if>
+            <if test="overrideType != null and overrideType != ''">AND mo.override_type = #{overrideType}</if>
+        </where>
+        ORDER BY mo.id DESC
+    </select>
+
+    <select id="selectVOById" resultType="cn.nihility.rbac.appaccess.override.dto.ManualOverrideVO">
+        SELECT
+        mo.id AS id,
+        mo.user_id AS user_id,
+        u.name AS user_name,
+        mo.app_id AS app_id,
+        a.name AS app_name,
+        mo.override_type AS override_type,
+        mo.remark AS remark,
+        mo.create_time AS create_time,
+        mo.update_time AS update_time
+        FROM tab_app_access_manual_override mo
+        INNER JOIN tab_user u ON u.id = mo.user_id
+        INNER JOIN tab_app a ON a.id = mo.app_id
+        WHERE mo.id = #{id}
+    </select>
+
+</mapper>

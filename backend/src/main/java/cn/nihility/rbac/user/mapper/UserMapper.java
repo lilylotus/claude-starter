@@ -13,8 +13,8 @@ import org.apache.ibatis.annotations.Param;
 /**
  * 用户 MyBatis-Plus 数据访问接口，单表 CRUD 直接复用 {@link BaseMapper}，不在此处
  * 编写 SQL；{@link #countByColumnValue}、{@link #selectUserPage}、
- * {@link #selectSyncPullPage} 是例外，SQL 写在 {@code resources/mybatis/mapper/UserMapper.xml}
- * 里。
+ * {@link #selectSyncPullPage}、{@link #selectIdsByAttrCondition} 是例外，SQL 写在
+ * {@code resources/mybatis/mapper/UserMapper.xml} 里。
  */
 @Mapper
 public interface UserMapper extends BaseMapper<UserEntity> {
@@ -88,4 +88,20 @@ public interface UserMapper extends BaseMapper<UserEntity> {
             @Param("updateTimeFrom") LocalDateTime updateTimeFrom, @Param("updateTimeTo") LocalDateTime updateTimeTo,
             @Param("ids") List<Long> ids, @Param("codes") List<String> codes, @Param("mobile") String mobile,
             @Param("allowedOrgIds") Set<Long> allowedOrgIds);
+
+    /**
+     * 按动态列名与运算符匹配未被逻辑删除的用户 id，供"应用访问授权"策略的用户属性条件
+     * 执行匹配使用（app-access-authorization change design.md Decision 1/Risks）。
+     * {@code column} 只接受调用方从 {@code tab_metadata_field} 目录解析得到、并经白名单
+     * 校验（{@code table_name='tab_user'} 且列名仅含字母数字下划线）的合法列名，不接受
+     * 任意字符串拼接，避免 SQL 注入。
+     *
+     * @param column       目标列名，仅接受白名单内的合法列名
+     * @param operator     运算符：{@code EQ}/{@code NE}/{@code IN}
+     * @param singleValue  {@code EQ}/{@code NE} 时的比较值，{@code IN} 时忽略
+     * @param values       {@code IN} 时的一组比较值，{@code EQ}/{@code NE} 时忽略
+     * @return 命中的用户 id 列表
+     */
+    List<Long> selectIdsByAttrCondition(@Param("column") String column, @Param("operator") String operator,
+            @Param("singleValue") String singleValue, @Param("values") List<String> values);
 }

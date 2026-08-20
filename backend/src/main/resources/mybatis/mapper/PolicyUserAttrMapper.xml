@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 策略用户属性条件查询：tab_app_access_policy_user_attr 关联 tab_metadata_field 回填
+     字段名称、字段编码（design.md Decision 1：只存 metadata_field_id 外键，不落快照，
+     查询时实时 JOIN 读取）。用 INNER JOIN 是有意为之：关联的元数据字段若已被删除，
+     该条属性条件失去展示与执行意义，不返回。 -->
+<mapper namespace="cn.nihility.rbac.appaccess.policy.mapper.PolicyUserAttrMapper">
+
+    <select id="selectByPolicyId" resultType="cn.nihility.rbac.appaccess.policy.dto.PolicyUserAttrRow">
+        SELECT
+        a.metadata_field_id AS metadataFieldId,
+        mf.field_name AS fieldName,
+        mf.field_code AS fieldCode,
+        a.operator AS operator,
+        a.attr_value AS attrValue,
+        a.update_time AS updateTime
+        FROM tab_app_access_policy_user_attr a
+        INNER JOIN tab_metadata_field mf ON mf.id = a.metadata_field_id
+        WHERE a.policy_id = #{policyId}
+        ORDER BY a.id ASC
+    </select>
+
+</mapper>

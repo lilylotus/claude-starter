@@ -61,6 +61,7 @@ export const PERMISSION_MODULE_LABELS: Record<string, string> = {
   RoleManagement: '角色管理',
   PermissionManagement: '权限点管理',
   AdminManagement: '管理员管理',
+  AppAccessManagement: '应用访问授权',
   MenuManagement: '菜单管理',
   DictManagement: '字典管理',
   MetadataFieldManagement: '元数据配置',

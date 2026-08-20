@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 策略组织范围条件查询：tab_app_access_policy_org_scope 关联 tab_org 回填组织名称。
+     用 INNER JOIN（而非 LEFT JOIN）是有意为之：组织若已被删除，对应的组织范围条件没有
+     展示价值，直接不返回。 -->
+<mapper namespace="cn.nihility.rbac.appaccess.policy.mapper.PolicyOrgScopeMapper">
+
+    <select id="selectByPolicyId" resultType="cn.nihility.rbac.appaccess.policy.dto.PolicyOrgScopeVO">
+        SELECT
+        s.org_id AS org_id,
+        o.name AS org_name,
+        s.include_children AS include_children,
+        s.update_time AS update_time
+        FROM tab_app_access_policy_org_scope s
+        INNER JOIN tab_org o ON o.id = s.org_id
+        WHERE s.policy_id = #{policyId}
+        ORDER BY o.show_order DESC, o.id ASC
+    </select>
+
+</mapper>

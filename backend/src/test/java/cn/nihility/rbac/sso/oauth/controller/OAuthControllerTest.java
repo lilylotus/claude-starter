@@ -20,6 +20,16 @@ import cn.nihility.rbac.app.entity.AppEntity;
 import cn.nihility.rbac.app.mapper.AppConfigMapper;
 import cn.nihility.rbac.app.mapper.AppMapper;
 import cn.nihility.rbac.app.sync.constant.TransformType;
+import cn.nihility.rbac.appaccess.override.constant.OverrideType;
+import cn.nihility.rbac.appaccess.override.entity.ManualOverrideEntity;
+import cn.nihility.rbac.appaccess.override.mapper.ManualOverrideMapper;
+import cn.nihility.rbac.appaccess.policy.constant.PolicyStatus;
+import cn.nihility.rbac.appaccess.policy.entity.PolicyEntity;
+import cn.nihility.rbac.appaccess.policy.entity.PolicyGrantEntity;
+import cn.nihility.rbac.appaccess.policy.entity.PolicyIpRuleEntity;
+import cn.nihility.rbac.appaccess.policy.mapper.PolicyGrantMapper;
+import cn.nihility.rbac.appaccess.policy.mapper.PolicyIpRuleMapper;
+import cn.nihility.rbac.appaccess.policy.mapper.PolicyMapper;
 import cn.nihility.rbac.auth.entity.UserPasswordEntity;
 import cn.nihility.rbac.auth.mapper.UserPasswordMapper;
 import cn.nihility.rbac.auth.util.PasswordDigestUtils;
@@ -51,7 +61,14 @@ import org.springframework.test.web.servlet.MockMvc;
  * 全部 OAuth2 场景：redirect_uri 白名单匹配/不匹配、未登录跳转 SSO 登录页、state 原样返回、
  * 授权码一次性消费、client_secret 校验、redirect_uri 一致性校验、
  * {@code grant_type=refresh_token} 刷新成功与 refresh_token 不存在/过期时拒绝、userinfo
- * 校验成功/401。断言 {@code Location} 响应头、JSON 响应体、错误状态码。
+ * 校验成功/401。断言 {@code Location} 响应头、JSON 响应体、错误状态码。{@code setUp} 默认
+ * 为测试用户+应用插入一条 GRANT 人工例外，模拟具备最终生效授权，让原有覆盖授权码/令牌签发
+ * 成功场景的用例继续反映其本身要覆盖的分支；未授权场景由
+ * {@link #authorize_shouldReject_andNotIssueCode_whenUserNotAuthorizedForApp} 单独覆盖
+ * （app-access-authorization change tasks.md 8.5）；身份命中但请求控制不满足/满足两种
+ * 场景由 {@link #authorize_shouldReject_whenPolicyRequestControlNotSatisfied}/
+ * {@link #authorize_shouldIssueCode_whenPolicyRequestControlSatisfied} 覆盖
+ * （app-access-request-control change tasks.md 8.5）。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -100,6 +117,24 @@ class OAuthControllerTest {
     @Autowired
     private MetadataFieldMapper metadataFieldMapper;
 
+    /** 人工例外数据访问接口（app-access-authorization change），测试内直接插入 GRANT
+     *  例外模拟测试用户对测试应用具备最终生效授权，覆盖"应用访问授权"接入后的默认拒绝。 */
+    @Autowired
+    private ManualOverrideMapper manualOverrideMapper;
+
+    /** 策略规则数据访问接口（app-access-request-control change），请求控制场景用例内
+     *  直接插入策略与 IP 白名单条件。 */
+    @Autowired
+    private PolicyMapper policyMapper;
+
+    /** 策略计算结果数据访问接口，请求控制场景用例内直接插入身份命中记录。 */
+    @Autowired
+    private PolicyGrantMapper policyGrantMapper;
+
+    /** 策略请求控制条件-IP/网段白名单数据访问接口。 */
+    @Autowired
+    private PolicyIpRuleMapper policyIpRuleMapper;
+
     /** 测试用 client_secret 明文。 */
     private static final String CLIENT_SECRET_PLAIN = "test-client-secret";
 
@@ -111,6 +146,9 @@ class OAuthControllerTest {
 
     /** 本用例插入的测试用户 id。 */
     private Long userId;
+
+    /** 请求控制场景用例内插入的测试策略 id，未使用该场景时为 {@code null}。 */
+    private Long policyId;
 
     /**
      * 每个用例前插入一份独立的测试应用（OAuth2 协议，redirect_uri 白名单为
@@ -187,6 +225,19 @@ class OAuthControllerTest {
                 .updateTime(now)
                 .build();
         userPasswordMapper.insert(password);
+
+        // app-access-authorization change 接入后，OAuth2 授权码签发前新增最终生效权限
+        // 校验：默认插入一条 GRANT 人工例外，让本测试类原有覆盖"授权码/令牌签发成功"场景的
+        // 用例继续反映其本身要覆盖的分支；未授权场景由下方专门的用例单独覆盖（不预置该例外）。
+        manualOverrideMapper.insert(ManualOverrideEntity.builder()
+                .userId(userId)
+                .appId(appRefId)
+                .overrideType(OverrideType.GRANT)
+                .createBy("test")
+                .createTime(now)
+                .updateBy("test")
+                .updateTime(now)
+                .build());
     }
 
     /**
@@ -194,6 +245,10 @@ class OAuthControllerTest {
      */
     @AfterEach
     void tearDown() {
+        if (userId != null && appRefId != null) {
+            manualOverrideMapper.delete(new LambdaQueryWrapper<ManualOverrideEntity>()
+                    .eq(ManualOverrideEntity::getUserId, userId).eq(ManualOverrideEntity::getAppId, appRefId));
+        }
         if (appRefId != null) {
             appUserinfoFieldMappingMapper.delete(new LambdaQueryWrapper<AppUserinfoFieldMappingEntity>()
                     .eq(AppUserinfoFieldMappingEntity::getAppRefId, appRefId));
@@ -204,6 +259,13 @@ class OAuthControllerTest {
         if (userId != null) {
             userPasswordMapper.delete(new LambdaQueryWrapper<UserPasswordEntity>().eq(UserPasswordEntity::getUserId, userId));
             userMapper.deleteById(userId);
+        }
+        if (policyId != null) {
+            policyIpRuleMapper.delete(new LambdaQueryWrapper<PolicyIpRuleEntity>()
+                    .eq(PolicyIpRuleEntity::getPolicyId, policyId));
+            policyGrantMapper.delete(new LambdaQueryWrapper<PolicyGrantEntity>()
+                    .eq(PolicyGrantEntity::getPolicyId, policyId));
+            policyMapper.deleteById(policyId);
         }
     }
 
@@ -254,6 +316,122 @@ class OAuthControllerTest {
 
         assertThat(location).startsWith(ALLOWED_REDIRECT_URI + "?code=");
         assertThat(location).endsWith("&state=xyz-state");
+    }
+
+    /**
+     * redirect_uri 校验通过且已登录，但当前用户不具备访问该应用的最终生效授权（没有任何
+     * 人工例外/策略授权）时，应拒绝且不签发授权码、不发生重定向
+     * （app-access-authorization change spec.md "用户无最终生效授权时拒绝签发授权码"
+     * Scenario）。
+     */
+    @Test
+    void authorize_shouldReject_andNotIssueCode_whenUserNotAuthorizedForApp() throws Exception {
+        manualOverrideMapper.delete(new LambdaQueryWrapper<ManualOverrideEntity>()
+                .eq(ManualOverrideEntity::getUserId, userId).eq(ManualOverrideEntity::getAppId, appRefId));
+        String sessionToken = ssoSessionService.issue(userId);
+        Cookie cookie = new Cookie("sso_session", sessionToken);
+
+        String body = mockMvc.perform(get("/api/authn/oauth/authorize")
+                        .param("response_type", "code")
+                        .param("client_id", clientId)
+                        .param("redirect_uri", ALLOWED_REDIRECT_URI)
+                        .cookie(cookie))
+                .andExpect(status().isForbidden())
+                .andExpect(header().doesNotExist("Location"))
+                .andReturn().getResponse().getContentAsString();
+        Map<String, Object> json = JacksonUtils.toObj(body, JacksonUtils.MAP_OBJECT_TYPE_REFERENCE);
+        assertThat(json.get("code")).isEqualTo(403);
+        assertThat(json.get("message")).isEqualTo("当前用户无权访问该应用");
+    }
+
+    /**
+     * 身份命中某启用中策略（配置了 IP 白名单，仅允许 {@code 10.0.0.0/8} 网段访问），但当前
+     * 请求的客户端 IP（MockMvc 默认 {@code 127.0.0.1}）不在该白名单内，且不存在能覆盖此次
+     * 访问的 GRANT 人工例外时，应拒绝且不签发授权码（app-access-request-control change
+     * spec.md "身份命中但当前请求不满足命中策略的请求控制时拒绝签发授权码" Scenario）。
+     */
+    @Test
+    void authorize_shouldReject_whenPolicyRequestControlNotSatisfied() throws Exception {
+        manualOverrideMapper.delete(new LambdaQueryWrapper<ManualOverrideEntity>()
+                .eq(ManualOverrideEntity::getUserId, userId).eq(ManualOverrideEntity::getAppId, appRefId));
+        insertIpRestrictedPolicyGrant("10.0.0.0/8");
+        String sessionToken = ssoSessionService.issue(userId);
+        Cookie cookie = new Cookie("sso_session", sessionToken);
+
+        String body = mockMvc.perform(get("/api/authn/oauth/authorize")
+                        .param("response_type", "code")
+                        .param("client_id", clientId)
+                        .param("redirect_uri", ALLOWED_REDIRECT_URI)
+                        .cookie(cookie))
+                .andExpect(status().isForbidden())
+                .andExpect(header().doesNotExist("Location"))
+                .andReturn().getResponse().getContentAsString();
+        Map<String, Object> json = JacksonUtils.toObj(body, JacksonUtils.MAP_OBJECT_TYPE_REFERENCE);
+        assertThat(json.get("code")).isEqualTo(403);
+    }
+
+    /**
+     * 身份命中某启用中策略（配置了 IP 白名单，允许 {@code 127.0.0.0/8} 网段访问，覆盖
+     * MockMvc 默认的客户端 IP {@code 127.0.0.1}）时，应正常签发授权码
+     * （app-access-request-control change spec.md 判定规则 Scenario）。
+     */
+    @Test
+    void authorize_shouldIssueCode_whenPolicyRequestControlSatisfied() throws Exception {
+        manualOverrideMapper.delete(new LambdaQueryWrapper<ManualOverrideEntity>()
+                .eq(ManualOverrideEntity::getUserId, userId).eq(ManualOverrideEntity::getAppId, appRefId));
+        insertIpRestrictedPolicyGrant("127.0.0.0/8");
+        String sessionToken = ssoSessionService.issue(userId);
+        Cookie cookie = new Cookie("sso_session", sessionToken);
+
+        String location = mockMvc.perform(get("/api/authn/oauth/authorize")
+                        .param("response_type", "code")
+                        .param("client_id", clientId)
+                        .param("redirect_uri", ALLOWED_REDIRECT_URI)
+                        .cookie(cookie))
+                .andExpect(status().isFound())
+                .andReturn().getResponse().getHeader("Location");
+
+        assertThat(location).startsWith(ALLOWED_REDIRECT_URI + "?code=");
+    }
+
+    /**
+     * 插入一条启用中的策略，配置给定 IP 白名单，并为测试用户+应用产生一条身份命中的策略
+     * 授权记录，供请求控制场景用例复用；插入的策略 id 记录到 {@link #policyId} 供
+     * {@link #tearDown} 清理。
+     *
+     * @param ipCidr IP 白名单条目
+     */
+    private void insertIpRestrictedPolicyGrant(String ipCidr) {
+        LocalDateTime now = LocalDateTime.now();
+        PolicyEntity policy = PolicyEntity.builder()
+                .name("OAuth2 请求控制测试策略")
+                .status(PolicyStatus.ENABLED)
+                .createBy("test")
+                .createTime(now)
+                .updateBy("test")
+                .updateTime(now)
+                .build();
+        policyMapper.insert(policy);
+        policyId = policy.getId();
+
+        policyIpRuleMapper.insert(PolicyIpRuleEntity.builder()
+                .policyId(policyId)
+                .ipCidr(ipCidr)
+                .createBy("test")
+                .createTime(now)
+                .updateBy("test")
+                .updateTime(now)
+                .build());
+
+        policyGrantMapper.insert(PolicyGrantEntity.builder()
+                .policyId(policyId)
+                .userId(userId)
+                .appId(appRefId)
+                .createBy("test")
+                .createTime(now)
+                .updateBy("test")
+                .updateTime(now)
+                .build());
     }
 
     /**

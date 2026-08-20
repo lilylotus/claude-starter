@@ -1,11 +1,14 @@
 package cn.nihility.rbac.sso.cas.controller;
 
+import cn.nihility.rbac.common.result.Result;
+import cn.nihility.rbac.common.util.ClientRequestUtils;
 import cn.nihility.rbac.sso.cas.dto.CasTicketPayload;
 import cn.nihility.rbac.sso.cas.service.CasTicketService;
 import cn.nihility.rbac.sso.cas.support.CasJsonResponses;
 import cn.nihility.rbac.sso.cas.support.CasXmlResponses;
 import cn.nihility.rbac.sso.session.SsoSessionCookieUtils;
 import cn.nihility.rbac.sso.session.SsoSessionService;
+import cn.nihility.rbac.sso.support.AppAccessAuthorizationChecker;
 import cn.nihility.rbac.sso.support.AppProtocolGuard;
 import cn.nihility.rbac.sso.support.ProtocolResponseWriter;
 import cn.nihility.rbac.sso.support.SsoLogoutExecutor;
@@ -46,6 +49,9 @@ public class CasController {
     /** 应用协议校验入口。 */
     private final AppProtocolGuard appProtocolGuard;
 
+    /** 应用访问授权校验入口（app-access-authorization change）。 */
+    private final AppAccessAuthorizationChecker appAccessAuthorizationChecker;
+
     /** CAS 服务票据业务逻辑接口。 */
     private final CasTicketService casTicketService;
 
@@ -63,7 +69,10 @@ public class CasController {
 
     /**
      * CAS 单点登录：{@code service} 校验通过后，若当前浏览器持有有效 SSO 会话则签发服务
-     * 票据并重定向回 {@code service}；否则重定向到 SSO 登录页。
+     * 票据并重定向回 {@code service}；否则重定向到 SSO 登录页。授权校验读取当前请求的
+     * 客户端 IP（{@link ClientRequestUtils#resolveClientIp}）与 {@code User-Agent}，
+     * 纳入"考虑请求上下文"的最终生效权限判定（app-access-request-control change
+     * design.md Decision 6）。
      *
      * @param appId    应用对外标识（路径变量）
      * @param service  CAS {@code service} 参数
@@ -86,6 +95,17 @@ public class CasController {
         Optional<Long> userIdOpt = ssoSessionService.verify(sessionToken);
         if (userIdOpt.isEmpty()) {
             ProtocolResponseWriter.redirect(response, ProtocolResponseWriter.ssoLoginRedirectLocation(request));
+            return;
+        }
+
+        try {
+            String clientIp = ClientRequestUtils.resolveClientIp(request);
+            String userAgent = request.getHeader("User-Agent");
+            appAccessAuthorizationChecker.assertAuthorized(userIdOpt.get(), appProtocolGuard.resolveAppRefId(appId),
+                    clientIp, userAgent);
+        } catch (SsoProtocolException e) {
+            ProtocolResponseWriter.json(response, HttpServletResponse.SC_FORBIDDEN,
+                    Result.error(HttpServletResponse.SC_FORBIDDEN, e.getMessage()));
             return;
         }
 

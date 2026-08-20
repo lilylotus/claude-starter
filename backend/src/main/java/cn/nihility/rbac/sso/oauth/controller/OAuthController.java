@@ -2,6 +2,8 @@ package cn.nihility.rbac.sso.oauth.controller;
 
 import cn.nihility.rbac.app.config.AppSecretProperties;
 import cn.nihility.rbac.app.entity.AppConfigEntity;
+import cn.nihility.rbac.common.result.Result;
+import cn.nihility.rbac.common.util.ClientRequestUtils;
 import cn.nihility.rbac.common.util.Sm4JdkUtils;
 import cn.nihility.rbac.sso.oauth.dto.IssuedToken;
 import cn.nihility.rbac.sso.oauth.dto.OAuthCodePayload;
@@ -11,6 +13,7 @@ import cn.nihility.rbac.sso.oauth.dto.OAuthTokenRequest;
 import cn.nihility.rbac.sso.oauth.service.OAuthTokenService;
 import cn.nihility.rbac.sso.session.SsoSessionCookieUtils;
 import cn.nihility.rbac.sso.session.SsoSessionService;
+import cn.nihility.rbac.sso.support.AppAccessAuthorizationChecker;
 import cn.nihility.rbac.sso.support.AppProtocolGuard;
 import cn.nihility.rbac.sso.support.ProtocolResponseWriter;
 import cn.nihility.rbac.sso.support.SsoProtocolException;
@@ -53,6 +56,9 @@ public class OAuthController {
     /** 应用协议校验入口。 */
     private final AppProtocolGuard appProtocolGuard;
 
+    /** 应用访问授权校验入口（app-access-authorization change）。 */
+    private final AppAccessAuthorizationChecker appAccessAuthorizationChecker;
+
     /** OAuth2 令牌业务逻辑接口。 */
     private final OAuthTokenService oAuthTokenService;
 
@@ -71,7 +77,10 @@ public class OAuthController {
     /**
      * OAuth2 授权：{@code redirect_uri} 校验通过后，若 {@code response_type} 非
      * {@code code} 则把错误原样重定向回 {@code redirect_uri}；若当前浏览器持有有效 SSO
-     * 会话则签发授权码并重定向回 {@code redirect_uri}，否则重定向到 SSO 登录页。
+     * 会话则签发授权码并重定向回 {@code redirect_uri}，否则重定向到 SSO 登录页。授权校验
+     * 读取当前请求的客户端 IP（{@link ClientRequestUtils#resolveClientIp}）与
+     * {@code User-Agent}，纳入"考虑请求上下文"的最终生效权限判定
+     * （app-access-request-control change design.md Decision 6）。
      *
      * @param responseType 期望固定为 {@code code}
      * @param clientId     OAuth2 client_id（即应用对外标识）
@@ -106,6 +115,17 @@ public class OAuthController {
         Optional<Long> userIdOpt = ssoSessionService.verify(sessionToken);
         if (userIdOpt.isEmpty()) {
             ProtocolResponseWriter.redirect(response, ProtocolResponseWriter.ssoLoginRedirectLocation(request));
+            return;
+        }
+
+        try {
+            String clientIp = ClientRequestUtils.resolveClientIp(request);
+            String userAgent = request.getHeader("User-Agent");
+            appAccessAuthorizationChecker.assertAuthorized(userIdOpt.get(), appProtocolGuard.resolveAppRefId(clientId),
+                    clientIp, userAgent);
+        } catch (SsoProtocolException e) {
+            ProtocolResponseWriter.json(response, HttpServletResponse.SC_FORBIDDEN,
+                    Result.error(HttpServletResponse.SC_FORBIDDEN, e.getMessage()));
             return;
         }
 

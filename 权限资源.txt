@@ -133,6 +133,17 @@ AdminManagement（管理员管理，/permission/admins）
 - AdminManagement:admin:disable  停用管理员
 - AdminManagement:admin:delete   删除管理员
 
+AppAccessManagement（应用访问授权，/permission/app-access，见 openspec/changes/app-access-authorization）
+- AppAccessManagement:appAccess:view     应用访问授权页面访问（含"最终生效权限查询"板块的只读查询，不单独设按钮权限点）
+- AppAccessManagement:policy:add         新增策略规则
+- AppAccessManagement:policy:edit        编辑策略规则
+- AppAccessManagement:policy:enable      启用策略规则
+- AppAccessManagement:policy:disable     停用策略规则
+- AppAccessManagement:policy:execute     执行策略规则（重新计算策略授权）
+- AppAccessManagement:policy:delete      删除策略规则
+- AppAccessManagement:override:add       新增/编辑人工例外（手动授权或手动收回）
+- AppAccessManagement:override:delete    删除人工例外
+
 
 系统管理
 --------
