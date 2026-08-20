@@ -107,5 +107,5 @@
 
 ## 13. OpenSpec 收尾
 
-- [ ] 13.1 实现完成后运行 `openspec-doc-sync` 对齐 `proposal.md`/`design.md`/`tasks.md` 与实际改动
+- [x] 13.1 实现完成后运行 `openspec-doc-sync` 对齐 `proposal.md`/`design.md`/`tasks.md` 与实际改动
 - [ ] 13.2 视用户指示决定是否执行 `openspec-sync-specs` 把本变更的 delta spec 应用到 `openspec/specs/app-sync-notify-pull/spec.md`、`openspec/specs/app-api-credentials/spec.md`（归档仍为用户手动触发，不自动执行）

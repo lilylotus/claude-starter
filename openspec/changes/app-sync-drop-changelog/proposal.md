@@ -15,7 +15,12 @@
 - **通知触发方式从"消费已落库的变更记录"改为"数据变更时直接判定候选应用并发起通知"**：候选应用判定逻辑本身不变（数据域允许同步 + 应用同步总开关开启 + 同步方式为通知 + 组织范围匹配），只是不再有中间的持久化步骤；通知请求体新增被变更对象的业务编码字段（`bizCode`，任职数据类型无业务编码字段时为空），新增/编辑/启用/停用/删除五种操作类型的区分保留不变。
 - **拉取日志（`tab_app_pull_record`）去掉"拉取方式"字段**：原来区分"按 id / 按序列号"两种拉取方式，现在只有一种统一的分页拉取，该字段失去意义，一并从表结构、后端 `PullMode` 常量、管理端"拉取日志"表格列中移除。
 - 应用配置页面"拉取日志"子 tab 的表格去掉"拉取方式"列，其余列（数据类型、请求摘要、返回条数、时间）不变；请求摘要文案改为反映新的分页/过滤参数。
-- **实现完成后基于反馈的两轮修正**：① 拉取响应从裸记录数组改为带分页信息的整页对象（顶层 `dataType`/`page`/`pageSize` + `records`），每条记录直接是合并了 `bizId`/`bizCode`/`bizStatus`/`updateTime` 四个固定键的业务字段 Map，不再是"元信息+data"的嵌套结构；② 新增字典（DICT）作为第六个可拉取数据域（拉取字典项，合并 `dictTypeCode` 固定键），任职（POSITION）记录额外合并关联用户编码 `userCode` 固定键（详见 design.md Decision 2/7/8）。
+- **实现完成后基于反馈的五轮修正**（详见 design.md Decision 1/2/7/8/9）：
+  1. 拉取响应从裸记录数组改为带分页信息的整页对象（顶层 `dataType`/`page`/`pageSize` + `records`），每条记录直接是合并了 `bizId`/`bizCode`/`updateTime` 三个固定键的业务字段 Map，不再是"元信息+data"的嵌套结构（Decision 2）。
+  2. 新增 `bizStatus` 固定键：配置了字段映射后转换结果可能不含原始 `status` 字段，`bizStatus` 直接取自业务表原始状态字段、不受字段映射配置影响，保证"不过滤 status、靠状态字段判断停用/删除"这个设计前提始终成立（Decision 1）。
+  3. 新增字典（DICT）作为第六个可拉取数据域（拉取的是字典项 `tab_dict_item` 而非字典类型本身，合并 `dictTypeCode` 固定键），任职（POSITION）记录额外合并关联用户编码 `userCode` 固定键（Decision 7/8）。
+  4. 响应顶层新增 `dataSize`（本页 `records` 实际条数）与 `latestUpdateTime`（本页最大更新时间，可原样作为下一次增量拉取的 `updateTimeFrom`），避免调用方自己遍历 `records` 求值（Decision 9）。
+  5. 任职（POSITION）记录再额外合并关联组织编码 `orgCode` 固定键，与 `userCode` 同等对待、同一套批量回填模式（Decision 8）。
 
 ## Capabilities
 
@@ -38,7 +43,7 @@
   - `AppNotifyServiceImpl`/`NotifyPayload`：payload 去掉 `sequence`，新增 `bizCode`；触发入口从"传入一条已落库的变更记录"改为"传入 `DomainChangeEvent` + 目标应用"。
   - `AppNotifyRecordEntity`：去掉 `changeLogId` 字段。
   - 新增分页拉取服务/查询组件：为组织/用户/任职/应用/角色五个业务表分别提供"按数据域启用+组织范围+可选过滤条件+分页"的查询（新的 MyBatis Mapper XML，标准可移植 SQL，不使用 MySQL 8.0+ 专属语法）。
-  - `SyncPullService`/`SyncPullServiceImpl`/`SyncPullController`：合并为一个分页拉取方法/接口；`SyncPullRecordVO` 字段调整为 `dataType`/`bizId`/`bizCode`/`updateTime`/`data`。
+  - `SyncPullService`/`SyncPullServiceImpl`/`SyncPullController`：合并为一个分页拉取方法/接口；原计划的 `SyncPullRecordVO`（按记录展开）被实现后修正废弃，改为整页视图对象 `SyncPullPageVO`（顶层 `dataType`/`page`/`pageSize`/`dataSize`/`latestUpdateTime`/`records`，`records` 元素为 `Map<String, Object>`，每条合并 `bizId`/`bizCode`/`bizStatus`/`updateTime` 四个通用固定键，POSITION 记录另合并 `userCode`/`orgCode`，DICT 记录另合并 `dictTypeCode`，详见 design.md Decision 1/2/7/8/9）。
   - `AppPullRecordEntity`/`AppPullRecordService`：去掉 `pullMode` 字段，`requestSummary` 内容改为反映新参数。
   - `SyncDomain.CHANGE_LOG_DOMAINS` 常量重命名（不再与"变更记录"绑定，如改名 `SYNC_PULL_DOMAINS`）。
 - **前端**：`frontend/src/types/app.ts`（`AppPullRecordRow` 去掉 `pullMode`，去掉 `PULL_MODE_LABELS`）、`frontend/src/views/application/app/AppConfigView.vue`（"拉取日志"表格去掉"拉取方式"列）、`frontend/src/api/app.ts`（如有 `getAppPullRecordPage` 请求参数变化需同步，预期不需要——该接口是管理端查日志，不是对外拉取接口本身）。

@@ -8,12 +8,12 @@
 
 **Goals:**
 - 删除 `tab_app_data_change_log` 表与相关全部代码，拉取/通知都不再依赖它。
-- 拉取接口改为一个统一的分页查询接口：`page`/`pageSize`（默认 1/该应用该数据域配置的 `pageSize`）、按 `update_time ASC, id ASC` 排序、最后一页 `records` 返回空数组标识拉取完毕；响应是一个整页对象，顶层回显 `dataType`/`page`/`pageSize`，`records` 里每条记录就是合并了 `bizId`/`bizCode`/`updateTime` 的字段 Map 本身，不再是"元信息+data"的嵌套结构（见 Decision 2）。
+- 拉取接口改为一个统一的分页查询接口：`page`/`pageSize`（默认 1/该应用该数据域配置的 `pageSize`）、按 `update_time ASC, id ASC` 排序、最后一页 `records` 返回空数组标识拉取完毕；响应是一个整页对象，顶层回显 `dataType`/`page`/`pageSize`/`dataSize`（本页实际条数）/`latestUpdateTime`（本页最大更新时间，供下一次增量拉取直接使用，见 Decision 9），`records` 里每条记录就是合并了 `bizId`/`bizCode`/`bizStatus`/`updateTime` 四个通用固定键的字段 Map 本身，不再是"元信息+data"的嵌套结构（见 Decision 1/2）。
 - 支持增量拉取（`updateTimeFrom`/`updateTimeTo` 替代原序列号游标）与关键字段精确查询（`ids`/`codes`/`mobile`）。
 - 拉取结果不过滤 `status`，停用/已删除记录原样返回，由调用方基于 `data.status` 自行判断。
 - 通知触发逻辑改为数据变更时直接判定候选应用（复用现有"数据域启用+总开关+组织范围+`syncMode=NOTIFY`"判定规则）并直接发起，不经过任何持久化中转；通知请求体新增业务编码字段 `bizCode`，五种操作类型区分保留不变。
 - 拉取日志（`tab_app_pull_record`）去掉"拉取方式"维度（只剩一种拉取方式，字段失去意义）。
-- 新增字典（DICT）作为第六个可拉取数据域（拉取字典项，合并所属字典类型编码 `dictTypeCode`），任职（POSITION）数据额外合并关联用户编码 `userCode`（见 Decision 7/8）。
+- 新增字典（DICT）作为第六个可拉取数据域（拉取字典项，合并所属字典类型编码 `dictTypeCode`），任职（POSITION）数据额外合并关联用户编码 `userCode` 与关联组织编码 `orgCode`（见 Decision 7/8）。
 
 **Non-Goals:**
 - 不改变 `app-sync-master-switch`（同步总开关）、`app-sync-field-mapping`（字段映射）、`app-sync-org-scope`（组织范围配置）这几个已有能力的配置存储与语义，只是把它们的"生效时机"从写时判定改为读时判定（组织范围/字段映射本来就是读时判定，无需改动；总开关/数据域启用原来是写时判定的一部分，现在挪到拉取查询与通知候选判定各自的读时判定里）。
