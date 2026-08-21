@@ -40,6 +40,14 @@ public class PolicyVO {
     @Schema(description = "状态：2000=启用，3000=停用")
     private Integer status;
 
+    /**
+     * 显示序号，数值越小优先级越高：最终生效权限判定（考虑请求上下文）按该字段升序排列
+     * 候选策略并取排在最前的一条计算结果，与 {@code tab_role.show_order}"数值越大越靠前"的
+     * 展示排序语义方向相反（policy-condition-exclusive-priority change design.md Decision）。
+     */
+    @Schema(description = "显示序号，数值越小优先级越高，运行时按升序取第一条候选策略计算结果")
+    private Integer showOrder;
+
     /** 最近一次执行时间，从未执行过为空。 */
     @Schema(description = "最近一次执行时间，从未执行过为空")
     private LocalDateTime lastExecTime;

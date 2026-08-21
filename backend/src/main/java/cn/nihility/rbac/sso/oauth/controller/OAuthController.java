@@ -108,14 +108,14 @@ public class OAuthController {
             appProtocolGuard.assertOAuthRedirectUriAllowed(clientId, redirectUri);
         } catch (SsoProtocolException e) {
             ssoProtocolLogRecorder.recordFailure(AuthProtocol.OAUTH2, SsoProtocolLogEventType.AUTHORIZE, clientId,
-                    appProtocolGuard.resolveAppRefIdOrNull(clientId), null, null, e.getMessage());
+                    appProtocolGuard.resolveAppRefIdOrNull(clientId), null, null, e.getMessage(), null);
             ProtocolResponseWriter.text(response, HttpServletResponse.SC_BAD_REQUEST, e.getMessage());
             return;
         }
 
         if (!"code".equals(responseType)) {
             ssoProtocolLogRecorder.recordFailure(AuthProtocol.OAUTH2, SsoProtocolLogEventType.AUTHORIZE, clientId,
-                    appProtocolGuard.resolveAppRefIdOrNull(clientId), null, null, "response_type 不支持");
+                    appProtocolGuard.resolveAppRefIdOrNull(clientId), null, null, "response_type 不支持", null);
             String location = redirectUri + (redirectUri.contains("?") ? "&" : "?") + "error=unsupported_response_type"
                     + (StringUtils.hasText(state) ? "&state=" + state : "");
             ProtocolResponseWriter.redirect(response, location);
@@ -137,7 +137,7 @@ public class OAuthController {
             appAccessAuthorizationChecker.assertAuthorized(userIdOpt.get(), appRefId, clientIp, userAgent);
         } catch (SsoProtocolException e) {
             ssoProtocolLogRecorder.recordFailure(AuthProtocol.OAUTH2, SsoProtocolLogEventType.AUTHORIZE, clientId,
-                    appRefId, userIdOpt.get(), sessionId, e.getMessage());
+                    appRefId, userIdOpt.get(), sessionId, e.getMessage(), e.getDeniedByPolicyId());
             ProtocolResponseWriter.json(response, HttpServletResponse.SC_FORBIDDEN,
                     Result.error(HttpServletResponse.SC_FORBIDDEN, e.getMessage()));
             return;
@@ -192,7 +192,7 @@ public class OAuthController {
         } else {
             ssoProtocolLogRecorder.recordFailure(AuthProtocol.OAUTH2, SsoProtocolLogEventType.TOKEN,
                     tokenRequest.getClientId(), appProtocolGuard.resolveAppRefIdOrNull(tokenRequest.getClientId()),
-                    null, null, "grant_type 不支持");
+                    null, null, "grant_type 不支持", null);
             ProtocolResponseWriter.json(response, HttpServletResponse.SC_BAD_REQUEST, errorBody("unsupported_grant_type"));
         }
     }
@@ -218,7 +218,7 @@ public class OAuthController {
                 : null;
         if (!StringUtils.hasText(token)) {
             ssoProtocolLogRecorder.recordFailure(AuthProtocol.OAUTH2, SsoProtocolLogEventType.USERINFO, null, null,
-                    null, null, "access_token 无效或缺失");
+                    null, null, "access_token 无效或缺失", null);
             writeUnauthorized(response);
             return;
         }
@@ -226,7 +226,7 @@ public class OAuthController {
         Optional<OAuthTokenPayload> payloadOpt = oAuthTokenService.verifyAccessToken(token);
         if (payloadOpt.isEmpty()) {
             ssoProtocolLogRecorder.recordFailure(AuthProtocol.OAUTH2, SsoProtocolLogEventType.USERINFO, null, null,
-                    null, null, "access_token 无效或缺失");
+                    null, null, "access_token 无效或缺失", null);
             writeUnauthorized(response);
             return;
         }
@@ -259,7 +259,7 @@ public class OAuthController {
                 || !StringUtils.hasText(tokenRequest.getRedirectUri()) || !StringUtils.hasText(tokenRequest.getCode())) {
             ssoProtocolLogRecorder.recordFailure(AuthProtocol.OAUTH2, SsoProtocolLogEventType.TOKEN,
                     tokenRequest.getClientId(), appProtocolGuard.resolveAppRefIdOrNull(tokenRequest.getClientId()),
-                    null, null, "invalid_request：缺少必要参数");
+                    null, null, "invalid_request：缺少必要参数", null);
             ProtocolResponseWriter.json(response, HttpServletResponse.SC_BAD_REQUEST, errorBody("invalid_request"));
             return;
         }
@@ -270,7 +270,7 @@ public class OAuthController {
         } catch (SsoProtocolException e) {
             ssoProtocolLogRecorder.recordFailure(AuthProtocol.OAUTH2, SsoProtocolLogEventType.TOKEN,
                     tokenRequest.getClientId(), appProtocolGuard.resolveAppRefIdOrNull(tokenRequest.getClientId()),
-                    null, null, "invalid_client：client_id 不存在或未开启 OAuth2.0 单点登录协议");
+                    null, null, "invalid_client：client_id 不存在或未开启 OAuth2.0 单点登录协议", null);
             ProtocolResponseWriter.json(response, HttpServletResponse.SC_UNAUTHORIZED, errorBody("invalid_client"));
             return;
         }
@@ -281,7 +281,7 @@ public class OAuthController {
         if (!secretMatches) {
             ssoProtocolLogRecorder.recordFailure(AuthProtocol.OAUTH2, SsoProtocolLogEventType.TOKEN,
                     tokenRequest.getClientId(), appConfig.getAppRefId(), null, null,
-                    "invalid_client：client_secret 不匹配");
+                    "invalid_client：client_secret 不匹配", null);
             ProtocolResponseWriter.json(response, HttpServletResponse.SC_UNAUTHORIZED, errorBody("invalid_client"));
             return;
         }
@@ -294,7 +294,7 @@ public class OAuthController {
                     .orElse(null);
             ssoProtocolLogRecorder.recordFailure(AuthProtocol.OAUTH2, SsoProtocolLogEventType.TOKEN,
                     tokenRequest.getClientId(), appConfig.getAppRefId(), userId, sessionId,
-                    "invalid_grant：授权码不存在、已过期或与请求参数不一致");
+                    "invalid_grant：授权码不存在、已过期或与请求参数不一致", null);
             ProtocolResponseWriter.json(response, HttpServletResponse.SC_BAD_REQUEST, errorBody("invalid_grant"));
             return;
         }
@@ -331,7 +331,7 @@ public class OAuthController {
         if (!StringUtils.hasText(tokenRequest.getRefreshToken())) {
             ssoProtocolLogRecorder.recordFailure(AuthProtocol.OAUTH2, SsoProtocolLogEventType.TOKEN,
                     tokenRequest.getClientId(), appProtocolGuard.resolveAppRefIdOrNull(tokenRequest.getClientId()),
-                    null, null, "invalid_request：缺少必要参数");
+                    null, null, "invalid_request：缺少必要参数", null);
             ProtocolResponseWriter.json(response, HttpServletResponse.SC_BAD_REQUEST, errorBody("invalid_request"));
             return;
         }
@@ -340,7 +340,7 @@ public class OAuthController {
         if (payloadOpt.isEmpty()) {
             ssoProtocolLogRecorder.recordFailure(AuthProtocol.OAUTH2, SsoProtocolLogEventType.TOKEN,
                     tokenRequest.getClientId(), appProtocolGuard.resolveAppRefIdOrNull(tokenRequest.getClientId()),
-                    null, null, "invalid_grant：refresh_token 不存在或已过期");
+                    null, null, "invalid_grant：refresh_token 不存在或已过期", null);
             ProtocolResponseWriter.json(response, HttpServletResponse.SC_BAD_REQUEST, errorBody("invalid_grant"));
             return;
         }

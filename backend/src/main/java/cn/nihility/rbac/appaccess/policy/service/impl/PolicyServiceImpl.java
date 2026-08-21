@@ -60,6 +60,9 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class PolicyServiceImpl implements PolicyService {
 
+    /** 显示序号未提供时的默认值。 */
+    private static final int DEFAULT_SHOW_ORDER = 0;
+
     /** 策略规则数据访问接口。 */
     private final PolicyMapper policyMapper;
 
@@ -95,7 +98,8 @@ public class PolicyServiceImpl implements PolicyService {
         LambdaQueryWrapper<PolicyEntity> wrapper = new LambdaQueryWrapper<PolicyEntity>()
                 .like(StringUtils.hasText(request.getName()), PolicyEntity::getName, request.getName())
                 .eq(request.getStatus() != null, PolicyEntity::getStatus, request.getStatus())
-                .orderByDesc(PolicyEntity::getId);
+                .orderByAsc(PolicyEntity::getShowOrder)
+                .orderByAsc(PolicyEntity::getId);
 
         Page<PolicyEntity> queryPage = new Page<>(request.getPage(), request.getPageSize());
         Page<PolicyEntity> resultPage = policyMapper.selectPage(queryPage, wrapper);
@@ -118,7 +122,7 @@ public class PolicyServiceImpl implements PolicyService {
     @Override
     @Transactional
     public PolicyVO create(PolicyCreateRequest request) {
-        assertScopeAndAttrNotBothEmpty(request.getOrgScopes(), request.getUserAttrs(), request.getBrowserRules(),
+        assertConditionsNotAllEmpty(request.getOrgScopes(), request.getUserAttrs(), request.getBrowserRules(),
                 request.getIpRules());
         assertTargetAppsNotEmpty(request.getTargetAppIds());
         assertUserAttrsValid(request.getUserAttrs());
@@ -130,6 +134,7 @@ public class PolicyServiceImpl implements PolicyService {
                 .name(request.getName())
                 .remark(request.getRemark())
                 .status(PolicyStatus.ENABLED)
+                .showOrder(resolveShowOrder(request.getShowOrder()))
                 .createBy(operator)
                 .createTime(now)
                 .updateBy(operator)
@@ -152,7 +157,7 @@ public class PolicyServiceImpl implements PolicyService {
     @Transactional
     public PolicyVO update(Long id, PolicyUpdateRequest request) {
         PolicyEntity entity = getExisting(id);
-        assertScopeAndAttrNotBothEmpty(request.getOrgScopes(), request.getUserAttrs(), request.getBrowserRules(),
+        assertConditionsNotAllEmpty(request.getOrgScopes(), request.getUserAttrs(), request.getBrowserRules(),
                 request.getIpRules());
         assertTargetAppsNotEmpty(request.getTargetAppIds());
         assertUserAttrsValid(request.getUserAttrs());
@@ -162,6 +167,7 @@ public class PolicyServiceImpl implements PolicyService {
         LocalDateTime now = LocalDateTime.now();
         entity.setName(request.getName());
         entity.setRemark(request.getRemark());
+        entity.setShowOrder(resolveShowOrder(request.getShowOrder()));
         entity.setUpdateBy(operator);
         entity.setUpdateTime(now);
         policyMapper.updateById(entity);
@@ -258,24 +264,35 @@ public class PolicyServiceImpl implements PolicyService {
 
     /**
      * 校验组织范围、用户属性条件、请求控制条件（浏览器白名单或 IP 白名单任一非空）不能同时
-     * 为空，仅四者全部为空时才拒绝，允许"仅配置请求控制"的策略保存（close-sso-log-and-policy-gaps
-     * change design.md Decision 3，反转原 app-access-authorization change design.md
-     * Decision 1"两者不能同时为空"的校验）。
+     * 为空，三者中至少配置一类即可保存，允许同时配置多类（policy-condition-exclusive-priority
+     * change 用户反馈撤回，恢复为 close-sso-log-and-policy-gaps change design.md Decision 3
+     * "四者只需不全空"的校验语义，不再要求三选一互斥）。
      *
      * @param orgScopes    组织范围条件列表
      * @param userAttrs    用户属性条件列表
      * @param browserRules 浏览器白名单编码列表
      * @param ipRules      IP/网段白名单列表
      */
-    private void assertScopeAndAttrNotBothEmpty(List<PolicyOrgScopeRequestItem> orgScopes,
+    private void assertConditionsNotAllEmpty(List<PolicyOrgScopeRequestItem> orgScopes,
             List<PolicyUserAttrRequestItem> userAttrs, List<String> browserRules, List<String> ipRules) {
         boolean orgScopeEmpty = orgScopes == null || orgScopes.isEmpty();
         boolean userAttrEmpty = userAttrs == null || userAttrs.isEmpty();
-        boolean browserRulesEmpty = browserRules == null || browserRules.isEmpty();
-        boolean ipRulesEmpty = ipRules == null || ipRules.isEmpty();
-        if (orgScopeEmpty && userAttrEmpty && browserRulesEmpty && ipRulesEmpty) {
-            throw new BusinessException("组织范围、用户属性条件、请求控制条件不能同时为空，请至少配置一类");
+        boolean requestControlEmpty = (browserRules == null || browserRules.isEmpty())
+                && (ipRules == null || ipRules.isEmpty());
+        if (orgScopeEmpty && userAttrEmpty && requestControlEmpty) {
+            throw new BusinessException("组织范围、用户属性、请求控制条件不能同时为空，请至少配置一类");
         }
+    }
+
+    /**
+     * 解析显示序号：请求未提供时默认 {@code 0}（spec.md"策略规则的显示序号与生效优先级"
+     * 需求）。
+     *
+     * @param showOrder 请求携带的显示序号，可为空
+     * @return 解析后的显示序号
+     */
+    private Integer resolveShowOrder(Integer showOrder) {
+        return showOrder == null ? DEFAULT_SHOW_ORDER : showOrder;
     }
 
     /**

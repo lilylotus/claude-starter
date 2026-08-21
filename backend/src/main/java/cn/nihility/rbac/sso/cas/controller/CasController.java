@@ -95,7 +95,7 @@ public class CasController {
             appProtocolGuard.assertCasServiceAllowed(appId, service);
         } catch (SsoProtocolException e) {
             ssoProtocolLogRecorder.recordFailure(AuthProtocol.CAS, SsoProtocolLogEventType.LOGIN, appId,
-                    appProtocolGuard.resolveAppRefIdOrNull(appId), null, null, e.getMessage());
+                    appProtocolGuard.resolveAppRefIdOrNull(appId), null, null, e.getMessage(), null);
             ProtocolResponseWriter.text(response, HttpServletResponse.SC_BAD_REQUEST, e.getMessage());
             return;
         }
@@ -115,7 +115,7 @@ public class CasController {
             appAccessAuthorizationChecker.assertAuthorized(userIdOpt.get(), appRefId, clientIp, userAgent);
         } catch (SsoProtocolException e) {
             ssoProtocolLogRecorder.recordFailure(AuthProtocol.CAS, SsoProtocolLogEventType.LOGIN, appId, appRefId,
-                    userIdOpt.get(), sessionId, e.getMessage());
+                    userIdOpt.get(), sessionId, e.getMessage(), e.getDeniedByPolicyId());
             ProtocolResponseWriter.json(response, HttpServletResponse.SC_FORBIDDEN,
                     Result.error(HttpServletResponse.SC_FORBIDDEN, e.getMessage()));
             return;
@@ -153,7 +153,7 @@ public class CasController {
         Optional<CasTicketPayload> payloadOpt = casTicketService.consume(ticket);
         if (payloadOpt.isEmpty() || !Objects.equals(payloadOpt.get().service(), service)) {
             ssoProtocolLogRecorder.recordFailure(AuthProtocol.CAS, SsoProtocolLogEventType.SERVICE_VALIDATE, appId,
-                    appProtocolGuard.resolveAppRefIdOrNull(appId), null, null, "Ticket 不存在、已过期或已被使用");
+                    appProtocolGuard.resolveAppRefIdOrNull(appId), null, null, "Ticket 不存在、已过期或已被使用", null);
             writeFailure(response, useXml);
             return;
         }
@@ -163,7 +163,8 @@ public class CasController {
         UserEntity user = userMapper.selectById(payload.userId());
         if (user == null) {
             ssoProtocolLogRecorder.recordFailure(AuthProtocol.CAS, SsoProtocolLogEventType.SERVICE_VALIDATE, appId,
-                    appProtocolGuard.resolveAppRefIdOrNull(payload.appId()), payload.userId(), sessionId, "用户不存在");
+                    appProtocolGuard.resolveAppRefIdOrNull(payload.appId()), payload.userId(), sessionId, "用户不存在",
+                    null);
             writeFailure(response, useXml);
             return;
         }
@@ -217,7 +218,7 @@ public class CasController {
             appProtocolGuard.assertCasServiceAllowed(appId, service);
         } catch (SsoProtocolException e) {
             ssoProtocolLogRecorder.recordFailure(AuthProtocol.CAS, SsoProtocolLogEventType.LOGOUT, appId,
-                    appProtocolGuard.resolveAppRefIdOrNull(appId), null, null, e.getMessage());
+                    appProtocolGuard.resolveAppRefIdOrNull(appId), null, null, e.getMessage(), null);
             ProtocolResponseWriter.text(response, HttpServletResponse.SC_BAD_REQUEST, e.getMessage());
             return;
         }

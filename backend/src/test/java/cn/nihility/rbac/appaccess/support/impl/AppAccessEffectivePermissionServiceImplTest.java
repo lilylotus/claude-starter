@@ -14,6 +14,7 @@ import cn.nihility.rbac.appaccess.policy.entity.PolicyIpRuleEntity;
 import cn.nihility.rbac.appaccess.policy.mapper.PolicyBrowserRuleMapper;
 import cn.nihility.rbac.appaccess.policy.mapper.PolicyGrantMapper;
 import cn.nihility.rbac.appaccess.policy.mapper.PolicyIpRuleMapper;
+import cn.nihility.rbac.appaccess.support.AppAccessAuthorizationDecision;
 import cn.nihility.rbac.appaccess.support.dto.EffectiveRawRow;
 import cn.nihility.rbac.appaccess.support.mapper.AppAccessEffectiveMapper;
 import cn.nihility.rbac.common.result.PageResult;
@@ -25,13 +26,14 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * {@link AppAccessEffectivePermissionServiceImpl} 的单元测试（tasks.md 8.4），覆盖优先级
- * 规则四种场景（{@code DENY} 最高、{@code GRANT} 次之、策略再次之、都无则不可访问）、
- * 停用中的策略不计入（由 {@code existsActiveGrant} SQL 内 {@code p.status=2000} 条件保证，
- * 此处通过打桩其返回值间接验证调用方分支正确）、"包含已收回"审计查询；以及
- * app-access-request-control change 新增的"考虑请求上下文"判定入口（浏览器/IP 满足与否、
- * 两者 AND 语义、多策略命中取"任一满足"、GRANT 不受约束、DENY 优先级不变）与原两参数方法
- * 行为不变的回归验证。
+ * {@link AppAccessEffectivePermissionServiceImpl} 的单元测试（tasks.md 8.4，
+ * policy-condition-exclusive-priority change tasks.md 4.4/5.6 调整判定语义后同步更新），
+ * 覆盖优先级规则四种场景（{@code DENY} 最高、{@code GRANT} 次之、策略再次之、都无则不可
+ * 访问）、停用中的策略不计入（由 {@code existsActiveGrant} SQL 内 {@code p.status=2000}
+ * 条件保证，此处通过打桩其返回值间接验证调用方分支正确）、"包含已收回"审计查询；以及
+ * "考虑请求上下文"判定入口（浏览器/IP 满足与否、两者 AND 语义、多策略命中"只看排序最前
+ * 一条，非黑即白"、GRANT 不受约束、DENY 优先级不变）、{@code checkAuthorization} 返回的
+ * 拒绝来源策略 id 与原两参数方法行为不变的回归验证。
  */
 @ExtendWith(MockitoExtension.class)
 class AppAccessEffectivePermissionServiceImplTest {
@@ -407,11 +409,13 @@ class AppAccessEffectivePermissionServiceImplTest {
     }
 
     /**
-     * 考虑请求上下文的判定：多条策略命中同一用户+应用时，只要其中一条策略的请求控制条件
-     * 被满足即判定为可访问（spec.md"多条策略命中时任一策略满足请求控制即可" Scenario）。
+     * 考虑请求上下文的判定：多条策略命中同一用户+应用时，只看排序最前的一条候选策略，即使
+     * 该策略请求控制不满足、后面还有满足的候选策略，也直接判定为不可访问，不再检查排序更
+     * 靠后的候选（spec.md"多条策略命中时按序号取排在最前的一条单独决定结果" Scenario，
+     * policy-condition-exclusive-priority change：取代原"任一候选满足即放行"的并集语义）。
      */
     @Test
-    void isAuthorizedWithContext_shouldReturnTrue_whenAnyCandidatePolicySatisfied() {
+    void isAuthorizedWithContext_shouldReturnFalse_whenTopCandidateNotSatisfied_evenIfLaterCandidateWould() {
         String firefoxUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0";
         when(manualOverrideMapper.selectOne(any())).thenReturn(null);
         when(policyGrantMapper.selectActivePolicyIds(1L, 2L)).thenReturn(List.of(10L, 20L));
@@ -419,8 +423,75 @@ class AppAccessEffectivePermissionServiceImplTest {
                 List.of(PolicyBrowserRuleEntity.builder().policyId(10L).browserCode("CHROME").build()));
         when(policyIpRuleMapper.selectList(any())).thenReturn(List.of());
 
-        // 策略 10 要求 Chrome，不满足；策略 20 未配置请求控制，身份命中即满足，整体判定通过。
-        assertThat(service.isAuthorized(1L, 2L, "192.168.1.1", firefoxUserAgent)).isTrue();
+        // 策略 10（排序最前）要求 Chrome，不满足；策略 20 虽未配置请求控制，但排序更靠后，
+        // 不会被检查，整体判定为不可访问。
+        assertThat(service.isAuthorized(1L, 2L, "192.168.1.1", firefoxUserAgent)).isFalse();
+    }
+
+    /**
+     * 考虑请求上下文的判定：候选列表中排序最前的一条策略请求控制条件满足时，即使还有排序
+     * 更靠后的候选，也不影响放行结果（只看第一条）。
+     */
+    @Test
+    void isAuthorizedWithContext_shouldReturnTrue_whenTopCandidateSatisfied() {
+        when(manualOverrideMapper.selectOne(any())).thenReturn(null);
+        when(policyGrantMapper.selectActivePolicyIds(1L, 2L)).thenReturn(List.of(10L, 20L));
+        when(policyBrowserRuleMapper.selectList(any())).thenReturn(List.of());
+        when(policyIpRuleMapper.selectList(any())).thenReturn(List.of());
+
+        assertThat(service.isAuthorized(1L, 2L, "192.168.1.1", null)).isTrue();
+    }
+
+    /**
+     * 考虑请求上下文的判定：候选为空时不可访问，且拒绝来源策略 id 为空（spec.md"既无例外
+     * 也无策略授权时不可访问" Scenario）。
+     */
+    @Test
+    void checkAuthorization_shouldReturnDeniedWithoutPolicy_whenNoCandidatePolicies() {
+        when(manualOverrideMapper.selectOne(any())).thenReturn(null);
+        when(policyGrantMapper.selectActivePolicyIds(1L, 2L)).thenReturn(List.of());
+
+        AppAccessAuthorizationDecision decision =
+                service.checkAuthorization(1L, 2L, "192.168.1.1", "chrome-ua");
+
+        assertThat(decision.authorized()).isFalse();
+        assertThat(decision.deniedByPolicyId()).isNull();
+    }
+
+    /**
+     * 考虑请求上下文的判定：被 DENY 人工例外拒绝时，拒绝来源策略 id 为空（spec.md"被人工
+     * 例外拒绝时不产生拒绝来源策略 id" Scenario）。
+     */
+    @Test
+    void checkAuthorization_shouldReturnDeniedWithoutPolicy_whenDeniedByManualOverride() {
+        when(manualOverrideMapper.selectOne(any())).thenReturn(
+                ManualOverrideEntity.builder().userId(1L).appId(2L).overrideType(OverrideType.DENY).build());
+
+        AppAccessAuthorizationDecision decision =
+                service.checkAuthorization(1L, 2L, "192.168.1.1", "chrome-ua");
+
+        assertThat(decision.authorized()).isFalse();
+        assertThat(decision.deniedByPolicyId()).isNull();
+    }
+
+    /**
+     * 考虑请求上下文的判定：排在最前的候选策略请求控制条件不满足时，拒绝来源策略 id 应为
+     * 该策略的 id（spec.md"被拒绝时提供拒绝来源的策略 id" Scenario）。
+     */
+    @Test
+    void checkAuthorization_shouldReturnDeniedByPolicy_whenTopCandidateNotSatisfied() {
+        String firefoxUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0";
+        when(manualOverrideMapper.selectOne(any())).thenReturn(null);
+        when(policyGrantMapper.selectActivePolicyIds(1L, 2L)).thenReturn(List.of(100L));
+        when(policyBrowserRuleMapper.selectList(any())).thenReturn(
+                List.of(PolicyBrowserRuleEntity.builder().policyId(100L).browserCode("CHROME").build()));
+        when(policyIpRuleMapper.selectList(any())).thenReturn(List.of());
+
+        AppAccessAuthorizationDecision decision =
+                service.checkAuthorization(1L, 2L, "192.168.1.1", firefoxUserAgent);
+
+        assertThat(decision.authorized()).isFalse();
+        assertThat(decision.deniedByPolicyId()).isEqualTo(100L);
     }
 
     /**

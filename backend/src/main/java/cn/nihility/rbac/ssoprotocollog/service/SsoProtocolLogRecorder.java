@@ -36,10 +36,15 @@ public interface SsoProtocolLogRecorder {
      * @param userId     关联的用户 id：只要处理链路已经解析出了用户 id（即使本次调用最终判定
      *                   为失败），也 SHALL 使用该已解析到的值，不因失败就丢弃已掌握的身份信息；
      *                   处理链路在拿到用户 id 之前就已经失败的分支为 {@code null}
-     * @param sessionId  本次调用所属 SSO 会话标识，与 {@code userId} 遵循相同的"能拿到就填、
-     *                   不因失败丢弃"原则
-     * @param failReason 失败原因文案
+     * @param sessionId       本次调用所属 SSO 会话标识，与 {@code userId} 遵循相同的"能拿到就填、
+     *                        不因失败丢弃"原则
+     * @param failReason      失败原因文案
+     * @param deniedPolicyId  拒绝来源的策略 id：仅失败原因为"应用访问授权策略拒绝"（排在最前的
+     *                        候选策略请求控制条件不满足）时非空，其余失败原因（含被 DENY 人工
+     *                        例外拒绝、`service`/`redirect_uri` 白名单不匹配、票据/令牌失效等）
+     *                        均传 {@code null}（policy-condition-exclusive-priority change
+     *                        design.md Decision）
      */
     void recordFailure(String protocol, String eventType, String appId, Long appRefId, Long userId, String sessionId,
-            String failReason);
+            String failReason, Long deniedPolicyId);
 }

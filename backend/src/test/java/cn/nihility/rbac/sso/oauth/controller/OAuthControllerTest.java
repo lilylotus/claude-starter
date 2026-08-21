@@ -376,6 +376,10 @@ class OAuthControllerTest {
         assertThat(logEntity.getUserId()).isEqualTo(userId);
         assertThat(logEntity.getFailReason()).isEqualTo("当前用户无权访问该应用");
         assertThat(logEntity.getSessionId()).isEqualTo(SsoSessionIdHasher.hash(sessionToken));
+        // 本用例未预置任何策略授权记录（人工例外已删除），属于"候选为空"分支，并非由具体
+        // 策略拒绝，拒绝来源策略 id 应为空（policy-condition-exclusive-priority change
+        // tasks.md 5.6）。
+        assertThat(logEntity.getDeniedPolicyId()).isNull();
     }
 
     /**
@@ -407,6 +411,9 @@ class OAuthControllerTest {
         assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.FAILED);
         assertThat(logEntity.getUserId()).isEqualTo(userId);
         assertThat(logEntity.getSessionId()).isEqualTo(SsoSessionIdHasher.hash(sessionToken));
+        // 排在最前的候选策略（本用例只插入了一条）请求控制不满足，拒绝来源策略 id 应记为
+        // 该策略的 id（policy-condition-exclusive-priority change tasks.md 5.6）。
+        assertThat(logEntity.getDeniedPolicyId()).isEqualTo(policyId);
     }
 
     /**

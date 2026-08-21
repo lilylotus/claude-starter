@@ -11,6 +11,7 @@ import cn.nihility.rbac.appaccess.policy.entity.PolicyIpRuleEntity;
 import cn.nihility.rbac.appaccess.policy.mapper.PolicyBrowserRuleMapper;
 import cn.nihility.rbac.appaccess.policy.mapper.PolicyGrantMapper;
 import cn.nihility.rbac.appaccess.policy.mapper.PolicyIpRuleMapper;
+import cn.nihility.rbac.appaccess.support.AppAccessAuthorizationDecision;
 import cn.nihility.rbac.appaccess.support.AppAccessEffectivePermissionService;
 import cn.nihility.rbac.appaccess.support.IpCidrMatcher;
 import cn.nihility.rbac.appaccess.support.dto.EffectiveRawRow;
@@ -22,13 +23,14 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 /**
  * 最终生效权限计算与查询业务逻辑实现（design.md Decision 2/3；app-access-request-control
- * change design.md Decision 3 新增"考虑请求上下文"的判定入口）。
+ * change design.md Decision 3 新增"考虑请求上下文"的判定入口；policy-condition-exclusive
+ * -priority change design.md Decision 将"考虑请求上下文"的候选策略判定改为"取排在最前的
+ * 一条，非黑即白"，并新增 {@link #checkAuthorization} 返回拒绝来源的策略 id）。
  */
 @Service
 @RequiredArgsConstructor
@@ -66,48 +68,57 @@ public class AppAccessEffectivePermissionServiceImpl implements AppAccessEffecti
      */
     @Override
     public boolean isAuthorized(Long userId, Long appId, String clientIp, String userAgent) {
+        return checkAuthorization(userId, appId, clientIp, userAgent).authorized();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public AppAccessAuthorizationDecision checkAuthorization(Long userId, Long appId, String clientIp,
+            String userAgent) {
         Boolean overrideDecision = resolveOverrideDecision(userId, appId);
         if (overrideDecision != null) {
-            return overrideDecision;
+            return overrideDecision ? AppAccessAuthorizationDecision.allow()
+                    : AppAccessAuthorizationDecision.denyWithoutPolicy();
         }
 
+        // 候选策略已按 show_order 升序、id 升序排列（PolicyGrantMapper.xml），只取排在
+        // 最前的一条，由它单独决定放行或拒绝，不再遍历其余候选（design.md Decision：
+        // "取第一条，非黑即白"，取代原"任一候选满足即放行"的并集语义）。
         List<Long> candidatePolicyIds = policyGrantMapper.selectActivePolicyIds(userId, appId);
         if (candidatePolicyIds.isEmpty()) {
-            return false;
+            return AppAccessAuthorizationDecision.denyWithoutPolicy();
         }
+        Long topPolicyId = candidatePolicyIds.get(0);
 
-        LambdaQueryWrapper<PolicyBrowserRuleEntity> browserRuleWrapper = new LambdaQueryWrapper<>();
-        browserRuleWrapper.in(PolicyBrowserRuleEntity::getPolicyId, candidatePolicyIds);
-        Map<Long, List<String>> browserRulesByPolicy = policyBrowserRuleMapper.selectList(browserRuleWrapper).stream()
-                .collect(Collectors.groupingBy(PolicyBrowserRuleEntity::getPolicyId,
-                        Collectors.mapping(PolicyBrowserRuleEntity::getBrowserCode, Collectors.toList())));
+        LambdaQueryWrapper<PolicyBrowserRuleEntity> browserRuleWrapper = new LambdaQueryWrapper<PolicyBrowserRuleEntity>()
+                .eq(PolicyBrowserRuleEntity::getPolicyId, topPolicyId);
+        List<String> browserWhitelist = policyBrowserRuleMapper.selectList(browserRuleWrapper).stream()
+                .map(PolicyBrowserRuleEntity::getBrowserCode).toList();
 
-        LambdaQueryWrapper<PolicyIpRuleEntity> ipRuleWrapper = new LambdaQueryWrapper<>();
-        ipRuleWrapper.in(PolicyIpRuleEntity::getPolicyId, candidatePolicyIds);
-        Map<Long, List<String>> ipRulesByPolicy = policyIpRuleMapper.selectList(ipRuleWrapper).stream()
-                .collect(Collectors.groupingBy(PolicyIpRuleEntity::getPolicyId,
-                        Collectors.mapping(PolicyIpRuleEntity::getIpCidr, Collectors.toList())));
+        LambdaQueryWrapper<PolicyIpRuleEntity> ipRuleWrapper = new LambdaQueryWrapper<PolicyIpRuleEntity>()
+                .eq(PolicyIpRuleEntity::getPolicyId, topPolicyId);
+        List<String> ipWhitelist = policyIpRuleMapper.selectList(ipRuleWrapper).stream()
+                .map(PolicyIpRuleEntity::getIpCidr).toList();
+
         String browserCode = PolicyRequestControlBrowser.resolveCode(UserAgentParser.parseBrowser(userAgent));
+        boolean browserSatisfied = browserWhitelist.isEmpty()
+                || (browserCode != null && browserWhitelist.contains(browserCode));
+        boolean ipSatisfied = ipWhitelist.isEmpty()
+                || ipWhitelist.stream().anyMatch(rule -> IpCidrMatcher.matches(clientIp, rule));
 
-        for (Long policyId : candidatePolicyIds) {
-            List<String> browserWhitelist = browserRulesByPolicy.getOrDefault(policyId, List.of());
-            List<String> ipWhitelist = ipRulesByPolicy.getOrDefault(policyId, List.of());
-            boolean browserSatisfied = browserWhitelist.isEmpty()
-                    || (browserCode != null && browserWhitelist.contains(browserCode));
-            boolean ipSatisfied = ipWhitelist.isEmpty()
-                    || ipWhitelist.stream().anyMatch(rule -> IpCidrMatcher.matches(clientIp, rule));
-            if (browserSatisfied && ipSatisfied) {
-                return true;
-            }
+        if (browserSatisfied && ipSatisfied) {
+            return AppAccessAuthorizationDecision.allow();
         }
-        return false;
+        return AppAccessAuthorizationDecision.denyByPolicy(topPolicyId);
     }
 
     /**
      * 解析人工例外优先级判定：存在 {@code DENY} 例外返回 {@code false}，存在 {@code GRANT}
      * 例外返回 {@code true}，不存在人工例外返回 {@code null}（由调用方继续按策略授权记录
-     * 判定），供两个 {@code isAuthorized} 重载共享，避免重复实现"取候选策略 id 集合"之前
-     * 的这段逻辑（design.md Decision 3）。
+     * 判定），供 {@code isAuthorized(Long, Long)} 与 {@code checkAuthorization} 共享，
+     * 避免重复实现"取候选策略 id 集合"之前的这段逻辑（design.md Decision 3）。
      *
      * @param userId 用户 id
      * @param appId  应用 id

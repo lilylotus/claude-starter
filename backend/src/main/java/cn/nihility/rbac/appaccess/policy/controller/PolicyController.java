@@ -45,7 +45,7 @@ public class PolicyController {
      * @param pageSize 每页条数，默认 10 条
      * @return 策略规则的分页结果
      */
-    @Operation(summary = "分页查询策略规则", description = "支持按名称模糊搜索、按状态过滤，均可选")
+    @Operation(summary = "分页查询策略规则", description = "支持按名称模糊搜索、按状态过滤，均可选；默认按显示序号升序、id 升序排列")
     @GetMapping("/api/app-access/policies")
     public PageResult<PolicyVO> page(
             @Parameter(description = "策略名称，模糊匹配") @RequestParam(required = false) String name,
@@ -79,7 +79,8 @@ public class PolicyController {
      * @return 新增后的策略规则详情
      */
     @Operation(summary = "新增策略规则",
-            description = "组织范围、用户属性条件、浏览器白名单、IP 白名单均可选，但不能同时为空；目标应用不能为空")
+            description = "组织范围、用户属性、请求控制条件三者中至少配置一类，可以同时配置多类；"
+                    + "目标应用不能为空；显示序号可选，未提供时默认 0，数值越小优先级越高")
     @PostMapping("/api/app-access/policies")
     public PolicyVO create(@Valid @RequestBody PolicyCreateRequest request) {
         return policyService.create(request);
@@ -92,7 +93,10 @@ public class PolicyController {
      * @param request 编辑请求
      * @return 编辑后的策略规则详情
      */
-    @Operation(summary = "编辑策略规则", description = "组织范围/用户属性条件/目标应用均为整体替换语义（先删后插）")
+    @Operation(summary = "编辑策略规则",
+            description = "组织范围/用户属性/目标应用/请求控制条件均为整体替换语义（先删后插）；组织范围、"
+                    + "用户属性、请求控制条件三者中至少配置一类，可以同时配置多类；显示序号可选，修改后立即影响"
+                    + "下一次判定，不触发策略重新执行")
     @PutMapping("/api/app-access/policies/{id}")
     public PolicyVO update(@PathVariable Long id, @Valid @RequestBody PolicyUpdateRequest request) {
         return policyService.update(id, request);

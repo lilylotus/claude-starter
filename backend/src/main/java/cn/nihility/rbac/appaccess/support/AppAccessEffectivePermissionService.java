@@ -27,10 +27,14 @@ public interface AppAccessEffectivePermissionService {
 
     /**
      * 判定指定用户对指定应用是否具备最终生效授权（考虑请求上下文）：在仅身份维度判定的
-     * 基础上，对"启用中策略产生的授权记录"这一来源追加请求控制约束——命中的多条策略中，
-     * 只要存在至少一条策略的请求控制条件（浏览器白名单/IP 白名单）被当前请求满足即判定为
-     * 可访问；{@code GRANT} 人工例外不受此约束（app-access-request-control change
-     * design.md Decision 3）。
+     * 基础上，对"启用中策略产生的授权记录"这一来源追加请求控制约束——取该用户对该应用当前
+     * 处于启用状态的候选策略，按显示序号升序排列（序号相同按策略 id 升序），只取排在最前的
+     * 一条策略，判断其请求控制条件（浏览器白名单/IP 白名单）是否被当前请求满足：满足则可
+     * 访问，不满足则直接不可访问，不再检查排序更靠后的其余候选（policy-condition-exclusive
+     * -priority change design.md Decision，取代原"任一候选满足即放行"的并集语义）；
+     * {@code GRANT} 人工例外不受此约束（app-access-request-control change design.md
+     * Decision 3）。等价于 {@link #checkAuthorization(Long, Long, String, String)} 的
+     * {@code authorized()}，供不需要拒绝来源策略 id 细节的调用方继续使用。
      *
      * @param userId    用户 id
      * @param appId     应用 id
@@ -41,6 +45,22 @@ public interface AppAccessEffectivePermissionService {
      * @return {@code true} 表示可访问
      */
     boolean isAuthorized(Long userId, Long appId, String clientIp, String userAgent);
+
+    /**
+     * 判定指定用户对指定应用是否具备最终生效授权（考虑请求上下文），并在"排在最前的候选
+     * 策略请求控制条件不满足"这一具体分支下额外返回拒绝来源的策略 id（policy-condition
+     * -exclusive-priority change design.md Decision），供 SSO 登录授权校验场景
+     * （{@code cn.nihility.rbac.sso.support.AppAccessAuthorizationChecker}）记录到协议
+     * 调用日志。判定逻辑与 {@link #isAuthorized(Long, Long, String, String)} 完全一致，
+     * 仅返回结构不同。
+     *
+     * @param userId    用户 id
+     * @param appId     应用 id
+     * @param clientIp  当前请求的客户端 IP，取不到时传 {@code null}
+     * @param userAgent 当前请求的 {@code User-Agent}，取不到时传 {@code null}
+     * @return 判定结果，含是否放行与（若适用）拒绝来源的策略 id
+     */
+    AppAccessAuthorizationDecision checkAuthorization(Long userId, Long appId, String clientIp, String userAgent);
 
     /**
      * 分页查询指定用户当前可访问的全部应用，标明每条结果的判定依据。

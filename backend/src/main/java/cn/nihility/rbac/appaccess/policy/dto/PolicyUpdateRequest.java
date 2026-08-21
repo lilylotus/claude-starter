@@ -10,10 +10,10 @@ import lombok.Getter;
 import lombok.Setter;
 
 /**
- * 策略规则编辑请求，语义与 {@link PolicyCreateRequest} 一致，组织范围/用户属性条件/
+ * 策略规则编辑请求，语义与 {@link PolicyCreateRequest} 一致，组织范围/用户属性/
  * 目标应用/请求控制条件（浏览器白名单/IP 白名单）均为整体替换语义（先删后插）；组织范围、
- * 用户属性条件、浏览器白名单、IP 白名单四者不能同时为空，允许"仅配置请求控制"的策略
- * （close-sso-log-and-policy-gaps change design.md Decision 3）。
+ * 用户属性、请求控制条件（浏览器白名单+IP 白名单合并算一类）三者中至少配置一类，允许同时
+ * 配置多类（close-sso-log-and-policy-gaps change design.md Decision 3）。
  */
 @Getter
 @Setter
@@ -32,19 +32,27 @@ public class PolicyUpdateRequest {
     private String remark;
 
     /**
-     * 组织范围条件，可选，与 {@link #userAttrs}/{@link #browserRules}/{@link #ipRules}
-     * 不能同时为空，整体替换。
+     * 显示序号，可选，未提供时默认 {@code 0}；数值越小优先级越高，运行时最终生效权限判定
+     * （考虑请求上下文）按该字段升序取排在最前的候选策略计算结果，修改该字段 SHALL NOT
+     * 触发策略重新执行（policy-condition-exclusive-priority change design.md Decision）。
+     */
+    @Schema(description = "显示序号，数值越小优先级越高，未提供时默认 0")
+    private Integer showOrder;
+
+    /**
+     * 组织范围条件，可选，与 {@link #userAttrs}、{@link #browserRules}/{@link #ipRules}
+     * 可以同时配置，三者中至少一类非空，整体替换。
      */
     @Valid
-    @Schema(description = "组织范围条件，可选，整体替换")
+    @Schema(description = "组织范围条件，可选，可与用户属性、请求控制条件同时配置，整体替换")
     private List<PolicyOrgScopeRequestItem> orgScopes;
 
     /**
-     * 用户属性条件，可选，与 {@link #orgScopes}/{@link #browserRules}/{@link #ipRules}
-     * 不能同时为空，整体替换。
+     * 用户属性条件，可选，与 {@link #orgScopes}、{@link #browserRules}/{@link #ipRules}
+     * 可以同时配置，三者中至少一类非空，整体替换。
      */
     @Valid
-    @Schema(description = "用户属性条件，可选，整体替换")
+    @Schema(description = "用户属性条件，可选，可与组织范围、请求控制条件同时配置，整体替换")
     private List<PolicyUserAttrRequestItem> userAttrs;
 
     /** 目标应用 id 列表，至少一个，整体替换。 */
@@ -53,16 +61,16 @@ public class PolicyUpdateRequest {
     private List<Long> targetAppIds;
 
     /**
-     * 请求控制条件-浏览器白名单编码列表，可选，与 {@link #orgScopes}/{@link #userAttrs}/
-     * {@link #ipRules} 不能同时为空，整体替换。
+     * 请求控制条件-浏览器白名单编码列表，可选，与 {@link #ipRules} 合并算一类，可与
+     * {@link #orgScopes}/{@link #userAttrs} 同时配置，整体替换。
      */
-    @Schema(description = "请求控制条件-浏览器白名单编码列表，可选，整体替换")
+    @Schema(description = "请求控制条件-浏览器白名单编码列表，可选，与 IP 白名单合并算一类，可与组织范围、用户属性同时配置，整体替换")
     private List<String> browserRules;
 
     /**
-     * 请求控制条件-IP/网段白名单列表，可选，与 {@link #orgScopes}/{@link #userAttrs}/
-     * {@link #browserRules} 不能同时为空，整体替换。
+     * 请求控制条件-IP/网段白名单列表，可选，与 {@link #browserRules} 合并算一类，可与
+     * {@link #orgScopes}/{@link #userAttrs} 同时配置，整体替换。
      */
-    @Schema(description = "请求控制条件-IP/网段白名单列表，可选，整体替换")
+    @Schema(description = "请求控制条件-IP/网段白名单列表，可选，与浏览器白名单合并算一类，可与组织范围、用户属性同时配置，整体替换")
     private List<String> ipRules;
 }

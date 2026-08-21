@@ -28,13 +28,14 @@ public interface PolicyGrantMapper extends BaseMapper<PolicyGrantEntity> {
     int existsActiveGrant(@Param("userId") Long userId, @Param("appId") Long appId);
 
     /**
-     * 查询给定用户对给定应用、由当前处于启用状态的策略产生的策略授权记录，去重后的
-     * {@code policyId} 集合（app-access-request-control change design.md Decision 3，
-     * 供"考虑请求上下文"的最终生效权限判定批量取候选策略的请求控制条件）。
+     * 查询给定用户对给定应用、由当前处于启用状态的策略产生的策略授权记录对应的
+     * {@code policyId} 集合，按策略显示序号升序、id 升序排列（policy-condition-exclusive
+     * -priority change design.md Decision：供"考虑请求上下文"的最终生效权限判定取排在
+     * 最前的一条候选策略计算结果，调用方不需要再自行排序）。
      *
      * @param userId 用户 id
      * @param appId  应用 id
-     * @return 去重后的候选策略 id 列表，可能为空
+     * @return 按显示序号、id 升序排列的候选策略 id 列表，可能为空
      */
     List<Long> selectActivePolicyIds(@Param("userId") Long userId, @Param("appId") Long appId);
 }

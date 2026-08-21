@@ -37,6 +37,14 @@ public class PolicyEntity {
     /** 状态：2000=启用，3000=停用。 */
     private Integer status;
 
+    /**
+     * 显示序号，数值越小优先级越高：最终生效权限判定（考虑请求上下文）按该字段升序排列
+     * 候选策略并取排在最前的一条计算结果，与 {@code tab_role.show_order}"数值越大越靠前"的
+     * 展示排序语义方向相反，使用时需注意区分（policy-condition-exclusive-priority change
+     * design.md Decision）。新增/编辑时可指定，未指定默认 {@code 0}。
+     */
+    private Integer showOrder;
+
     /** 最近一次执行时间，从未执行过为空。 */
     private LocalDateTime lastExecTime;
 

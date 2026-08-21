@@ -1,17 +1,4 @@
-# sso-protocol-access-log Specification
-
-## Purpose
-
-CAS/OAuth2.0 协议运行时端点的调用记录能力：为 `app-sso-protocol-runtime` 能力的全部 6 类
-运行时端点（CAS 单点登录、CAS 票据验证、CAS 单点登出、OAuth2 授权、OAuth2 令牌签发/刷新、
-OAuth2 用户信息查询）以及全局单点登出接口的每一次调用（无论成功或失败）留痕，供问题排查
-（如某个应用的用户反馈"登录不了"时定位是哪一步、因为什么原因失败）。与 `login-log-management`
-能力的登录尝试记录物理隔离——后者只对应"账号密码校验"这一个动作本身，本能力覆盖的是
-凭证校验通过、SSO 会话建立之后，该会话驱动的全部协议层活动（票据签发/验证、令牌签发/刷新/
-校验、登出等），二者通过 SSO 会话标识（`sessionId`）关联，供登录日志页面查看某次登录之后
-关联的协议调用记录。
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: SSO 协议调用记录
 系统 SHALL 为 CAS/OAuth2.0 协议的全部 6 类运行时端点（CAS 单点登录、CAS 票据验证、CAS
@@ -74,38 +61,3 @@ CAS 单点登录（`LOGIN`）与 OAuth2 授权（`AUTHORIZE`）两类事件，�
 #### Scenario: 令牌刷新后新令牌延续同一会话标识
 - **WHEN** 某 OAuth2 应用使用 `grant_type=refresh_token` 刷新令牌，成功签发新的 access token 与 refresh token
 - **THEN** 用新签发的 access token 调用用户信息接口时，产生的调用记录与本次登录最初签发授权码时的调用记录具有相同的 SSO 会话标识
-
-### Requirement: SSO 协议调用记录分页查询
-系统 SHALL 提供 SSO 协议调用记录的只读分页查询接口，支持按应用、协议类型、事件类型、调用结果、
-SSO 会话标识、调用时间范围筛选，均为可选参数；分页参数 `page`（默认 `1`）、`pageSize`（默认 `10`）
-均为可选；结果按调用发生时间降序排列。该接口不提供新增、编辑、删除能力。按 SSO 会话标识筛选主要
-供"登录日志"页面查看某次成功 SSO 登录之后关联的协议调用记录使用（见 `login-log-management` 能力
-"登录日志页面查看关联的 SSO 协议调用记录"需求）。查询结果的每条记录 SHALL 包含该条记录关联的
-`sessionId`（SSO 会话令牌的 SHA-256 摘要），供前端在协议调用记录详情表格中展示；`sessionId` 为空的
-记录该字段返回空。
-
-#### Scenario: 查询调用记录分页列表
-- **WHEN** 客户端调用 `GET /api/sso-protocol-logs?page={page}&pageSize={pageSize}`
-- **THEN** 系统返回 SSO 协议调用记录的分页结果，按调用发生时间降序排列
-
-#### Scenario: 按应用与事件类型筛选
-- **WHEN** 客户端调用 `GET /api/sso-protocol-logs?appRefId={appRefId}&eventType={eventType}`
-- **THEN** 系统返回指定应用、指定事件类型的调用记录分页结果
-
-#### Scenario: 按 SSO 会话标识查询某次登录之后的全部协议调用
-- **WHEN** 客户端调用 `GET /api/sso-protocol-logs?sessionId={sessionId}`，`sessionId` 取自某条登录日志记录
-- **THEN** 系统返回该 SSO 会话产生的全部 CAS/OAuth2 协议调用记录（成功+失败），按调用发生时间排列
-
-#### Scenario: 查询结果返回会话标识字段供展示
-- **WHEN** 客户端调用 `GET /api/sso-protocol-logs?sessionId={sessionId}` 并获得非空的分页结果
-- **THEN** 返回的每条记录都包含其关联的 `sessionId` 字段，值与查询参数一致
-
-### Requirement: SSO 协议调用记录定期清理
-`tab_sso_protocol_log` SHALL 纳入系统既有的日志定期清理任务范围（`login-log-management`
-能力"登录日志定期清理"需求引入的同一个定时任务与配置），与登录日志、操作日志共用同一份
-cron 表达式与保留天数配置，不单独提供开关或配置项。
-
-#### Scenario: 与登录日志、操作日志同批次清理
-- **WHEN** 日志定期清理任务按配置的 cron 表达式触发
-- **THEN** 系统在同一次任务执行中，分别清理 `tab_login_log`、`tab_operation_log`、
-  `tab_sso_protocol_log` 三张表中创建时间早于保留期的记录

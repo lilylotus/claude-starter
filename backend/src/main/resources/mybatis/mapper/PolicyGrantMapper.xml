@@ -16,13 +16,20 @@
         AND p.status = 2000
     </select>
 
+    <!-- 按 show_order 升序、id 升序返回候选策略 id（policy-condition-exclusive-priority
+         change design.md Decision：运行时最终生效权限判定按该顺序取排在最前的一条候选
+         策略计算结果，不再遍历全部候选）。不再使用 DISTINCT：
+         tab_app_access_policy_grant 已有 (policy_id, user_id, app_id) 唯一约束，
+         固定 user_id/app_id 后 policy_id 天然不重复，直接按 JOIN 后的 show_order/id
+         排序即可，避免 DISTINCT 与 ORDER BY 引用非选择列组合在部分 SQL 方言下的歧义。 -->
     <select id="selectActivePolicyIds" resultType="java.lang.Long">
-        SELECT DISTINCT g.policy_id
+        SELECT g.policy_id
         FROM tab_app_access_policy_grant g
         INNER JOIN tab_app_access_policy p ON p.id = g.policy_id
         WHERE g.user_id = #{userId}
         AND g.app_id = #{appId}
         AND p.status = 2000
+        ORDER BY p.show_order ASC, p.id ASC
     </select>
 
 </mapper>

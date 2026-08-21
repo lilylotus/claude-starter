@@ -133,6 +133,9 @@ export interface PolicyVO {
   // 配置已变更、待重新执行：组织范围/用户属性条件/目标应用中任一条最新更新时间晚于
   // lastExecTime 时为 true，由后端纯查询判断给出
   pendingReExecute: boolean
+  // 显示序号：数值越小优先级越高，运行时按升序取第一条命中身份的策略计算结果；
+  // 列表默认按 showOrder 升序、id 升序排列（后端排序，前端只负责展示）
+  showOrder: number
 }
 
 // 新增/编辑弹窗提交的请求体，字段与后端 PolicyCreateRequest/PolicyUpdateRequest 一致
@@ -145,6 +148,8 @@ export interface PolicyFormRequest {
   browserRules: PolicyBrowserCode[]
   ipRules: string[]
   targetAppIds: number[]
+  // 显示序号：数值越小优先级越高，未填写默认 0
+  showOrder: number
 }
 
 // 分页查询参数，对应 GET /api/app-access/policies 的 query 参数，均可选

@@ -57,6 +57,14 @@ public class SsoProtocolLogEntity {
     /** 失败原因文案，成功时为 {@code null}。 */
     private String failReason;
 
+    /**
+     * 拒绝来源的策略 id（关联 {@code tab_app_access_policy.id}），仅失败原因为"应用访问
+     * 授权策略拒绝"（排在最前的候选策略请求控制条件不满足）时非空，其余失败原因（含被
+     * {@code DENY} 人工例外拒绝）均为 {@code null}（policy-condition-exclusive-priority
+     * change design.md Decision）。
+     */
+    private Long deniedPolicyId;
+
     /** 客户端 IP，取不到时为空。 */
     private String clientIp;
 

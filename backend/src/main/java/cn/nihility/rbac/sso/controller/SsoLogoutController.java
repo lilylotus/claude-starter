@@ -70,7 +70,7 @@ public class SsoLogoutController {
             String protocol = resolved.map(AppAuthConfigEntity::getAuthProtocol).orElse(AuthProtocol.NONE);
             Long appRefId = resolved.map(AppAuthConfigEntity::getAppRefId).orElse(null);
             ssoProtocolLogRecorder.recordFailure(protocol, SsoProtocolLogEventType.LOGOUT, appId, appRefId, null, null,
-                    e.getMessage());
+                    e.getMessage(), null);
             ProtocolResponseWriter.text(response, HttpServletResponse.SC_BAD_REQUEST, e.getMessage());
             return;
         }

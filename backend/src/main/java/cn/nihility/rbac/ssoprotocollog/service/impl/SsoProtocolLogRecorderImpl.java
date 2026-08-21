@@ -38,7 +38,7 @@ public class SsoProtocolLogRecorderImpl implements SsoProtocolLogRecorder {
     @Override
     public void recordSuccess(String protocol, String eventType, String appId, Long appRefId, Long userId,
             String sessionId) {
-        record(SsoProtocolLogResult.SUCCESS, protocol, eventType, appId, appRefId, userId, sessionId, null);
+        record(SsoProtocolLogResult.SUCCESS, protocol, eventType, appId, appRefId, userId, sessionId, null, null);
     }
 
     /**
@@ -46,24 +46,26 @@ public class SsoProtocolLogRecorderImpl implements SsoProtocolLogRecorder {
      */
     @Override
     public void recordFailure(String protocol, String eventType, String appId, Long appRefId, Long userId,
-            String sessionId, String failReason) {
-        record(SsoProtocolLogResult.FAILED, protocol, eventType, appId, appRefId, userId, sessionId, failReason);
+            String sessionId, String failReason, Long deniedPolicyId) {
+        record(SsoProtocolLogResult.FAILED, protocol, eventType, appId, appRefId, userId, sessionId, failReason,
+                deniedPolicyId);
     }
 
     /**
      * 统一的落库入口：解析请求上下文信息、写入日志。
      *
-     * @param result     调用结果
-     * @param protocol   协议类型
-     * @param eventType  事件类型
-     * @param appId      原始 appId/client_id 参数值，可为 {@code null}
-     * @param appRefId   解析出的应用 id，可为 {@code null}
-     * @param userId     关联的用户 id，可为 {@code null}
-     * @param sessionId  本次调用所属 SSO 会话标识，可为 {@code null}
-     * @param failReason 失败原因文案，调用成功时为 {@code null}
+     * @param result         调用结果
+     * @param protocol       协议类型
+     * @param eventType      事件类型
+     * @param appId          原始 appId/client_id 参数值，可为 {@code null}
+     * @param appRefId       解析出的应用 id，可为 {@code null}
+     * @param userId         关联的用户 id，可为 {@code null}
+     * @param sessionId      本次调用所属 SSO 会话标识，可为 {@code null}
+     * @param failReason     失败原因文案，调用成功时为 {@code null}
+     * @param deniedPolicyId 拒绝来源的策略 id，仅"应用访问授权策略拒绝"失败原因下非空
      */
     private void record(int result, String protocol, String eventType, String appId, Long appRefId, Long userId,
-            String sessionId, String failReason) {
+            String sessionId, String failReason, Long deniedPolicyId) {
         HttpServletRequest request = currentRequest();
         LocalDateTime now = LocalDateTime.now();
         String operator = StringUtils.hasText(appId) ? appId : UNKNOWN_OPERATOR;
@@ -77,6 +79,7 @@ public class SsoProtocolLogRecorderImpl implements SsoProtocolLogRecorder {
                 .sessionId(sessionId)
                 .result(result)
                 .failReason(failReason)
+                .deniedPolicyId(deniedPolicyId)
                 .clientIp(ClientRequestUtils.resolveClientIp(request))
                 .userAgent(request == null ? null : request.getHeader(USER_AGENT_HEADER))
                 .createBy(operator)

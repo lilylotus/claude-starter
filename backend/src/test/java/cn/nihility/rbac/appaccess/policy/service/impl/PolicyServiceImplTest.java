@@ -32,8 +32,8 @@ import cn.nihility.rbac.appaccess.policy.mapper.PolicyTargetAppMapper;
 import cn.nihility.rbac.appaccess.policy.mapper.PolicyUserAttrMapper;
 import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.common.exception.BusinessException;
-import cn.nihility.rbac.formfield.constant.FormFieldBizType;
 import cn.nihility.rbac.metadata.constant.MetadataFieldStatus;
+import cn.nihility.rbac.formfield.constant.FormFieldBizType;
 import cn.nihility.rbac.metadata.entity.MetadataFieldEntity;
 import cn.nihility.rbac.metadata.mapper.MetadataFieldMapper;
 import java.util.List;
@@ -45,9 +45,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * {@link PolicyServiceImpl} 的单元测试（tasks.md 8.1），覆盖新增/编辑整体替换语义、组织
- * 范围与用户属性条件同时为空校验拒绝、目标应用为空校验拒绝、属性条件关联非 USER 域/
- * 已停用元数据字段被拒绝、同一策略内属性字段重复被拒绝、删除级联清理授权记录。
+ * {@link PolicyServiceImpl} 的单元测试（tasks.md 8.1，policy-condition-exclusive-priority
+ * change 用户反馈撤回"三选一互斥"后同步更新为"三者中至少一类非空，允许同时配置多类"），
+ * 覆盖新增/编辑整体替换语义、组织范围/用户属性/请求控制条件三者各自成功保存、同时配置
+ * 多类成功保存、三类全空被拒绝、目标应用为空校验拒绝、属性条件关联非 USER 域/已停用
+ * 元数据字段被拒绝、同一策略内属性字段重复被拒绝、显示序号默认值与显式指定、删除级联
+ * 清理授权记录。
  */
 @ExtendWith(MockitoExtension.class)
 class PolicyServiceImplTest {
@@ -113,13 +116,13 @@ class PolicyServiceImplTest {
     }
 
     /**
-     * 新增策略规则成功时，应插入策略主表、组织范围、用户属性条件、目标应用四类记录。
+     * 仅配置组织范围时应能正常保存，且不写入用户属性条件/请求控制条件子表（spec.md"成功
+     * 创建仅含组织范围的策略规则" Scenario）。
      */
     @Test
-    void create_shouldPersistPolicyAndSubTables_whenValid() {
-        when(metadataFieldMapper.selectById(1L)).thenReturn(buildUserField(1L));
+    void create_shouldPersistOrgScope_whenOnlyOrgScopeConfigured() {
+        PolicyCreateRequest request = orgOnlyRequest();
 
-        PolicyCreateRequest request = validRequest();
         PolicyVO vo = policyService.create(request);
 
         assertThat(vo.getId()).isEqualTo(100L);
@@ -130,9 +133,9 @@ class PolicyServiceImplTest {
         assertThat(orgScopeCaptor.getValue().getPolicyId()).isEqualTo(100L);
         assertThat(orgScopeCaptor.getValue().getOrgId()).isEqualTo(10L);
 
-        ArgumentCaptor<PolicyUserAttrEntity> userAttrCaptor = ArgumentCaptor.forClass(PolicyUserAttrEntity.class);
-        verify(policyUserAttrMapper).insert(userAttrCaptor.capture());
-        assertThat(userAttrCaptor.getValue().getAttrValue()).isEqualTo("male");
+        verify(policyUserAttrMapper, never()).insert(any(PolicyUserAttrEntity.class));
+        verify(policyBrowserRuleMapper, never()).insert(any(PolicyBrowserRuleEntity.class));
+        verify(policyIpRuleMapper, never()).insert(any(PolicyIpRuleEntity.class));
 
         ArgumentCaptor<PolicyTargetAppEntity> targetAppCaptor = ArgumentCaptor.forClass(PolicyTargetAppEntity.class);
         verify(policyTargetAppMapper).insert(targetAppCaptor.capture());
@@ -140,34 +143,69 @@ class PolicyServiceImplTest {
     }
 
     /**
-     * 组织范围、用户属性条件、浏览器白名单、IP 白名单四者同时为空时应拒绝保存
-     * （close-sso-log-and-policy-gaps change tasks.md 4.5）。
+     * 仅配置用户属性条件时应能正常保存，且不写入组织范围/请求控制条件子表（spec.md"成功
+     * 创建仅含用户属性条件的策略规则" Scenario）。
      */
     @Test
-    void create_shouldReject_whenAllFourConditionsEmpty() {
-        PolicyCreateRequest request = validRequest();
+    void create_shouldPersistUserAttr_whenOnlyUserAttrConfigured() {
+        when(metadataFieldMapper.selectById(1L)).thenReturn(buildUserField(1L));
+        PolicyCreateRequest request = userAttrOnlyRequest();
+
+        PolicyVO vo = policyService.create(request);
+
+        assertThat(vo.getId()).isEqualTo(100L);
+        ArgumentCaptor<PolicyUserAttrEntity> userAttrCaptor = ArgumentCaptor.forClass(PolicyUserAttrEntity.class);
+        verify(policyUserAttrMapper).insert(userAttrCaptor.capture());
+        assertThat(userAttrCaptor.getValue().getAttrValue()).isEqualTo("male");
+
+        verify(policyOrgScopeMapper, never()).insert(any(PolicyOrgScopeEntity.class));
+        verify(policyBrowserRuleMapper, never()).insert(any(PolicyBrowserRuleEntity.class));
+        verify(policyIpRuleMapper, never()).insert(any(PolicyIpRuleEntity.class));
+    }
+
+    /**
+     * 组织范围、用户属性条件、请求控制条件三者同时为空时应拒绝保存（spec.md"组织范围、
+     * 用户属性条件、请求控制条件同时为空时拒绝保存" Scenario）。
+     */
+    @Test
+    void create_shouldReject_whenAllThreeConditionsEmpty() {
+        PolicyCreateRequest request = orgOnlyRequest();
         request.setOrgScopes(List.of());
-        request.setUserAttrs(List.of());
-        request.setBrowserRules(List.of());
-        request.setIpRules(List.of());
 
         assertThatThrownBy(() -> policyService.create(request))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("组织范围、用户属性条件、请求控制条件不能同时为空");
+                .hasMessageContaining("不能同时为空");
         verify(policyMapper, never()).insert(any(PolicyEntity.class));
     }
 
     /**
+     * 同时配置组织范围与用户属性条件两类时应能正常保存，二者可以共存（spec.md"策略规则的
+     * 定义与维护"需求：三者中至少配置一类即可，不要求互斥）。
+     */
+    @Test
+    void create_shouldSucceed_whenOrgScopeAndUserAttrBothConfigured() {
+        when(metadataFieldMapper.selectById(1L)).thenReturn(buildUserField(1L));
+        PolicyCreateRequest request = orgOnlyRequest();
+        PolicyUserAttrRequestItem userAttr = new PolicyUserAttrRequestItem();
+        userAttr.setMetadataFieldId(1L);
+        userAttr.setOperator(PolicyAttrOperator.EQ);
+        userAttr.setValues(List.of("male"));
+        request.setUserAttrs(List.of(userAttr));
+
+        PolicyVO vo = policyService.create(request);
+
+        assertThat(vo.getId()).isEqualTo(100L);
+        verify(policyOrgScopeMapper).insert(any(PolicyOrgScopeEntity.class));
+        verify(policyUserAttrMapper).insert(any(PolicyUserAttrEntity.class));
+    }
+
+    /**
      * 仅配置请求控制条件（浏览器/IP 白名单），不配置组织范围与用户属性条件的策略应能正常
-     * 保存（close-sso-log-and-policy-gaps change design.md Decision 3、tasks.md 4.5）。
+     * 保存（spec.md"仅配置请求控制条件时允许保存" Scenario）。
      */
     @Test
     void create_shouldSucceed_whenOnlyRequestControlConfigured() {
-        PolicyCreateRequest request = validRequest();
-        request.setOrgScopes(List.of());
-        request.setUserAttrs(List.of());
-        request.setBrowserRules(List.of("CHROME"));
-        request.setIpRules(List.of("10.0.0.0/8"));
+        PolicyCreateRequest request = requestControlOnlyRequest();
 
         PolicyVO vo = policyService.create(request);
 
@@ -183,7 +221,7 @@ class PolicyServiceImplTest {
      */
     @Test
     void create_shouldReject_whenTargetAppEmpty() {
-        PolicyCreateRequest request = validRequest();
+        PolicyCreateRequest request = orgOnlyRequest();
         request.setTargetAppIds(List.of());
 
         assertThatThrownBy(() -> policyService.create(request))
@@ -201,7 +239,7 @@ class PolicyServiceImplTest {
         orgField.setBizType(FormFieldBizType.ORG);
         when(metadataFieldMapper.selectById(1L)).thenReturn(orgField);
 
-        PolicyCreateRequest request = validRequest();
+        PolicyCreateRequest request = userAttrOnlyRequest();
 
         assertThatThrownBy(() -> policyService.create(request))
                 .isInstanceOf(BusinessException.class)
@@ -218,7 +256,7 @@ class PolicyServiceImplTest {
         disabledField.setStatus(MetadataFieldStatus.DISABLED);
         when(metadataFieldMapper.selectById(1L)).thenReturn(disabledField);
 
-        PolicyCreateRequest request = validRequest();
+        PolicyCreateRequest request = userAttrOnlyRequest();
 
         assertThatThrownBy(() -> policyService.create(request))
                 .isInstanceOf(BusinessException.class)
@@ -233,7 +271,7 @@ class PolicyServiceImplTest {
     void create_shouldReject_whenDuplicateAttrField() {
         when(metadataFieldMapper.selectById(1L)).thenReturn(buildUserField(1L));
 
-        PolicyCreateRequest request = validRequest();
+        PolicyCreateRequest request = userAttrOnlyRequest();
         PolicyUserAttrRequestItem duplicate = new PolicyUserAttrRequestItem();
         duplicate.setMetadataFieldId(1L);
         duplicate.setOperator(PolicyAttrOperator.EQ);
@@ -247,19 +285,49 @@ class PolicyServiceImplTest {
     }
 
     /**
-     * 编辑策略规则时，组织范围/用户属性条件/目标应用均为整体替换语义：先按 policyId 删除
-     * 既有记录，再按提交内容批量插入。
+     * 新增策略规则未指定显示序号时，应使用默认值 0（spec.md"新增策略规则未指定显示序号时
+     * 使用默认值" Scenario）。
      */
     @Test
-    void update_shouldReplaceSubTables() {
-        PolicyEntity existing = PolicyEntity.builder().id(100L).name("旧名称").build();
+    void create_shouldUseDefaultShowOrder_whenNotProvided() {
+        ArgumentCaptor<PolicyEntity> captor = ArgumentCaptor.forClass(PolicyEntity.class);
+
+        policyService.create(orgOnlyRequest());
+
+        verify(policyMapper).insert(captor.capture());
+        assertThat(captor.getValue().getShowOrder()).isZero();
+    }
+
+    /**
+     * 新增策略规则显式指定显示序号时，应按该值保存（spec.md"新增策略规则时指定显示序号"
+     * Scenario）。
+     */
+    @Test
+    void create_shouldUseProvidedShowOrder() {
+        PolicyCreateRequest request = orgOnlyRequest();
+        request.setShowOrder(5);
+        ArgumentCaptor<PolicyEntity> captor = ArgumentCaptor.forClass(PolicyEntity.class);
+
+        policyService.create(request);
+
+        verify(policyMapper).insert(captor.capture());
+        assertThat(captor.getValue().getShowOrder()).isEqualTo(5);
+    }
+
+    /**
+     * 编辑策略规则时，组织范围为整体替换语义：先按 policyId 删除既有记录，再按提交内容批量
+     * 插入；用户属性条件子表虽本次未提交内容，也应先执行一次删除（整体替换语义对未选中的
+     * 类型同样生效，等价于清空）。
+     */
+    @Test
+    void update_shouldReplaceOrgScope_whenOnlyOrgScopeProvided() {
+        PolicyEntity existing = PolicyEntity.builder().id(100L).name("旧名称").showOrder(0).build();
         when(policyMapper.selectById(100L)).thenReturn(existing);
-        when(metadataFieldMapper.selectById(1L)).thenReturn(buildUserField(1L));
 
         PolicyUpdateRequest request = new PolicyUpdateRequest();
         request.setName("新名称");
-        request.setOrgScopes(validRequest().getOrgScopes());
-        request.setUserAttrs(validRequest().getUserAttrs());
+        request.setOrgScopes(orgOnlyRequest().getOrgScopes());
+        request.setUserAttrs(List.of());
         request.setTargetAppIds(List.of(300L));
 
         policyService.update(100L, request);
@@ -268,11 +336,37 @@ class PolicyServiceImplTest {
         verify(policyUserAttrMapper).delete(any());
         verify(policyTargetAppMapper).delete(any());
         verify(policyOrgScopeMapper, times(1)).insert(any(PolicyOrgScopeEntity.class));
-        verify(policyUserAttrMapper, times(1)).insert(any(PolicyUserAttrEntity.class));
+        verify(policyUserAttrMapper, never()).insert(any(PolicyUserAttrEntity.class));
         ArgumentCaptor<PolicyTargetAppEntity> targetAppCaptor = ArgumentCaptor.forClass(PolicyTargetAppEntity.class);
         verify(policyTargetAppMapper).insert(targetAppCaptor.capture());
         assertThat(targetAppCaptor.getValue().getAppId()).isEqualTo(300L);
         assertThat(existing.getName()).isEqualTo("新名称");
+    }
+
+    /**
+     * 编辑策略规则同时提交组织范围与用户属性条件两类非空内容时应能正常保存，二者可以共存。
+     */
+    @Test
+    void update_shouldSucceed_whenOrgScopeAndUserAttrBothConfigured() {
+        when(metadataFieldMapper.selectById(1L)).thenReturn(buildUserField(1L));
+        PolicyEntity existing = PolicyEntity.builder().id(100L).name("旧名称").showOrder(0).build();
+        when(policyMapper.selectById(100L)).thenReturn(existing);
+
+        PolicyUpdateRequest request = new PolicyUpdateRequest();
+        request.setName("新名称");
+        request.setOrgScopes(orgOnlyRequest().getOrgScopes());
+        PolicyUserAttrRequestItem userAttr = new PolicyUserAttrRequestItem();
+        userAttr.setMetadataFieldId(1L);
+        userAttr.setOperator(PolicyAttrOperator.EQ);
+        userAttr.setValues(List.of("male"));
+        request.setUserAttrs(List.of(userAttr));
+        request.setTargetAppIds(List.of(300L));
+
+        policyService.update(100L, request);
+
+        verify(policyOrgScopeMapper).insert(any(PolicyOrgScopeEntity.class));
+        verify(policyUserAttrMapper).insert(any(PolicyUserAttrEntity.class));
+        verify(policyMapper).updateById(any(PolicyEntity.class));
     }
 
     /**
@@ -312,9 +406,7 @@ class PolicyServiceImplTest {
      */
     @Test
     void create_shouldPersistRequestControlRules_whenProvided() {
-        when(metadataFieldMapper.selectById(1L)).thenReturn(buildUserField(1L));
-
-        PolicyCreateRequest request = validRequest();
+        PolicyCreateRequest request = requestControlOnlyRequest();
         request.setBrowserRules(List.of("CHROME", "EDGE"));
         request.setIpRules(List.of("192.168.1.0/24"));
 
@@ -331,31 +423,11 @@ class PolicyServiceImplTest {
     }
 
     /**
-     * 请求控制条件完全留空时应正常保存，不触发组织范围/用户属性条件"至少一项非空"约束之外
-     * 的额外报错（app-access-request-control change tasks.md 8.3）。
-     */
-    @Test
-    void create_shouldSucceed_whenRequestControlEmpty() {
-        when(metadataFieldMapper.selectById(1L)).thenReturn(buildUserField(1L));
-
-        PolicyCreateRequest request = validRequest();
-        request.setBrowserRules(List.of());
-        request.setIpRules(List.of());
-
-        PolicyVO vo = policyService.create(request);
-
-        assertThat(vo.getId()).isEqualTo(100L);
-        verify(policyBrowserRuleMapper, never()).insert(any(PolicyBrowserRuleEntity.class));
-        verify(policyIpRuleMapper, never()).insert(any(PolicyIpRuleEntity.class));
-    }
-
-    /**
      * IP 白名单条目格式不合法时应拒绝保存（spec.md"非法 IP/网段格式被拒绝" Scenario）。
      */
     @Test
     void create_shouldReject_whenIpRuleInvalid() {
-        when(metadataFieldMapper.selectById(1L)).thenReturn(buildUserField(1L));
-        PolicyCreateRequest request = validRequest();
+        PolicyCreateRequest request = requestControlOnlyRequest();
         request.setIpRules(List.of("not-an-ip"));
 
         assertThatThrownBy(() -> policyService.create(request))
@@ -369,8 +441,7 @@ class PolicyServiceImplTest {
      */
     @Test
     void create_shouldReject_whenBrowserCodeInvalid() {
-        when(metadataFieldMapper.selectById(1L)).thenReturn(buildUserField(1L));
-        PolicyCreateRequest request = validRequest();
+        PolicyCreateRequest request = requestControlOnlyRequest();
         request.setBrowserRules(List.of("UNKNOWN_BROWSER"));
 
         assertThatThrownBy(() -> policyService.create(request))
@@ -385,14 +456,13 @@ class PolicyServiceImplTest {
      */
     @Test
     void update_shouldReplaceRequestControlRules() {
-        PolicyEntity existing = PolicyEntity.builder().id(100L).name("旧名称").build();
+        PolicyEntity existing = PolicyEntity.builder().id(100L).name("旧名称").showOrder(0).build();
         when(policyMapper.selectById(100L)).thenReturn(existing);
-        when(metadataFieldMapper.selectById(1L)).thenReturn(buildUserField(1L));
 
         PolicyUpdateRequest request = new PolicyUpdateRequest();
         request.setName("新名称");
-        request.setOrgScopes(validRequest().getOrgScopes());
-        request.setUserAttrs(validRequest().getUserAttrs());
+        request.setOrgScopes(List.of());
+        request.setUserAttrs(List.of());
         request.setTargetAppIds(List.of(300L));
         request.setBrowserRules(List.of("FIREFOX"));
         request.setIpRules(List.of("10.0.0.1"));
@@ -407,16 +477,32 @@ class PolicyServiceImplTest {
     }
 
     /**
-     * 构造一条通过基本校验的策略规则新增请求：组织范围一条 + 用户属性条件一条 + 目标应用
-     * 一个。
+     * 构造一条仅配置组织范围的策略规则新增请求：组织范围一条 + 目标应用一个，用户属性条件/
+     * 请求控制条件均留空。
      *
      * @return 新增请求
      */
-    private PolicyCreateRequest validRequest() {
+    private PolicyCreateRequest orgOnlyRequest() {
         PolicyOrgScopeRequestItem orgScope = new PolicyOrgScopeRequestItem();
         orgScope.setOrgId(10L);
         orgScope.setIncludeChildren(false);
 
+        PolicyCreateRequest request = new PolicyCreateRequest();
+        request.setName("测试策略");
+        request.setRemark("备注");
+        request.setOrgScopes(List.of(orgScope));
+        request.setUserAttrs(List.of());
+        request.setTargetAppIds(List.of(200L));
+        return request;
+    }
+
+    /**
+     * 构造一条仅配置用户属性条件的策略规则新增请求：用户属性条件一条（关联元数据字段 id
+     * {@code 1}）+ 目标应用一个，组织范围/请求控制条件均留空。
+     *
+     * @return 新增请求
+     */
+    private PolicyCreateRequest userAttrOnlyRequest() {
         PolicyUserAttrRequestItem userAttr = new PolicyUserAttrRequestItem();
         userAttr.setMetadataFieldId(1L);
         userAttr.setOperator(PolicyAttrOperator.EQ);
@@ -425,9 +511,27 @@ class PolicyServiceImplTest {
         PolicyCreateRequest request = new PolicyCreateRequest();
         request.setName("测试策略");
         request.setRemark("备注");
-        request.setOrgScopes(List.of(orgScope));
+        request.setOrgScopes(List.of());
         request.setUserAttrs(List.of(userAttr));
         request.setTargetAppIds(List.of(200L));
+        return request;
+    }
+
+    /**
+     * 构造一条仅配置请求控制条件（浏览器+IP 白名单）的策略规则新增请求：目标应用一个，
+     * 组织范围/用户属性条件均留空。
+     *
+     * @return 新增请求
+     */
+    private PolicyCreateRequest requestControlOnlyRequest() {
+        PolicyCreateRequest request = new PolicyCreateRequest();
+        request.setName("测试策略");
+        request.setRemark("备注");
+        request.setOrgScopes(List.of());
+        request.setUserAttrs(List.of());
+        request.setTargetAppIds(List.of(200L));
+        request.setBrowserRules(List.of("CHROME"));
+        request.setIpRules(List.of("10.0.0.0/8"));
         return request;
     }
 

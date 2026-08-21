@@ -56,6 +56,10 @@ public class SsoProtocolLogVO {
     @Schema(description = "失败原因文案，成功时为空")
     private String failReason;
 
+    /** 拒绝来源的策略 id，仅失败原因为"应用访问授权策略拒绝"时非空，其余情况均为空。 */
+    @Schema(description = "拒绝来源的策略 id，仅失败原因为\"应用访问授权策略拒绝\"时非空")
+    private Long deniedPolicyId;
+
     /** 客户端 IP，可为空。 */
     @Schema(description = "客户端 IP")
     private String clientIp;

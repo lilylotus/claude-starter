@@ -1,8 +1,8 @@
 <script setup lang="ts">
-// 应用访问授权 - 策略规则子面板：分页列表（含"待重新执行"提示、启用/停用、执行、删除）
-// + 新建/编辑弹窗（组织范围多行可增删 + 用户属性条件多行可增删 + 目标应用多选）。
-// 组织范围选择器交互抄自 AppConfigView.vue 的"同步范围"区块（el-tree-select + 含子组织
-// 勾选 + 增删行）。
+// 应用访问授权 - 策略规则子面板：分页列表（含序号列、"待重新执行"提示、启用/停用、
+// 执行、删除）+ 新建/编辑弹窗（组织范围/用户属性/请求控制可同时配置，至少一类非空 +
+// 显示序号 + 目标应用多选）。组织范围选择器交互抄自 AppConfigView.vue 的"同步范围"区块
+// （el-tree-select + 含子组织勾选 + 增删行）。
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
@@ -121,10 +121,12 @@ interface PolicyForm {
   remark: string
   orgScopes: PolicyOrgScopeFormItem[]
   userAttrs: PolicyUserAttrFormItem[]
-  // 请求控制条件：浏览器白名单（多选编码）+ IP/网段白名单（可增删的字符串行），均可选
+  // 请求控制条件：浏览器白名单（多选编码）+ IP/网段白名单（可增删的字符串行）
   browserRules: PolicyBrowserCode[]
   ipRules: string[]
   targetAppIds: number[]
+  // 显示序号：数值越小优先级越高，运行时按升序取第一条命中身份的策略计算结果
+  showOrder: number
 }
 
 const form = reactive<PolicyForm>({
@@ -135,6 +137,7 @@ const form = reactive<PolicyForm>({
   browserRules: [],
   ipRules: [],
   targetAppIds: [],
+  showOrder: 0,
 })
 
 const rules: FormRules<PolicyForm> = {
@@ -152,6 +155,7 @@ function resetForm() {
   form.browserRules = []
   form.ipRules = []
   form.targetAppIds = []
+  form.showOrder = 0
 }
 
 async function openCreateDialog() {
@@ -162,7 +166,7 @@ async function openCreateDialog() {
   dialogVisible.value = true
 }
 
-// 用户属性条件回显：EQ/NE 时把唯一值填入 singleValue，IN 时把整组值填入 multiValues
+// 用户属性回显：EQ/NE 时把唯一值填入 singleValue，IN 时把整组值填入 multiValues
 function toUserAttrFormItem(attr: PolicyVO['userAttrs'][number]): PolicyUserAttrFormItem {
   return {
     metadataFieldId: attr.metadataFieldId,
@@ -184,6 +188,7 @@ async function openEditDialog(row: PolicyVO) {
   form.browserRules = detail.browserRules.map((rule) => rule.browserCode)
   form.ipRules = detail.ipRules.map((rule) => rule.ipCidr)
   form.targetAppIds = detail.targetApps.map((app) => app.appId)
+  form.showOrder = detail.showOrder
   dialogVisible.value = true
 }
 
@@ -202,7 +207,7 @@ function removeOrgScopeRow(index: number) {
   form.orgScopes.splice(index, 1)
 }
 
-// ---- 用户属性条件子表单：增删行、增删多值 ----
+// ---- 用户属性子表单：增删行、增删多值 ----
 
 function addUserAttrRow() {
   form.userAttrs.push({ metadataFieldId: null, operator: 'EQ', singleValue: '', multiValues: [] })
@@ -237,34 +242,42 @@ function removeIpRuleRow(index: number) {
   form.ipRules.splice(index, 1)
 }
 
-// ---- 提交前校验（组织范围/用户属性条件的动态行无法用 el-form rules 声明，单独校验） ----
+// ---- 提交前校验：组织范围/用户属性/请求控制可以同时配置，三者中至少一类非空，
+// 且已填写的每一类内部行数据要合法 ----
+// （组织范围/用户属性/请求控制的动态行无法用 el-form rules 声明，单独校验）
 
 function validateConditions(): string {
   if (form.orgScopes.some((scope) => scope.orgId === null)) {
     return '存在未选择组织的组织范围行，请补全或删除'
   }
-  const filledAttrs = form.userAttrs
-  if (filledAttrs.some((attr) => attr.metadataFieldId === null)) {
-    return '存在未选择字段的用户属性条件行，请补全或删除'
+
+  if (form.userAttrs.some((attr) => attr.metadataFieldId === null)) {
+    return '存在未选择字段的用户属性行，请补全或删除'
   }
-  for (const attr of filledAttrs) {
+  for (const attr of form.userAttrs) {
     if (attr.operator === 'IN') {
       if (attr.multiValues.filter((v) => v.trim()).length === 0) {
-        return '用户属性条件"属于多值"运算符至少需要一个比较值'
+        return '用户属性"属于多值"运算符至少需要一个比较值'
       }
     } else if (!attr.singleValue.trim()) {
-      return '用户属性条件的比较值不能为空'
+      return '用户属性的比较值不能为空'
     }
   }
-  const fieldIds = filledAttrs.map((attr) => attr.metadataFieldId)
+  const fieldIds = form.userAttrs.map((attr) => attr.metadataFieldId)
   if (new Set(fieldIds).size !== fieldIds.length) {
     return '同一策略内不允许重复配置同一个用户属性字段'
   }
-  if (form.orgScopes.length === 0 && form.userAttrs.length === 0) {
-    return '组织范围与用户属性条件不能同时为空，请至少配置一类'
-  }
+
   if (form.ipRules.some((ip) => !ip.trim())) {
     return '存在未填写的 IP/网段白名单行，请补全或删除'
+  }
+  const filledIpRules = form.ipRules.map((ip) => ip.trim()).filter((ip) => ip)
+
+  const hasOrgScope = form.orgScopes.length > 0
+  const hasUserAttr = form.userAttrs.length > 0
+  const hasRequestControl = form.browserRules.length > 0 || filledIpRules.length > 0
+  if (!hasOrgScope && !hasUserAttr && !hasRequestControl) {
+    return '组织范围、用户属性、请求控制条件不能同时为空，请至少配置一类'
   }
   return ''
 }
@@ -273,10 +286,7 @@ function toSubmitPayload(): PolicyFormRequest {
   return {
     name: form.name.trim(),
     remark: form.remark.trim(),
-    orgScopes: form.orgScopes.map((scope) => ({
-      orgId: scope.orgId as number,
-      includeChildren: scope.includeChildren,
-    })),
+    orgScopes: form.orgScopes.map((scope) => ({ orgId: scope.orgId as number, includeChildren: scope.includeChildren })),
     userAttrs: form.userAttrs.map((attr) => ({
       metadataFieldId: attr.metadataFieldId as number,
       operator: attr.operator,
@@ -285,6 +295,7 @@ function toSubmitPayload(): PolicyFormRequest {
     browserRules: [...form.browserRules],
     ipRules: form.ipRules.map((ip) => ip.trim()).filter((ip) => ip),
     targetAppIds: form.targetAppIds,
+    showOrder: form.showOrder,
   }
 }
 
@@ -384,6 +395,7 @@ async function handleDelete(row: PolicyVO) {
     </el-form>
 
     <el-table v-loading="listLoading" :data="list" empty-text="暂无策略规则">
+      <el-table-column prop="showOrder" label="序号" width="80" />
       <el-table-column prop="name" label="策略名称" min-width="150" />
       <el-table-column label="状态" width="90">
         <template #default="{ row }">
@@ -470,11 +482,15 @@ async function handleDelete(row: PolicyVO) {
         <el-form-item label="备注" prop="remark">
           <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="选填" />
         </el-form-item>
+        <el-form-item label="显示序号" prop="showOrder">
+          <el-input-number v-model="form.showOrder" :min="0" :max="99999" controls-position="right" style="width: 160px" />
+          <span class="policy-field-hint">数值越小优先级越高，运行时按升序取第一条命中身份的策略计算结果；相同序号按创建顺序排列</span>
+        </el-form-item>
 
         <el-form-item label="组织范围">
           <div class="policy-condition-block">
             <el-button link type="primary" :icon="Plus" @click="addOrgScopeRow">添加组织</el-button>
-            <p v-if="form.orgScopes.length === 0" class="policy-condition-empty">未配置组织范围（可选）</p>
+            <p v-if="form.orgScopes.length === 0" class="policy-condition-empty">未配置组织范围</p>
             <div v-else class="policy-condition-list">
               <div v-for="(scope, index) in form.orgScopes" :key="index" class="policy-condition-row">
                 <el-tree-select
@@ -493,10 +509,10 @@ async function handleDelete(row: PolicyVO) {
           </div>
         </el-form-item>
 
-        <el-form-item label="用户属性条件">
+        <el-form-item label="用户属性">
           <div class="policy-condition-block">
             <el-button link type="primary" :icon="Plus" @click="addUserAttrRow">添加条件</el-button>
-            <p v-if="form.userAttrs.length === 0" class="policy-condition-empty">未配置用户属性条件（可选）</p>
+            <p v-if="form.userAttrs.length === 0" class="policy-condition-empty">未配置用户属性</p>
             <div v-else class="policy-condition-list">
               <div v-for="(attr, index) in form.userAttrs" :key="index" class="policy-condition-row policy-condition-row--attr">
                 <el-select v-model="attr.metadataFieldId" placeholder="选择字段" style="width: 170px">
@@ -527,7 +543,7 @@ async function handleDelete(row: PolicyVO) {
         <el-form-item label="请求控制">
           <div class="policy-condition-block">
             <p class="policy-condition-hint">
-              浏览器白名单、IP/网段白名单均为可选条件，与组织范围/用户属性条件不同，不配置则不做任何限制。
+              浏览器白名单、IP/网段白名单二者至少配置一项；两者内部均可只配置其中一个。
             </p>
             <div class="policy-request-control-row">
               <span class="policy-request-control-label">浏览器白名单</span>
@@ -536,12 +552,12 @@ async function handleDelete(row: PolicyVO) {
                   {{ opt.label }}
                 </el-checkbox>
               </el-checkbox-group>
-              <p v-if="form.browserRules.length === 0" class="policy-condition-empty">未配置浏览器白名单（可选，不限制）</p>
+              <p v-if="form.browserRules.length === 0" class="policy-condition-empty">未配置浏览器白名单</p>
             </div>
             <div class="policy-request-control-row">
               <span class="policy-request-control-label">IP/网段白名单</span>
               <el-button link type="primary" :icon="Plus" @click="addIpRuleRow">添加 IP/网段</el-button>
-              <p v-if="form.ipRules.length === 0" class="policy-condition-empty">未配置 IP/网段白名单（可选，不限制）</p>
+              <p v-if="form.ipRules.length === 0" class="policy-condition-empty">未配置 IP/网段白名单</p>
               <div v-else class="policy-condition-list">
                 <div v-for="(_, index) in form.ipRules" :key="index" class="policy-condition-row">
                   <el-input v-model="form.ipRules[index]" placeholder="如 192.168.1.0/24 或 10.0.0.5" style="flex: 1" />
@@ -614,6 +630,13 @@ async function handleDelete(row: PolicyVO) {
 
 .policy-condition-hint {
   margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+}
+
+.policy-field-hint {
+  display: block;
+  margin-top: 4px;
   font-size: 12px;
   color: var(--color-text-tertiary);
 }
