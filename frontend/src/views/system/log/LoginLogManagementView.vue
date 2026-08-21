@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { QuestionFilled } from '@element-plus/icons-vue'
 import * as loginLogApi from '@/api/loginLog'
 import SsoProtocolLogDialog from '@/components/SsoProtocolLogDialog.vue'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '@/constants/pagination'
@@ -158,7 +159,16 @@ function openSsoProtocolLogDialog(row: LoginLogRow) {
         <el-table-column label="设备信息" min-width="180">
           <template #default="{ row }">{{ deviceInfo(row as LoginLogRow) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="140" fixed="right">
+        <el-table-column min-width="220">
+          <template #header>
+            <span>会话ID</span>
+            <el-tooltip content="会话标识（摘要值，不可用于登录）" placement="top">
+              <el-icon class="log-panel__col-tip"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </template>
+          <template #default="{ row }">{{ displayValue((row as LoginLogRow).sessionId) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="100" fixed="right">
           <template #default="{ row }">
             <el-button
               v-if="canViewSsoProtocolLogs(row as LoginLogRow)"
@@ -166,7 +176,7 @@ function openSsoProtocolLogDialog(row: LoginLogRow) {
               type="primary"
               @click="openSsoProtocolLogDialog(row as LoginLogRow)"
             >
-              查看SSO调用记录
+              协议详情
             </el-button>
           </template>
         </el-table-column>
@@ -217,6 +227,13 @@ function openSsoProtocolLogDialog(row: LoginLogRow) {
   :deep(.el-form-item) {
     margin-bottom: 12px;
   }
+}
+
+.log-panel__col-tip {
+  margin-left: 4px;
+  color: var(--color-text-secondary);
+  vertical-align: middle;
+  cursor: help;
 }
 
 .log-pagination {

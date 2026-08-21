@@ -71,7 +71,8 @@ class SsoProtocolLogQueryServiceImplTest {
      */
     @Test
     void getPage_shouldReturnAllRecords_whenAllFiltersEmpty() {
-        SsoProtocolLogEntity entity = buildEntity(1L, SsoProtocolLogEventType.LOGIN, SsoProtocolLogResult.SUCCESS);
+        SsoProtocolLogEntity entity = buildEntity(1L, SsoProtocolLogEventType.LOGIN, SsoProtocolLogResult.SUCCESS,
+                "session-hash-abc");
         Page<SsoProtocolLogEntity> resultPage = new Page<>(1, 10, 1L);
         resultPage.setRecords(List.of(entity));
         when(ssoProtocolLogMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(resultPage);
@@ -87,6 +88,7 @@ class SsoProtocolLogQueryServiceImplTest {
         SsoProtocolLogVO vo = pageResult.getRecords().get(0);
         assertThat(vo.getEventType()).isEqualTo(SsoProtocolLogEventType.LOGIN);
         assertThat(vo.getResultLabel()).isEqualTo("成功");
+        assertThat(vo.getSessionId()).isEqualTo("session-hash-abc");
 
         ArgumentCaptor<LambdaQueryWrapper<SsoProtocolLogEntity>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
         verify(ssoProtocolLogMapper).selectPage(any(Page.class), captor.capture());
@@ -228,13 +230,15 @@ class SsoProtocolLogQueryServiceImplTest {
      * @param id        主键 id
      * @param eventType 事件类型
      * @param result    调用结果
+     * @param sessionId 关联的 SSO 会话标识，可为 {@code null}
      * @return SSO 协议调用记录实体
      */
-    private SsoProtocolLogEntity buildEntity(long id, String eventType, int result) {
+    private SsoProtocolLogEntity buildEntity(long id, String eventType, int result, String sessionId) {
         return SsoProtocolLogEntity.builder()
                 .id(id)
                 .eventType(eventType)
                 .result(result)
+                .sessionId(sessionId)
                 .createBy("test")
                 .createTime(LocalDateTime.now())
                 .updateBy("test")

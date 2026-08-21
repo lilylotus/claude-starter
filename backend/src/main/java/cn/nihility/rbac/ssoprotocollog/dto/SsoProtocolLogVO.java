@@ -60,6 +60,13 @@ public class SsoProtocolLogVO {
     @Schema(description = "客户端 IP")
     private String clientIp;
 
+    /**
+     * 本次调用所属 SSO 会话标识（会话令牌 SHA-256 摘要，非原始令牌），处理链路尚未解析出
+     * 会话时为空；供登录日志页面下钻查看时与登录记录的会话标识核对展示。
+     */
+    @Schema(description = "SSO 会话标识（会话令牌摘要），处理链路尚未解析出会话时为空")
+    private String sessionId;
+
     /** 原始 User-Agent 请求头，可为空。 */
     @Schema(description = "原始 User-Agent 请求头")
     private String userAgent;

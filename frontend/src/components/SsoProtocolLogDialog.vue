@@ -1,7 +1,7 @@
 <script setup lang="ts">
-// 登录日志页面"查看 SSO 调用记录"弹窗：按 sessionId 精确查询某次成功的 SSO 登录
+// 登录日志页面"协议详情"弹窗：按 sessionId 精确查询某次成功的 SSO 登录
 // 之后关联的全部 CAS/OAuth2 协议调用记录（服务票据签发/验证、授权码/令牌签发、
-// 用户信息查询、登出等），分页展示。sessionId 只作为查询参数使用，不在页面上展示。
+// 用户信息查询、登出等），分页展示。
 import { ref, watch } from 'vue'
 import * as ssoProtocolLogApi from '@/api/ssoProtocolLog'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '@/constants/pagination'
@@ -98,7 +98,7 @@ function displayValue(value: string | number | null | undefined): string {
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="SSO 调用记录" width="900px">
+  <el-dialog v-model="visible" title="协议详情" width="1200px">
     <el-table v-loading="listLoading" :data="list" empty-text="暂无关联的 SSO 协议调用记录">
       <el-table-column prop="createTime" label="调用时间" width="170" />
       <el-table-column label="协议" width="90">
@@ -125,6 +125,9 @@ function displayValue(value: string | number | null | undefined): string {
       </el-table-column>
       <el-table-column label="客户端IP" width="140">
         <template #default="{ row }">{{ displayValue((row as SsoProtocolLogRow).clientIp) }}</template>
+      </el-table-column>
+      <el-table-column label="会话ID" min-width="220">
+        <template #default="{ row }">{{ displayValue((row as SsoProtocolLogRow).sessionId) }}</template>
       </el-table-column>
     </el-table>
 

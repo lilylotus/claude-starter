@@ -57,4 +57,6 @@ export interface SsoProtocolLogRow {
   clientIp: string | null
   userAgent: string | null
   createTime: string
+  // 本次调用所属 SSO 会话标识（会话令牌哈希摘要），处理链路尚未解析出会话时为空
+  sessionId: string | null
 }
