@@ -41,8 +41,8 @@ public class LoginLogRecorderImpl implements LoginLogRecorder {
      * {@inheritDoc}
      */
     @Override
-    public void recordSuccess(String loginAccount, Long userId, String userName) {
-        record(LoginResult.SUCCESS, loginAccount, userId, userName, null);
+    public void recordSuccess(String loginAccount, Long userId, String userName, String sessionId) {
+        record(LoginResult.SUCCESS, loginAccount, userId, userName, null, sessionId);
     }
 
     /**
@@ -50,7 +50,7 @@ public class LoginLogRecorderImpl implements LoginLogRecorder {
      */
     @Override
     public void recordFailure(String loginAccount, Long userId, String userName, String failReason) {
-        record(LoginResult.FAILED, loginAccount, userId, userName, failReason);
+        record(LoginResult.FAILED, loginAccount, userId, userName, failReason, null);
     }
 
     /**
@@ -61,8 +61,10 @@ public class LoginLogRecorderImpl implements LoginLogRecorder {
      * @param userId       关联的用户 id，可为 {@code null}
      * @param userName     关联的用户姓名，可为 {@code null}
      * @param failReason   失败原因文案，登录成功时为 {@code null}
+     * @param sessionId    本次建立的 SSO 会话标识，仅 SSO 登录成功时非空
      */
-    private void record(int loginResult, String loginAccount, Long userId, String userName, String failReason) {
+    private void record(int loginResult, String loginAccount, Long userId, String userName, String failReason,
+            String sessionId) {
         HttpServletRequest request = currentRequest();
         LocalDateTime now = LocalDateTime.now();
         String operator = StringUtils.hasText(loginAccount) ? loginAccount : UNKNOWN_OPERATOR;
@@ -74,6 +76,7 @@ public class LoginLogRecorderImpl implements LoginLogRecorder {
                 .loginResult(loginResult)
                 .failReason(failReason)
                 .loginIp(ClientRequestUtils.resolveClientIp(request))
+                .sessionId(sessionId)
                 .createBy(operator)
                 .createTime(now)
                 .updateBy(operator)

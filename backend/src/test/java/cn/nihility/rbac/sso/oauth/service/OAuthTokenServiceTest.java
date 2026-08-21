@@ -150,7 +150,7 @@ class OAuthTokenServiceTest {
         IssuedToken issued = oAuthTokenService.issueAccessTokenWithRefresh("client-4", 23L, "profile", null);
 
         IssuedToken rotated = oAuthTokenService.rotateAccessAndRefreshToken(issued.refreshToken(), "client-4", 23L,
-                "profile");
+                "profile", null);
 
         assertThat(rotated.accessToken()).isNotEqualTo(issued.accessToken());
         assertThat(rotated.refreshToken()).isNotEqualTo(issued.refreshToken());
@@ -161,5 +161,27 @@ class OAuthTokenServiceTest {
         assertThat(oAuthTokenService.verifyRefreshToken(rotated.refreshToken())).isPresent();
         Long ttl = stringRedisTemplate.getExpire("oauth:refresh:" + rotated.refreshToken(), TimeUnit.SECONDS);
         assertThat(ttl).isGreaterThan(0);
+    }
+
+    /**
+     * 刷新轮转时传入的 {@code sessionToken} 应原样延续到新签发的 access token 与
+     * refresh token 载荷中，确保刷新链路始终关联同一个 SSO 会话（add-sso-protocol-access-log
+     * change design.md Decision 6）。
+     */
+    @Test
+    void rotateAccessAndRefreshToken_shouldPropagateSessionToken() {
+        String sessionToken = "sso-session-4";
+        IssuedToken issued = oAuthTokenService.issueAccessTokenWithRefresh("client-5", 24L, "profile", sessionToken);
+
+        IssuedToken rotated = oAuthTokenService.rotateAccessAndRefreshToken(issued.refreshToken(), "client-5", 24L,
+                "profile", sessionToken);
+
+        Optional<OAuthTokenPayload> newAccessPayload = oAuthTokenService.verifyAccessToken(rotated.accessToken());
+        assertThat(newAccessPayload).isPresent();
+        assertThat(newAccessPayload.get().sessionToken()).isEqualTo(sessionToken);
+
+        Optional<OAuthRefreshPayload> newRefreshPayload = oAuthTokenService.verifyRefreshToken(rotated.refreshToken());
+        assertThat(newRefreshPayload).isPresent();
+        assertThat(newRefreshPayload.get().sessionToken()).isEqualTo(sessionToken);
     }
 }

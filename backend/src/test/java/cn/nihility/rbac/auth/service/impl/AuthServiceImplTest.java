@@ -116,7 +116,7 @@ class AuthServiceImplTest {
         assertThat(response.getAccessKey()).isEqualTo("access-key");
         assertThat(response.getRefreshKey()).isEqualTo("refresh-key");
         assertThat(response.getFirstLogin()).isTrue();
-        verify(loginLogRecorder).recordSuccess("U001", 1L, "张三");
+        verify(loginLogRecorder).recordSuccess("U001", 1L, "张三", null);
         verify(loginLogRecorder, never()).recordFailure(any(), any(), any(), any());
     }
 
@@ -131,7 +131,7 @@ class AuthServiceImplTest {
                 .isInstanceOf(BusinessException.class);
         verify(tokenService, never()).issue(anyLong());
         verify(loginLogRecorder).recordFailure("unknown", null, null, LoginFailReason.ACCOUNT_NOT_FOUND);
-        verify(loginLogRecorder, never()).recordSuccess(any(), any(), any());
+        verify(loginLogRecorder, never()).recordSuccess(any(), any(), any(), any());
     }
 
     /**
@@ -147,7 +147,7 @@ class AuthServiceImplTest {
                 .isInstanceOf(BusinessException.class);
         verify(tokenService, never()).issue(anyLong());
         verify(loginLogRecorder).recordFailure("U001", 1L, "张三", LoginFailReason.PASSWORD_MISMATCH);
-        verify(loginLogRecorder, never()).recordSuccess(any(), any(), any());
+        verify(loginLogRecorder, never()).recordSuccess(any(), any(), any(), any());
     }
 
     /**
@@ -163,7 +163,7 @@ class AuthServiceImplTest {
         verify(passwordService, never()).verifyPassword(anyLong(), any());
         verify(tokenService, never()).issue(anyLong());
         verify(loginLogRecorder).recordFailure("U001", 1L, "张三", LoginFailReason.ACCOUNT_DISABLED);
-        verify(loginLogRecorder, never()).recordSuccess(any(), any(), any());
+        verify(loginLogRecorder, never()).recordSuccess(any(), any(), any(), any());
     }
 
     /**
@@ -180,7 +180,7 @@ class AuthServiceImplTest {
         verify(passwordService, never()).verifyPassword(anyLong(), any());
         verify(tokenService, never()).issue(anyLong());
         verify(loginLogRecorder).recordFailure("U001", 1L, "张三", LoginFailReason.ACCOUNT_DELETED);
-        verify(loginLogRecorder, never()).recordSuccess(any(), any(), any());
+        verify(loginLogRecorder, never()).recordSuccess(any(), any(), any(), any());
     }
 
     /**
@@ -197,7 +197,7 @@ class AuthServiceImplTest {
         verify(userMapper, never()).selectOne(any(LambdaQueryWrapper.class));
         verify(tokenService, never()).issue(anyLong());
         verify(loginLogRecorder).recordFailure(null, null, null, LoginFailReason.DECRYPT_FAILED);
-        verify(loginLogRecorder, never()).recordSuccess(any(), any(), any());
+        verify(loginLogRecorder, never()).recordSuccess(any(), any(), any(), any());
     }
 
     /**

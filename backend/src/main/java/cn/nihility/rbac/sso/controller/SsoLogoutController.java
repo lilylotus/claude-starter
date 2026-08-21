@@ -1,14 +1,19 @@
 package cn.nihility.rbac.sso.controller;
 
+import cn.nihility.rbac.app.authconfig.constant.AuthProtocol;
+import cn.nihility.rbac.app.authconfig.entity.AppAuthConfigEntity;
 import cn.nihility.rbac.sso.support.AppProtocolGuard;
 import cn.nihility.rbac.sso.support.ProtocolResponseWriter;
 import cn.nihility.rbac.sso.support.SsoLogoutExecutor;
 import cn.nihility.rbac.sso.support.SsoProtocolException;
+import cn.nihility.rbac.ssoprotocollog.constant.SsoProtocolLogEventType;
+import cn.nihility.rbac.ssoprotocollog.service.SsoProtocolLogRecorder;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -35,6 +40,9 @@ public class SsoLogoutController {
     /** 单点登出主流程公共执行组件。 */
     private final SsoLogoutExecutor ssoLogoutExecutor;
 
+    /** SSO 协议调用记录组件（add-sso-protocol-access-log change design.md Decision 4）。 */
+    private final SsoProtocolLogRecorder ssoProtocolLogRecorder;
+
     /**
      * 全局单点登出：按 {@code appId} 解析该应用的单点登录协议配置，依据其协议类型校验
      * {@code service} 是否匹配对应的匹配列表（CAS 匹配 service 列表，OAuth2.0 匹配
@@ -54,12 +62,18 @@ public class SsoLogoutController {
     @GetMapping("/api/authn/{appId}/logout")
     public void logout(@PathVariable String appId, @RequestParam String service, HttpServletRequest request,
             HttpServletResponse response) throws IOException {
+        AppAuthConfigEntity authConfig;
         try {
-            appProtocolGuard.assertLogoutServiceAllowed(appId, service);
+            authConfig = appProtocolGuard.assertLogoutServiceAllowed(appId, service);
         } catch (SsoProtocolException e) {
+            Optional<AppAuthConfigEntity> resolved = appProtocolGuard.tryResolveAuthConfig(appId);
+            String protocol = resolved.map(AppAuthConfigEntity::getAuthProtocol).orElse(AuthProtocol.NONE);
+            Long appRefId = resolved.map(AppAuthConfigEntity::getAppRefId).orElse(null);
+            ssoProtocolLogRecorder.recordFailure(protocol, SsoProtocolLogEventType.LOGOUT, appId, appRefId, null, null,
+                    e.getMessage());
             ProtocolResponseWriter.text(response, HttpServletResponse.SC_BAD_REQUEST, e.getMessage());
             return;
         }
-        ssoLogoutExecutor.execute(request, response, service);
+        ssoLogoutExecutor.execute(request, response, service, appId, authConfig.getAuthProtocol());
     }
 }

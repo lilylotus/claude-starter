@@ -19,6 +19,25 @@ SHALL 有过期时间，过期后需要重新登录。
 - **WHEN** 用户已持有管理端 SPA 的登录态，但从未做过 SSO 登录
 - **THEN** 该用户访问 CAS/OAuth2 协议端点时仍被判定为未建立 SSO 会话，需要走 SSO 登录
 
+### Requirement: SSO 登录记录登录日志
+SSO 专用登录端点（`/api/authn/sso/login`）的每一次凭证校验尝试 SHALL 触发一次登录日志记录（复用 `login-log-management` 能力的记录动作），区分登录成功、密码不正确、账号不存在、账号已停用、账号已删除、账号密文解密失败六类场景，字段粒度（登录账号、关联用户 id/姓名快照、失败原因、登录发起 IP/终端/操作系统/浏览器/User-Agent、发起时间）与 `password-login-auth`（管理端口令登录）完全一致。SSO 会话建立后，由该会话签发的后续 CAS 服务票据、OAuth2 授权码/令牌 SHALL NOT 触发额外的登录日志记录——因为签发票据/令牌时不再重新校验账号密码，不构成新的登录尝试。记录登录日志 SHALL 不影响、不改变 SSO 登录接口对外返回的错误提示文案与信息泄露约束。
+
+#### Scenario: SSO 登录成功记录登录日志
+- **WHEN** 用户在 SSO 登录页提交的账号密码校验通过
+- **THEN** 系统写入一条登录结果为成功的登录日志，包含该用户的 id、姓名快照，随后建立 SSO 会话
+
+#### Scenario: SSO 登录密码错误记录对应失败原因
+- **WHEN** 用户在 SSO 登录页提交的账号存在且启用，但密码校验不通过
+- **THEN** 系统写入一条登录结果为失败、失败原因为"密码不正确"的登录日志，SSO 登录接口仍返回统一的"账号或密码不正确"提示
+
+#### Scenario: SSO 登录覆盖账号不存在/已停用/已删除/解密失败场景
+- **WHEN** 用户在 SSO 登录页提交的账号解密失败，或解密后对应的账号不存在/已停用/已逻辑删除
+- **THEN** 系统写入一条登录结果为失败、失败原因对应各自场景的登录日志，字段粒度与管理端口令登录的同名场景一致
+
+#### Scenario: 同一 SSO 会话签发多个应用的票据不重复记录
+- **WHEN** 用户已持有有效 SSO 会话，先后访问 CAS 应用 A 与 OAuth2 应用 B 的单点登录端点，均直接签发票据/授权码而未重新触发登录页
+- **THEN** 系统不为这两次票据/授权码签发额外写入登录日志——本次会话建立时的那一条登录日志记录已经覆盖
+
 ### Requirement: CAS 单点登录
 `GET /api/authn/cas/{appId}/login` SHALL 校验 `appId` 对应应用的协议类型为 CAS 且
 `service` 参数匹配该应用配置的回跳地址匹配列表（`servicePatterns`）中的至少一条规则，不匹配时 SHALL
@@ -29,60 +48,46 @@ SHALL 有过期时间，过期后需要重新登录。
 返回 HTTP 403，响应体为标准 `{code, message, data}` JSON 结构（`code=403`），不发生重定向、不签发
 票据。授权校验通过后系统 SHALL 签发一次性的服务票据（ST）并重定向到 `service`（附带 `ticket`
 参数）；若无有效 SSO 会话，系统 SHALL 重定向到 SSO 登录页，登录成功后能够回到本次请求继续完成
-授权校验与票据签发。
+授权校验与票据签发。`service` 校验失败、最终生效权限校验失败、票据签发成功三种结果 SHALL 各自
+触发一次 `sso-protocol-access-log` 能力的调用记录（事件类型 `LOGIN`）；重定向到 SSO 登录页这一步
+本身 SHALL NOT 触发记录（尚未发生任何 CAS 协议语义上的动作）。
 
 #### Scenario: service 未匹配任何规则被拒绝
 - **WHEN** 调用方携带的 `service` 不匹配该应用配置的任何 ANT 匹配规则
-- **THEN** 系统拒绝该请求，不重定向到该 `service`
+- **THEN** 系统拒绝该请求，不重定向到该 `service`，记录一条失败的调用记录（失败原因为 service 未匹配）
 
 #### Scenario: 未登录时先跳转 SSO 登录页
 - **WHEN** 浏览器没有有效 SSO 会话地访问 CAS 单点登录接口
-- **THEN** 系统重定向到 SSO 登录页；登录成功后系统签发服务票据并重定向回原始 `service`
+- **THEN** 系统重定向到 SSO 登录页；登录成功后系统签发服务票据并重定向回原始 `service`；重定向到
+  登录页这一步不产生调用记录
 
 #### Scenario: 已登录且请求满足最终生效授权（含请求控制）时直接签发票据
 - **WHEN** 浏览器持有有效 SSO 会话地访问 CAS 单点登录接口，`service` 校验通过，且当前用户具备访问该应用的最终生效授权，当前请求的浏览器/IP 满足命中策略配置的请求控制条件（或命中的策略/例外未配置请求控制）
-- **THEN** 系统直接签发服务票据并重定向到 `service`，不再展示登录页
+- **THEN** 系统直接签发服务票据并重定向到 `service`，不再展示登录页，记录一条成功的调用记录（含解析到的用户 id）；即使本次访问复用了此前已建立的 SSO 会话、未重新输入账号密码，本次票据签发依然单独记一条
 
 #### Scenario: 用户无最终生效授权时拒绝签发票据
 - **WHEN** 浏览器持有有效 SSO 会话地访问 CAS 单点登录接口，`service` 校验通过，但当前用户不具备访问 `appId` 对应应用的最终生效授权（不存在人工例外授权，也不存在任何身份命中的启用中策略）
-- **THEN** 系统返回 HTTP 403，响应体为 `{code:403, message:"当前用户无权访问该应用", data:null}`，不签发服务票据，不发生重定向
+- **THEN** 系统返回 HTTP 403，响应体为 `{code:403, message:"当前用户无权访问该应用", data:null}`，不签发服务票据，不发生重定向，记录一条失败的调用记录
 
 #### Scenario: 身份命中但当前请求不满足命中策略的请求控制时拒绝签发票据
 - **WHEN** 浏览器持有有效 SSO 会话地访问 CAS 单点登录接口，`service` 校验通过，当前用户身份命中某启用中策略（该策略配置了"仅允许 Chrome 浏览器访问"），但当前请求的 `User-Agent` 不是 Chrome，且该用户不存在能覆盖此次访问的 `GRANT` 人工例外
-- **THEN** 系统返回 HTTP 403，响应体为 `{code:403, message:"当前用户无权访问该应用", data:null}`，不签发服务票据，不发生重定向
+- **THEN** 系统返回 HTTP 403，响应体为 `{code:403, message:"当前用户无权访问该应用", data:null}`，不签发服务票据，不发生重定向，记录一条失败的调用记录
 
 ### Requirement: CAS 票据验证
 `GET /api/authn/cas/{appId}/p3/serviceValidate` SHALL 校验 `ticket` 存在、未过期、
-未被消费过，且签发时绑定的 `service` 与本次请求的 `service` 一致；校验通过后 SHALL
-将该票据标记为已消费（一次性），并返回认证成功响应（含用户标识 `cas:user`，固定取
-用户 `code`）；校验不通过时 SHALL 返回认证失败响应。
+`service` 参数与签发该票据时使用的 `service` 一致，票据仅可被消费一次；校验通过后返回认证成功响应
+（含用户属性），否则返回认证失败响应。本端点由应用后端服务器直接调用（不经过浏览器），不涉及
+`tab_login_log` 的账号/密码语义，成功/失败均 SHALL 触发一次 `sso-protocol-access-log` 能力的调用
+记录（事件类型 `SERVICE_VALIDATE`），失败时记录票据不存在/已过期/已使用或 `service` 不一致等具体
+原因。
 
-接口 SHALL 支持 `format` 查询参数（大小写不敏感），取值为 `XML` 时返回 XML 格式响应；
-取值缺省或为其它任意值时 SHALL 返回 JSON 格式响应（默认 JSON）。响应中除 `cas:user`
-外的用户属性（`cas:attributes` 或 JSON 对应节点）SHALL 按该应用配置的用户信息字段映射
-动态生成（未配置任何映射时使用默认的"用户ID + 姓名"两个属性）。
+#### Scenario: 合法票据校验成功记录调用
+- **WHEN** 应用后端服务器携带一个刚签发、未消费过的合法票据请求校验
+- **THEN** 系统返回认证成功响应，记录一条成功的调用记录，包含票据绑定的用户 id
 
-#### Scenario: 合法票据校验成功且不可重复使用
-- **WHEN** 调用方使用一个刚签发、`service` 匹配的合法票据发起验证请求
-- **THEN** 系统返回认证成功响应；调用方用同一票据再次发起验证请求时，系统返回认证失败响应
-
-#### Scenario: service 不一致时校验失败
-- **WHEN** 调用方使用的票据是为另一个 `service` 签发的
-- **THEN** 系统返回认证失败响应，不消费该票据的有效性判定结果泄露给非授权调用方
-
-#### Scenario: 未指定 format 时默认返回 JSON
-- **WHEN** 调用方发起票据验证请求且未携带 `format` 参数
-- **THEN** 系统返回 JSON 格式的认证成功/失败响应，而不是 XML
-
-#### Scenario: format=XML 时返回 XML 格式响应
-- **WHEN** 调用方发起票据验证请求并携带 `format=XML`
-- **THEN** 系统返回 CAS 3.0 格式的 XML 认证成功/失败响应
-
-#### Scenario: 用户属性按字段映射动态生成
-- **WHEN** 某应用配置了一条用户信息字段映射（本地字段"姓名"→应用字段编码
-  `displayName`，转换方式"不转换"），且票据校验成功
-- **THEN** 响应的属性节点中包含键为 `displayName`、值为该用户姓名的属性，
-  而不是固定的 `cas:name`
+#### Scenario: 票据已被消费或过期时记录失败
+- **WHEN** 应用后端服务器携带一个已经被消费过、或已过期的票据请求校验
+- **THEN** 系统返回认证失败响应，记录一条失败的调用记录，失败原因为票据不存在/已过期/已被使用
 
 ### Requirement: CAS 单点登出
 `GET /api/authn/cas/{appId}/logout` SHALL 校验 `appId` 对应应用的协议类型为 CAS 且
@@ -90,22 +95,24 @@ SHALL 有过期时间，过期后需要重新登录。
 拒绝且不发生重定向。校验通过后，系统 SHALL 依次执行：清除当前浏览器持有的 SSO 会话
 （使其失效）、清除 `sso_session` Cookie、触发一次"单点登出后端回调通知"（通知本次
 会话在其他应用建立的登录态失效），最终 302 重定向到 `service`。后端回调通知的执行
-结果（成功/部分失败/超时）SHALL NOT 影响本次登出主流程与 302 重定向的正常完成。
+结果（成功/部分失败/超时）SHALL NOT 影响本次登出主流程与 302 重定向的正常完成。`service`
+校验失败与登出执行成功两种结果 SHALL 各自触发一次 `sso-protocol-access-log` 能力的调用记录
+（事件类型 `LOGOUT`），未持有有效会话时的登出仍视为一次成功的调用记录（用户 id 为空）。
 
 #### Scenario: service 未匹配任何规则被拒绝
 - **WHEN** 调用方携带的 `service` 不匹配该应用配置的任何 ANT 匹配规则
-- **THEN** 系统拒绝该请求，不清除会话，不发生重定向
+- **THEN** 系统拒绝该请求，不清除会话，不发生重定向，记录一条失败的调用记录
 
 #### Scenario: 登出后原会话失效并跳回 service
 - **WHEN** 用户携带匹配的 `service` 参数访问 CAS 单点登出接口
 - **THEN** 该浏览器持有的 SSO 会话失效、`sso_session` Cookie 被清除，且系统 302
-  重定向到 `service`
+  重定向到 `service`，记录一条成功的调用记录（含被登出的用户 id）
 
 #### Scenario: 回调通知失败不阻塞登出流程
 - **WHEN** 用户访问 CAS 单点登出接口，且本次会话登录过的某个应用的登出回调通知
   请求失败或超时
 - **THEN** 系统仍完成会话失效、Cookie 清除，并正常 302 重定向到 `service`，不因该
-  应用的通知失败而报错或延迟响应
+  应用的通知失败而报错或延迟响应，调用记录不受回调通知结果影响、仍记为成功
 
 ### Requirement: 全局单点登出接口
 系统 SHALL 提供 `GET /api/authn/{appId}/logout?service={callBackServiceUrl}` 接口。
@@ -116,32 +123,34 @@ SHALL 拒绝该次请求；协议类型为 CAS 或 OAuth2.0 时，`service` SHAL
 逻辑：清除当前浏览器持有的 SSO 会话、清除 `sso_session` Cookie、触发一次"单点登出后端
 回调通知"（通知范围为本次会话实际登录过的全部应用，不局限于路径上的 `appId`），最终
 302 重定向到 `service`。该接口可供不经过 CAS 票据流程的登出入口（如 OAuth2.0 接入方、
-前端直接触发的"退出登录"）统一调用。
+前端直接触发的"退出登录"）统一调用。校验失败与登出执行成功两种结果 SHALL 各自触发一次
+`sso-protocol-access-log` 能力的调用记录（事件类型 `LOGOUT`，协议类型取该应用当前实际配置的
+协议类型，而不是固定为 CAS）。
 
 #### Scenario: 全局登出接口清除会话并跳回 service
 - **WHEN** 前端调用某 CAS 协议应用的全局登出接口，携带的 `service` 匹配该应用已配置的
   `servicePatterns` 中的至少一条规则
 - **THEN** 当前浏览器持有的 SSO 会话失效、`sso_session` Cookie 被清除，系统触发登出
-  回调通知后 302 重定向到该 `service`
+  回调通知后 302 重定向到该 `service`，记录一条协议类型为 CAS 的成功调用记录
 
 #### Scenario: OAuth2.0 协议应用的全局登出
 - **WHEN** 前端调用某 OAuth2.0 协议应用的全局登出接口，携带的 `service` 匹配该应用已
   配置的 `servicePatterns` 中的至少一条规则
 - **THEN** 当前浏览器持有的 SSO 会话失效、`sso_session` Cookie 被清除，系统触发登出
-  回调通知后 302 重定向到该 `service`
+  回调通知后 302 重定向到该 `service`，记录一条协议类型为 OAuth2.0 的成功调用记录
 
 #### Scenario: appId 不存在或协议类型为无时被拒绝
 - **WHEN** 调用方携带的 `appId` 不存在，或该应用的单点登录协议类型为"无"
-- **THEN** 系统拒绝该请求，不清除会话，不发生重定向，不触发回调通知
+- **THEN** 系统拒绝该请求，不清除会话，不发生重定向，不触发回调通知，记录一条失败的调用记录
 
 #### Scenario: service 未匹配该应用规则时被拒绝
 - **WHEN** 调用方携带的 `service` 不匹配 `appId` 对应应用配置的 `servicePatterns`
-- **THEN** 系统拒绝该请求，不清除会话，不发生重定向，不触发回调通知
+- **THEN** 系统拒绝该请求，不清除会话，不发生重定向，不触发回调通知，记录一条失败的调用记录
 
 #### Scenario: 未持有有效会话时仍正常响应
 - **WHEN** 调用方在没有有效 `sso_session` Cookie 的情况下访问全局登出接口，且 `appId`/
   `service` 校验通过
-- **THEN** 系统不报错，直接 302 重定向到 `service`，不触发任何回调通知
+- **THEN** 系统不报错，直接 302 重定向到 `service`，不触发任何回调通知，仍记录一条成功的调用记录（用户 id 为空）
 
 ### Requirement: 单点登出后端回调通知
 CAS 单点登出与全局登出触发登出主流程时，系统 SHALL 对本次 `sso_session` 会话实际
@@ -186,11 +195,14 @@ accessKey/secretKey 计算），供接收方校验请求来源合法性。
 校验最终生效授权（见 `app-access-authorization` 能力"考虑请求上下文"的「最终生效权限计算规则」）；
 不具备授权时 SHALL 返回 HTTP 403，响应体为标准 `{code, message, data}` JSON 结构（`code=403`），不
 发生重定向、不签发授权码。授权校验通过后系统 SHALL 签发一次性授权码并重定向到 `redirect_uri`（附带
-`code` 与原样返回的 `state`）；若无有效 SSO 会话，系统 SHALL 重定向到 SSO 登录页。
+`code` 与原样返回的 `state`）；若无有效 SSO 会话，系统 SHALL 重定向到 SSO 登录页。`redirect_uri`
+校验失败、`response_type` 不支持、最终生效权限校验失败、授权码签发成功四种结果 SHALL 各自触发一次
+`sso-protocol-access-log` 能力的调用记录（事件类型 `AUTHORIZE`）；重定向到 SSO 登录页这一步本身
+SHALL NOT 触发记录。
 
 #### Scenario: redirect_uri 未匹配任何规则被拒绝
 - **WHEN** 调用方携带的 `redirect_uri` 不匹配该应用配置的任何 ANT 匹配规则
-- **THEN** 系统拒绝该请求，不重定向到该 `redirect_uri`
+- **THEN** 系统拒绝该请求，不重定向到该 `redirect_uri`，记录一条失败的调用记录
 
 #### Scenario: state 原样返回
 - **WHEN** 调用方在授权请求中携带了 `state` 参数
@@ -198,11 +210,15 @@ accessKey/secretKey 计算），供接收方校验请求来源合法性。
 
 #### Scenario: 用户无最终生效授权时拒绝签发授权码
 - **WHEN** 浏览器持有有效 SSO 会话，`redirect_uri` 校验通过，但当前用户不具备访问 `client_id` 对应应用的最终生效授权
-- **THEN** 系统返回 HTTP 403，响应体为 `{code:403, message:"当前用户无权访问该应用", data:null}`，不签发授权码，不发生重定向
+- **THEN** 系统返回 HTTP 403，响应体为 `{code:403, message:"当前用户无权访问该应用", data:null}`，不签发授权码，不发生重定向，记录一条失败的调用记录
 
 #### Scenario: 身份命中但当前请求不满足命中策略的请求控制时拒绝签发授权码
 - **WHEN** 浏览器持有有效 SSO 会话，`redirect_uri` 校验通过，当前用户身份命中某启用中策略（该策略配置了 IP 白名单），但当前请求的客户端 IP 不在该白名单内，且该用户不存在能覆盖此次访问的 `GRANT` 人工例外
-- **THEN** 系统返回 HTTP 403，响应体为 `{code:403, message:"当前用户无权访问该应用", data:null}`，不签发授权码，不发生重定向
+- **THEN** 系统返回 HTTP 403，响应体为 `{code:403, message:"当前用户无权访问该应用", data:null}`，不签发授权码，不发生重定向，记录一条失败的调用记录
+
+#### Scenario: 复用已有会话签发授权码时同样记录
+- **WHEN** 浏览器已持有有效 SSO 会话（此前已登录，本次未重新输入账号密码）访问授权接口，各项校验均通过
+- **THEN** 系统签发授权码并重定向，记录一条成功的调用记录；即使没有发生新的凭证校验，本次授权码签发依然单独记一条
 
 ### Requirement: OAuth2 令牌签发
 `POST /api/authn/oauth/token` 在 `grant_type=authorization_code` 时 SHALL 校验
@@ -210,19 +226,22 @@ accessKey/secretKey 计算），供接收方校验请求来源合法性。
 `redirect_uri` 与签发该授权码时使用的 `redirect_uri` 一致；校验通过后 SHALL 将该
 授权码标记为已消费（一次性），签发一个具有有效期的 access token 与一个具有更长有效期
 的 refresh token，返回标准 OAuth2 JSON 响应（`access_token`/`token_type`/
-`expires_in`/`refresh_token`）。
+`expires_in`/`refresh_token`）。本端点由应用后端服务器直接调用，不涉及 `tab_login_log` 的
+账号/密码语义，`grant_type` 不支持、参数缺失、`client_secret` 不匹配、`code`/`redirect_uri`
+校验失败、签发成功等结果 SHALL 各自触发一次 `sso-protocol-access-log` 能力的调用记录（事件类型
+`TOKEN`）。
 
 #### Scenario: 合法授权码换取令牌成功且不可重复使用
 - **WHEN** 调用方使用一个刚签发、参数匹配的合法授权码请求令牌
-- **THEN** 系统返回 access token；调用方用同一授权码再次请求令牌时，系统拒绝
+- **THEN** 系统返回 access token，记录一条成功的调用记录（含授权码绑定的用户 id）；调用方用同一授权码再次请求令牌时，系统拒绝并记录一条失败的调用记录
 
 #### Scenario: client_secret 不匹配时拒绝签发
 - **WHEN** 调用方提供的 `client_secret` 与该应用的凭证不一致
-- **THEN** 系统拒绝签发令牌
+- **THEN** 系统拒绝签发令牌，记录一条失败的调用记录
 
 #### Scenario: redirect_uri 与签发授权码时不一致时拒绝
 - **WHEN** 调用方请求令牌时提供的 `redirect_uri` 与获取该授权码时使用的 `redirect_uri` 不同
-- **THEN** 系统拒绝签发令牌
+- **THEN** 系统拒绝签发令牌，记录一条失败的调用记录
 
 ### Requirement: OAuth2 令牌刷新
 `POST /api/authn/oauth/token` 在 `grant_type=refresh_token` 时 SHALL 校验
@@ -230,16 +249,18 @@ accessKey/secretKey 计算），供接收方校验请求来源合法性。
 `refresh_token` 标记为已消费（一次性，立即失效，不可再被用于任何后续刷新请求），
 同时签发一个新的 access token 与一个新的 `refresh_token`（拥有完整的配置有效期），
 返回标准 OAuth2 JSON 响应（`access_token`/`token_type`/`expires_in`/`refresh_token`，
-其中 `refresh_token` 为本次新签发的值）。
+其中 `refresh_token` 为本次新签发的值）。参数缺失、`refresh_token` 校验失败、刷新成功等结果
+SHALL 各自触发一次 `sso-protocol-access-log` 能力的调用记录（事件类型 `TOKEN`，与令牌签发共用
+同一事件类型，均属于本端点）。
 
 #### Scenario: 合法 refresh_token 刷新成功且旧值被消费
 - **WHEN** 调用方使用一个未过期的 `refresh_token` 请求刷新
-- **THEN** 系统返回新的 access token 与新的 `refresh_token`；调用方再次使用同一个
-  旧 `refresh_token` 请求刷新时，系统拒绝
+- **THEN** 系统返回新的 access token 与新的 `refresh_token`，记录一条成功的调用记录；调用方再次使用同一个
+  旧 `refresh_token` 请求刷新时，系统拒绝并记录一条失败的调用记录
 
 #### Scenario: refresh_token 不存在或已过期时拒绝
 - **WHEN** 调用方使用的 `refresh_token` 不存在或已过期
-- **THEN** 系统拒绝签发新的 access token，也不签发新的 refresh_token
+- **THEN** 系统拒绝签发新的 access token，也不签发新的 refresh_token，记录一条失败的调用记录
 
 #### Scenario: 新签发的 refresh_token 拥有完整有效期
 - **WHEN** 调用方使用一个即将到期的 `refresh_token` 成功请求刷新
@@ -254,23 +275,14 @@ accessKey/secretKey 计算），供接收方校验请求来源合法性。
 响应体 SHALL 始终包含固定字段 `sub`（取用户 id，不受字段映射配置影响）；除 `sub` 外的
 其余字段 SHALL 按该应用配置的用户信息字段映射动态生成（未配置任何映射时使用默认的
 "用户ID + 姓名"两个字段）；若某条映射配置的应用侧字段编码恰好为 `sub`，该行配置的值
-不生效，最终响应仍以协议规定的固定 `sub` 值为准。
+不生效，最终响应仍以协议规定的固定 `sub` 值为准。本端点由应用后端服务器直接调用，不涉及
+`tab_login_log` 的账号/密码语义，令牌校验成功/失败两种结果 SHALL 各自触发一次
+`sso-protocol-access-log` 能力的调用记录（事件类型 `USERINFO`）。
 
 #### Scenario: 合法令牌查询用户信息成功
 - **WHEN** 调用方携带一个有效的 access token 请求用户信息接口
-- **THEN** 系统返回该令牌签发时绑定用户的基本身份信息，响应体包含固定的 `sub` 字段
+- **THEN** 系统返回该令牌签发时绑定用户的基本身份信息，响应体包含固定的 `sub` 字段，记录一条成功的调用记录
 
 #### Scenario: 令牌过期或不存在时拒绝
 - **WHEN** 调用方携带的 access token 已过期或不存在
-- **THEN** 系统拒绝该请求，返回 401
-
-#### Scenario: 用户信息字段按映射配置动态生成
-- **WHEN** 某应用配置了两条用户信息字段映射（本地字段"用户ID"→应用字段编码 `id`，
-  本地字段"姓名"→应用字段编码 `displayName`），且请求携带有效令牌
-- **THEN** 响应体包含 `sub`、`id`、`displayName` 三个字段，不再包含固定的
-  `username`/`name` 字段
-
-#### Scenario: 映射字段编码与 sub 冲突时固定值优先
-- **WHEN** 某应用的一条用户信息字段映射的应用侧字段编码被配置为 `sub`
-- **THEN** 响应体的 `sub` 字段最终取值仍是协议规定的用户 id，不受该行映射配置的转换
-  结果影响
+- **THEN** 系统拒绝该请求，返回 401，记录一条失败的调用记录

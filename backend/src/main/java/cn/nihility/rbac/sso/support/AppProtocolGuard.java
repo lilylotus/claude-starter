@@ -10,6 +10,7 @@ import cn.nihility.rbac.common.util.JacksonUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.AntPathMatcher;
@@ -138,6 +139,37 @@ public class AppProtocolGuard {
             throw new SsoProtocolException("应用不存在");
         }
         return appConfig.getAppRefId();
+    }
+
+    /**
+     * 按对外应用标识（AppId/client_id）尝试解析内部应用 id（{@code tab_app.id}），应用不存在
+     * 时返回 {@code null} 而不是抛出异常。供 {@code SsoProtocolLogRecorder} 相关的日志记录场景
+     * 在校验失败分支尽力填充 {@code appRefId}，不因解析不到应用而中断主流程
+     * （add-sso-protocol-access-log change design.md Decision 4）。
+     *
+     * @param appId 对外应用标识
+     * @return 应用 id（{@code tab_app.id}），解析不到应用时为 {@code null}
+     */
+    public Long resolveAppRefIdOrNull(String appId) {
+        AppConfigEntity appConfig = findAppConfig(appId);
+        return appConfig == null ? null : appConfig.getAppRefId();
+    }
+
+    /**
+     * 按对外应用标识尝试解析应用的单点登录协议配置，应用不存在或未配置协议时返回空
+     * {@link Optional} 而不是抛出异常。供全局单点登出接口在校验失败分支尽力还原该应用的
+     * 实际协议类型用于日志记录，而不是笼统写死一个协议类型
+     * （add-sso-protocol-access-log change design.md Decision 3）。
+     *
+     * @param appId 对外应用标识
+     * @return 应用单点登录协议配置，解析不到时为空
+     */
+    public Optional<AppAuthConfigEntity> tryResolveAuthConfig(String appId) {
+        try {
+            return Optional.of(resolveAuthConfig(appId));
+        } catch (SsoProtocolException e) {
+            return Optional.empty();
+        }
     }
 
     /**

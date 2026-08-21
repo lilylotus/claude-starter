@@ -59,6 +59,12 @@ public class LoginLogEntity {
     /** 原始 User-Agent 请求头，取不到时为空。 */
     private String loginUserAgent;
 
+    /**
+     * 本次登录建立的 SSO 会话标识（SSO 会话令牌的 SHA-256 摘要，非原始令牌），仅 SSO
+     * 登录成功时填充；登录失败、或管理端口令登录（不产生 SSO 会话）时为 {@code null}。
+     */
+    private String sessionId;
+
     /** 创建人，即本次登录尝试提交的账号，为空时存固定值 {@code "unknown"}。 */
     private String createBy;
 

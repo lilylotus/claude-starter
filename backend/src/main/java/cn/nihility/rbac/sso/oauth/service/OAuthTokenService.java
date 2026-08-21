@@ -96,12 +96,12 @@ public class OAuthTokenService {
      * @return 签发的 access token / refresh token / access token 有效期
      */
     public IssuedToken issueAccessTokenWithRefresh(String clientId, Long userId, String scope, String ssoSessionToken) {
-        String accessToken = writeAccessToken(clientId, userId, scope);
+        String accessToken = writeAccessToken(clientId, userId, scope, ssoSessionToken);
         if (StringUtils.hasText(ssoSessionToken)) {
             ssoSessionService.recordAppCredential(ssoSessionToken, clientId, AuthProtocol.OAUTH2, accessToken);
         }
         String refreshToken = newHex();
-        OAuthRefreshPayload refreshPayload = new OAuthRefreshPayload(clientId, userId, scope);
+        OAuthRefreshPayload refreshPayload = new OAuthRefreshPayload(clientId, userId, scope, ssoSessionToken);
         RedisUtils.setObject(REFRESH_KEY_PREFIX + refreshToken, refreshPayload,
                 ssoProperties.getOauthRefreshTokenExpireSeconds(), TimeUnit.SECONDS);
         return new IssuedToken(accessToken, refreshToken, ssoProperties.getOauthTokenExpireSeconds());
@@ -117,13 +117,18 @@ public class OAuthTokenService {
      * @param clientId        OAuth2 client_id
      * @param userId          绑定的用户 id
      * @param scope           授权范围
+     * @param sessionToken    旧 refresh token 载荷（{@code OAuthRefreshPayload#sessionToken()}）
+     *                        携带的 SSO 会话令牌，原样透传给新签发的 access token/refresh
+     *                        token，确保刷新之后会话标识不丢失（add-sso-protocol-access-log
+     *                        change design.md Decision 6）
      * @return 新签发的 access token / refresh token / access token 有效期
      */
-    public IssuedToken rotateAccessAndRefreshToken(String oldRefreshToken, String clientId, Long userId, String scope) {
+    public IssuedToken rotateAccessAndRefreshToken(String oldRefreshToken, String clientId, Long userId, String scope,
+            String sessionToken) {
         RedisUtils.delete(REFRESH_KEY_PREFIX + oldRefreshToken);
-        String accessToken = writeAccessToken(clientId, userId, scope);
+        String accessToken = writeAccessToken(clientId, userId, scope, sessionToken);
         String newRefreshToken = newHex();
-        OAuthRefreshPayload refreshPayload = new OAuthRefreshPayload(clientId, userId, scope);
+        OAuthRefreshPayload refreshPayload = new OAuthRefreshPayload(clientId, userId, scope, sessionToken);
         RedisUtils.setObject(REFRESH_KEY_PREFIX + newRefreshToken, refreshPayload,
                 ssoProperties.getOauthRefreshTokenExpireSeconds(), TimeUnit.SECONDS);
         return new IssuedToken(accessToken, newRefreshToken, ssoProperties.getOauthTokenExpireSeconds());
@@ -160,14 +165,15 @@ public class OAuthTokenService {
      * 签发一枚 access token 并写入 Redis，供 {@link #issueAccessTokenWithRefresh}/
      * {@link #rotateAccessAndRefreshToken} 共用。
      *
-     * @param clientId OAuth2 client_id
-     * @param userId   绑定的用户 id
-     * @param scope    授权范围
+     * @param clientId     OAuth2 client_id
+     * @param userId       绑定的用户 id
+     * @param scope        授权范围
+     * @param sessionToken 关联的 SSO 会话令牌（原始令牌，非哈希值），可能为空
      * @return 新签发的 access token
      */
-    private String writeAccessToken(String clientId, Long userId, String scope) {
+    private String writeAccessToken(String clientId, Long userId, String scope, String sessionToken) {
         String accessToken = newHex();
-        OAuthTokenPayload payload = new OAuthTokenPayload(clientId, userId, scope);
+        OAuthTokenPayload payload = new OAuthTokenPayload(clientId, userId, scope, sessionToken);
         RedisUtils.setObject(TOKEN_KEY_PREFIX + accessToken, payload, ssoProperties.getOauthTokenExpireSeconds(),
                 TimeUnit.SECONDS);
         return accessToken;

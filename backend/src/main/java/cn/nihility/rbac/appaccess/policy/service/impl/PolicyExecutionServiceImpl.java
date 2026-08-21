@@ -20,6 +20,8 @@ import cn.nihility.rbac.metadata.entity.MetadataFieldEntity;
 import cn.nihility.rbac.metadata.mapper.MetadataFieldMapper;
 import cn.nihility.rbac.org.support.OrgDescendantExpander;
 import cn.nihility.rbac.user.constant.PositionStatus;
+import cn.nihility.rbac.user.constant.UserStatus;
+import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.entity.UserPositionEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import cn.nihility.rbac.user.mapper.UserPositionMapper;
@@ -96,6 +98,15 @@ public class PolicyExecutionServiceImpl implements PolicyExecutionService {
     @Override
     @Transactional
     public PolicyVO execute(Long policyId) {
+        return execute(policyId, Objects.toString(currentOperatorService.resolveUserId(), null));
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    @Transactional
+    public PolicyVO execute(Long policyId, String operator) {
         PolicyEntity policy = policyMapper.selectById(policyId);
         if (policy == null) {
             throw new BusinessException("策略规则不存在");
@@ -113,7 +124,6 @@ public class PolicyExecutionServiceImpl implements PolicyExecutionService {
         Set<Long> hitUserIds = intersect(orgScopeUserIds, attrUserIds);
 
         List<PolicyGrantEntity> newGrants = new ArrayList<>();
-        String operator = Objects.toString(currentOperatorService.resolveUserId(), null);
         LocalDateTime now = LocalDateTime.now();
         for (Long userId : hitUserIds) {
             for (PolicyTargetAppEntity targetApp : targetApps) {
@@ -229,7 +239,11 @@ public class PolicyExecutionServiceImpl implements PolicyExecutionService {
 
     /**
      * 组织范围结果集与用户属性条件结果集取交集：两者都配置时取交集，只配置一类时直接使用
-     * 该类结果（{@code null} 表示未配置该类条件，见调用方 design.md Decision 4）。
+     * 该类结果（{@code null} 表示未配置该类条件，见调用方 design.md Decision 4）；两者都
+     * 未配置时（此时策略必然配置了请求控制条件，否则无法通过保存校验），命中集合为系统内
+     * 全部启用状态用户，不要求存在任职记录——此时策略本就没有组织维度的圈定意图，纯粹依赖
+     * 请求控制收窄，语义上是"完全不做身份限定"，与组织范围匹配路径要求"存在未删除任职记录"
+     * 是有意的不一致（close-sso-log-and-policy-gaps change design.md Decision 3）。
      *
      * @param orgScopeUserIds 组织范围匹配结果，{@code null} 表示未配置组织范围
      * @param attrUserIds     用户属性条件匹配结果，{@code null} 表示未配置属性条件
@@ -242,7 +256,21 @@ public class PolicyExecutionServiceImpl implements PolicyExecutionService {
         if (orgScopeUserIds != null) {
             return orgScopeUserIds;
         }
-        return attrUserIds != null ? attrUserIds : new HashSet<>();
+        if (attrUserIds != null) {
+            return attrUserIds;
+        }
+        return allEnabledUserIds();
+    }
+
+    /**
+     * 查询系统内全部启用状态用户的 id，供组织范围与用户属性条件均未配置的策略执行时使用。
+     *
+     * @return 全部启用状态用户 id 集合
+     */
+    private Set<Long> allEnabledUserIds() {
+        List<UserEntity> enabledUsers = userMapper.selectList(
+                new LambdaQueryWrapper<UserEntity>().eq(UserEntity::getStatus, UserStatus.ENABLED));
+        return enabledUsers.stream().map(UserEntity::getId).collect(Collectors.toSet());
     }
 
     /**

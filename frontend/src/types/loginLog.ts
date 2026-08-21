@@ -39,4 +39,8 @@ export interface LoginLogRow {
   loginBrowser: string | null
   loginUserAgent: string | null
   createTime: string
+  // 本次登录建立的 SSO 会话标识（会话令牌的哈希摘要，不是原始令牌），仅通过 SSO 登录页
+  // 登录成功时非空；管理端口令登录、登录失败均为空。前端只用它作为查询关联的 SSO 协议
+  // 调用记录的参数，不在表格列里展示这个哈希值本身
+  sessionId: string | null
 }

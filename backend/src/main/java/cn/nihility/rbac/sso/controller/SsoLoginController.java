@@ -6,9 +6,12 @@ import cn.nihility.rbac.auth.service.PasswordService;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.common.result.Result;
 import cn.nihility.rbac.common.util.RsaJdkUtils;
+import cn.nihility.rbac.loginlog.constant.LoginFailReason;
+import cn.nihility.rbac.loginlog.service.LoginLogRecorder;
 import cn.nihility.rbac.sso.config.RbacSsoProperties;
 import cn.nihility.rbac.sso.dto.SsoLoginRequest;
 import cn.nihility.rbac.sso.session.SsoSessionCookieUtils;
+import cn.nihility.rbac.sso.session.SsoSessionIdHasher;
 import cn.nihility.rbac.sso.session.SsoSessionService;
 import cn.nihility.rbac.user.constant.UserStatus;
 import cn.nihility.rbac.user.entity.UserEntity;
@@ -54,6 +57,9 @@ public class SsoLoginController {
     /** SSO 浏览器会话业务逻辑接口。 */
     private final SsoSessionService ssoSessionService;
 
+    /** 登录日志记录组件，记录每一次 SSO 登录尝试（成功 + 失败），与管理端口令登录复用同一套记录粒度。 */
+    private final LoginLogRecorder loginLogRecorder;
+
     /**
      * 获取当前生效的 RSA 公钥（与管理端登录复用同一份密钥材料）。
      *
@@ -77,18 +83,40 @@ public class SsoLoginController {
     @Operation(summary = "SSO 登录", description = "账号、密码均为 RSA 公钥加密后的 Base64 密文，成功后通过 HttpOnly Cookie 下发 SSO 会话")
     @PostMapping("/api/authn/sso/login")
     public Result<Void> login(@Valid @RequestBody SsoLoginRequest request, HttpServletResponse response) {
-        String account = decrypt(request.getAccount());
-        String password = decrypt(request.getPassword());
+        String account;
+        String password;
+        try {
+            account = decrypt(request.getAccount());
+            password = decrypt(request.getPassword());
+        } catch (BusinessException e) {
+            // 解密失败根本拿不到明文账号，不记录密文本身——密文不是登录日志该保留的信息。
+            loginLogRecorder.recordFailure(null, null, null, LoginFailReason.DECRYPT_FAILED);
+            throw e;
+        }
 
+        // 不再 .ne(status, DELETED)：查询本身排除已删除账号会导致"账号不存在"与"账号已
+        // 删除"两种情况在 SQL 层面就已经合并成同一个 null 结果，Java 代码无论怎么写都
+        // 区分不出来，交给下面的显式分支按状态判断。
         UserEntity user = userMapper.selectOne(new LambdaQueryWrapper<UserEntity>().eq(UserEntity::getCode, account));
-        if (user == null || !Objects.equals(user.getStatus(), UserStatus.ENABLED)) {
+        if (user == null) {
+            loginLogRecorder.recordFailure(account, null, null, LoginFailReason.ACCOUNT_NOT_FOUND);
+            throw new BusinessException(LOGIN_FAILED_MESSAGE);
+        }
+        if (Objects.equals(user.getStatus(), UserStatus.DELETED)) {
+            loginLogRecorder.recordFailure(account, user.getId(), user.getName(), LoginFailReason.ACCOUNT_DELETED);
+            throw new BusinessException(LOGIN_FAILED_MESSAGE);
+        }
+        if (!Objects.equals(user.getStatus(), UserStatus.ENABLED)) {
+            loginLogRecorder.recordFailure(account, user.getId(), user.getName(), LoginFailReason.ACCOUNT_DISABLED);
             throw new BusinessException(LOGIN_FAILED_MESSAGE);
         }
         if (!passwordService.verifyPassword(user.getId(), password)) {
+            loginLogRecorder.recordFailure(account, user.getId(), user.getName(), LoginFailReason.PASSWORD_MISMATCH);
             throw new BusinessException(LOGIN_FAILED_MESSAGE);
         }
 
         String token = ssoSessionService.issue(user.getId());
+        loginLogRecorder.recordSuccess(account, user.getId(), user.getName(), SsoSessionIdHasher.hash(token));
         response.addHeader(HttpHeaders.SET_COOKIE,
                 SsoSessionCookieUtils.buildSetCookieHeader(token, ssoProperties.getSessionExpireSeconds(),
                         ssoProperties.isCookieSecure()));

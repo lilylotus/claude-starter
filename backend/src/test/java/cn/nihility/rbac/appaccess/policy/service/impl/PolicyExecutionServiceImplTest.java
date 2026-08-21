@@ -30,6 +30,8 @@ import cn.nihility.rbac.metadata.entity.MetadataFieldEntity;
 import cn.nihility.rbac.metadata.mapper.MetadataFieldMapper;
 import cn.nihility.rbac.org.support.OrgDescendantExpander;
 import cn.nihility.rbac.user.constant.PositionStatus;
+import cn.nihility.rbac.user.constant.UserStatus;
+import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.entity.UserPositionEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import cn.nihility.rbac.user.mapper.UserPositionMapper;
@@ -247,6 +249,27 @@ class PolicyExecutionServiceImplTest {
         ArgumentCaptor<PolicyGrantEntity> captor = ArgumentCaptor.forClass(PolicyGrantEntity.class);
         verify(policyGrantMapper, times(2)).insert(captor.capture());
         assertThat(captor.getAllValues()).extracting(PolicyGrantEntity::getUserId).containsExactlyInAnyOrder(2L, 3L);
+    }
+
+    /**
+     * 组织范围与用户属性条件均未配置（仅请求控制条件收窄准入）时，命中用户应为系统内全部
+     * 启用状态用户，不要求存在任职记录（close-sso-log-and-policy-gaps change design.md
+     * Decision 3、tasks.md 4.5）。
+     */
+    @Test
+    void execute_shouldMatchAllEnabledUsers_whenOrgScopeAndUserAttrBothUnconfigured() {
+        when(policyOrgScopeMapper.selectList(any())).thenReturn(List.of());
+        when(policyUserAttrMapper.selectList(any())).thenReturn(List.of());
+        when(userMapper.selectList(any())).thenReturn(List.of(
+                UserEntity.builder().id(1L).status(UserStatus.ENABLED).build(),
+                UserEntity.builder().id(2L).status(UserStatus.ENABLED).build()));
+
+        executionService.execute(100L);
+
+        verify(userPositionMapper, never()).selectList(any());
+        ArgumentCaptor<PolicyGrantEntity> captor = ArgumentCaptor.forClass(PolicyGrantEntity.class);
+        verify(policyGrantMapper, times(2)).insert(captor.capture());
+        assertThat(captor.getAllValues()).extracting(PolicyGrantEntity::getUserId).containsExactlyInAnyOrder(1L, 2L);
     }
 
     /**

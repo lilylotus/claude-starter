@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import * as loginLogApi from '@/api/loginLog'
+import SsoProtocolLogDialog from '@/components/SsoProtocolLogDialog.vue'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import { LOGIN_RESULT_OPTIONS, LOGIN_RESULT_SUCCESS, type LoginLogRow } from '@/types/loginLog'
 
@@ -85,6 +86,20 @@ function deviceInfo(row: LoginLogRow): string {
   )
   return parts.length > 0 ? parts.join(' / ') : '-'
 }
+
+// ---- 查看关联的 SSO 协议调用记录（仅登录成功且关联了 SSO 会话标识的行才展示入口） ----
+
+function canViewSsoProtocolLogs(row: LoginLogRow): boolean {
+  return row.loginResult === LOGIN_RESULT_SUCCESS && !!row.sessionId
+}
+
+const ssoProtocolLogVisible = ref(false)
+const selectedSessionId = ref<string | null>(null)
+
+function openSsoProtocolLogDialog(row: LoginLogRow) {
+  selectedSessionId.value = row.sessionId
+  ssoProtocolLogVisible.value = true
+}
 </script>
 
 <template>
@@ -143,6 +158,18 @@ function deviceInfo(row: LoginLogRow): string {
         <el-table-column label="设备信息" min-width="180">
           <template #default="{ row }">{{ deviceInfo(row as LoginLogRow) }}</template>
         </el-table-column>
+        <el-table-column label="操作" width="140" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              v-if="canViewSsoProtocolLogs(row as LoginLogRow)"
+              link
+              type="primary"
+              @click="openSsoProtocolLogDialog(row as LoginLogRow)"
+            >
+              查看SSO调用记录
+            </el-button>
+          </template>
+        </el-table-column>
       </el-table>
 
       <el-pagination
@@ -157,6 +184,8 @@ function deviceInfo(row: LoginLogRow): string {
         @size-change="handleSizeChange"
       />
     </section>
+
+    <SsoProtocolLogDialog v-model="ssoProtocolLogVisible" :session-id="selectedSessionId" />
   </div>
 </template>
 

@@ -78,7 +78,8 @@ public class PolicyController {
      * @param request 新增请求
      * @return 新增后的策略规则详情
      */
-    @Operation(summary = "新增策略规则", description = "组织范围与用户属性条件均可选，但不能同时为空；目标应用不能为空")
+    @Operation(summary = "新增策略规则",
+            description = "组织范围、用户属性条件、浏览器白名单、IP 白名单均可选，但不能同时为空；目标应用不能为空")
     @PostMapping("/api/app-access/policies")
     public PolicyVO create(@Valid @RequestBody PolicyCreateRequest request) {
         return policyService.create(request);

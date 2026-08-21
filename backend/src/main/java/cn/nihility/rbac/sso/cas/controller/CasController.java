@@ -1,5 +1,6 @@
 package cn.nihility.rbac.sso.cas.controller;
 
+import cn.nihility.rbac.app.authconfig.constant.AuthProtocol;
 import cn.nihility.rbac.common.result.Result;
 import cn.nihility.rbac.common.util.ClientRequestUtils;
 import cn.nihility.rbac.sso.cas.dto.CasTicketPayload;
@@ -7,6 +8,7 @@ import cn.nihility.rbac.sso.cas.service.CasTicketService;
 import cn.nihility.rbac.sso.cas.support.CasJsonResponses;
 import cn.nihility.rbac.sso.cas.support.CasXmlResponses;
 import cn.nihility.rbac.sso.session.SsoSessionCookieUtils;
+import cn.nihility.rbac.sso.session.SsoSessionIdHasher;
 import cn.nihility.rbac.sso.session.SsoSessionService;
 import cn.nihility.rbac.sso.support.AppAccessAuthorizationChecker;
 import cn.nihility.rbac.sso.support.AppProtocolGuard;
@@ -14,6 +16,8 @@ import cn.nihility.rbac.sso.support.ProtocolResponseWriter;
 import cn.nihility.rbac.sso.support.SsoLogoutExecutor;
 import cn.nihility.rbac.sso.support.SsoProtocolException;
 import cn.nihility.rbac.sso.support.SsoUserinfoAttributesResolver;
+import cn.nihility.rbac.ssoprotocollog.constant.SsoProtocolLogEventType;
+import cn.nihility.rbac.ssoprotocollog.service.SsoProtocolLogRecorder;
 import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import io.swagger.v3.oas.annotations.Operation;
@@ -67,6 +71,9 @@ public class CasController {
     /** 用户信息响应属性运行时解析组件，按应用配置的字段映射生成 {@code cas:attributes}。 */
     private final SsoUserinfoAttributesResolver ssoUserinfoAttributesResolver;
 
+    /** SSO 协议调用记录组件（add-sso-protocol-access-log change design.md Decision 4）。 */
+    private final SsoProtocolLogRecorder ssoProtocolLogRecorder;
+
     /**
      * CAS 单点登录：{@code service} 校验通过后，若当前浏览器持有有效 SSO 会话则签发服务
      * 票据并重定向回 {@code service}；否则重定向到 SSO 登录页。授权校验读取当前请求的
@@ -87,6 +94,8 @@ public class CasController {
         try {
             appProtocolGuard.assertCasServiceAllowed(appId, service);
         } catch (SsoProtocolException e) {
+            ssoProtocolLogRecorder.recordFailure(AuthProtocol.CAS, SsoProtocolLogEventType.LOGIN, appId,
+                    appProtocolGuard.resolveAppRefIdOrNull(appId), null, null, e.getMessage());
             ProtocolResponseWriter.text(response, HttpServletResponse.SC_BAD_REQUEST, e.getMessage());
             return;
         }
@@ -98,18 +107,23 @@ public class CasController {
             return;
         }
 
+        String sessionId = SsoSessionIdHasher.hash(sessionToken);
+        Long appRefId = appProtocolGuard.resolveAppRefId(appId);
         try {
             String clientIp = ClientRequestUtils.resolveClientIp(request);
             String userAgent = request.getHeader("User-Agent");
-            appAccessAuthorizationChecker.assertAuthorized(userIdOpt.get(), appProtocolGuard.resolveAppRefId(appId),
-                    clientIp, userAgent);
+            appAccessAuthorizationChecker.assertAuthorized(userIdOpt.get(), appRefId, clientIp, userAgent);
         } catch (SsoProtocolException e) {
+            ssoProtocolLogRecorder.recordFailure(AuthProtocol.CAS, SsoProtocolLogEventType.LOGIN, appId, appRefId,
+                    userIdOpt.get(), sessionId, e.getMessage());
             ProtocolResponseWriter.json(response, HttpServletResponse.SC_FORBIDDEN,
                     Result.error(HttpServletResponse.SC_FORBIDDEN, e.getMessage()));
             return;
         }
 
         String ticket = casTicketService.issue(appId, service, userIdOpt.get(), sessionToken);
+        ssoProtocolLogRecorder.recordSuccess(AuthProtocol.CAS, SsoProtocolLogEventType.LOGIN, appId, appRefId,
+                userIdOpt.get(), sessionId);
         String separator = service.contains("?") ? "&" : "?";
         ProtocolResponseWriter.redirect(response, service + separator + "ticket=" + ticket);
     }
@@ -138,19 +152,26 @@ public class CasController {
 
         Optional<CasTicketPayload> payloadOpt = casTicketService.consume(ticket);
         if (payloadOpt.isEmpty() || !Objects.equals(payloadOpt.get().service(), service)) {
+            ssoProtocolLogRecorder.recordFailure(AuthProtocol.CAS, SsoProtocolLogEventType.SERVICE_VALIDATE, appId,
+                    appProtocolGuard.resolveAppRefIdOrNull(appId), null, null, "Ticket 不存在、已过期或已被使用");
             writeFailure(response, useXml);
             return;
         }
 
         CasTicketPayload payload = payloadOpt.get();
+        String sessionId = SsoSessionIdHasher.hash(payload.sessionToken());
         UserEntity user = userMapper.selectById(payload.userId());
         if (user == null) {
+            ssoProtocolLogRecorder.recordFailure(AuthProtocol.CAS, SsoProtocolLogEventType.SERVICE_VALIDATE, appId,
+                    appProtocolGuard.resolveAppRefIdOrNull(payload.appId()), payload.userId(), sessionId, "用户不存在");
             writeFailure(response, useXml);
             return;
         }
 
         Long appRefId = appProtocolGuard.resolveAppRefId(payload.appId());
         Map<String, Object> attributes = ssoUserinfoAttributesResolver.resolve(appRefId, user);
+        ssoProtocolLogRecorder.recordSuccess(AuthProtocol.CAS, SsoProtocolLogEventType.SERVICE_VALIDATE, appId,
+                appRefId, payload.userId(), sessionId);
         if (useXml) {
             ProtocolResponseWriter.xml(response, CasXmlResponses.success(user.getCode(), attributes));
         } else {
@@ -195,9 +216,11 @@ public class CasController {
         try {
             appProtocolGuard.assertCasServiceAllowed(appId, service);
         } catch (SsoProtocolException e) {
+            ssoProtocolLogRecorder.recordFailure(AuthProtocol.CAS, SsoProtocolLogEventType.LOGOUT, appId,
+                    appProtocolGuard.resolveAppRefIdOrNull(appId), null, null, e.getMessage());
             ProtocolResponseWriter.text(response, HttpServletResponse.SC_BAD_REQUEST, e.getMessage());
             return;
         }
-        ssoLogoutExecutor.execute(request, response, service);
+        ssoLogoutExecutor.execute(request, response, service, appId, AuthProtocol.CAS);
     }
 }

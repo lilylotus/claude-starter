@@ -118,7 +118,8 @@ public class PolicyServiceImpl implements PolicyService {
     @Override
     @Transactional
     public PolicyVO create(PolicyCreateRequest request) {
-        assertScopeAndAttrNotBothEmpty(request.getOrgScopes(), request.getUserAttrs());
+        assertScopeAndAttrNotBothEmpty(request.getOrgScopes(), request.getUserAttrs(), request.getBrowserRules(),
+                request.getIpRules());
         assertTargetAppsNotEmpty(request.getTargetAppIds());
         assertUserAttrsValid(request.getUserAttrs());
         assertRequestControlValid(request.getBrowserRules(), request.getIpRules());
@@ -151,7 +152,8 @@ public class PolicyServiceImpl implements PolicyService {
     @Transactional
     public PolicyVO update(Long id, PolicyUpdateRequest request) {
         PolicyEntity entity = getExisting(id);
-        assertScopeAndAttrNotBothEmpty(request.getOrgScopes(), request.getUserAttrs());
+        assertScopeAndAttrNotBothEmpty(request.getOrgScopes(), request.getUserAttrs(), request.getBrowserRules(),
+                request.getIpRules());
         assertTargetAppsNotEmpty(request.getTargetAppIds());
         assertUserAttrsValid(request.getUserAttrs());
         assertRequestControlValid(request.getBrowserRules(), request.getIpRules());
@@ -255,17 +257,24 @@ public class PolicyServiceImpl implements PolicyService {
     }
 
     /**
-     * 校验组织范围与用户属性条件不能同时为空（design.md Decision 1）。
+     * 校验组织范围、用户属性条件、请求控制条件（浏览器白名单或 IP 白名单任一非空）不能同时
+     * 为空，仅四者全部为空时才拒绝，允许"仅配置请求控制"的策略保存（close-sso-log-and-policy-gaps
+     * change design.md Decision 3，反转原 app-access-authorization change design.md
+     * Decision 1"两者不能同时为空"的校验）。
      *
-     * @param orgScopes 组织范围条件列表
-     * @param userAttrs 用户属性条件列表
+     * @param orgScopes    组织范围条件列表
+     * @param userAttrs    用户属性条件列表
+     * @param browserRules 浏览器白名单编码列表
+     * @param ipRules      IP/网段白名单列表
      */
     private void assertScopeAndAttrNotBothEmpty(List<PolicyOrgScopeRequestItem> orgScopes,
-            List<PolicyUserAttrRequestItem> userAttrs) {
+            List<PolicyUserAttrRequestItem> userAttrs, List<String> browserRules, List<String> ipRules) {
         boolean orgScopeEmpty = orgScopes == null || orgScopes.isEmpty();
         boolean userAttrEmpty = userAttrs == null || userAttrs.isEmpty();
-        if (orgScopeEmpty && userAttrEmpty) {
-            throw new BusinessException("组织范围与用户属性条件不能同时为空，请至少配置一类");
+        boolean browserRulesEmpty = browserRules == null || browserRules.isEmpty();
+        boolean ipRulesEmpty = ipRules == null || ipRules.isEmpty();
+        if (orgScopeEmpty && userAttrEmpty && browserRulesEmpty && ipRulesEmpty) {
+            throw new BusinessException("组织范围、用户属性条件、请求控制条件不能同时为空，请至少配置一类");
         }
     }
 

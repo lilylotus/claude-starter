@@ -49,6 +49,7 @@ class CasTicketServiceTest {
         assertThat(first.get().appId()).isEqualTo("app-1");
         assertThat(first.get().service()).isEqualTo("https://partner.example.com/cb");
         assertThat(first.get().userId()).isEqualTo(10L);
+        assertThat(first.get().sessionToken()).isEqualTo("session-token-2");
 
         Optional<CasTicketPayload> second = casTicketService.consume(ticket);
         assertThat(second).isEmpty();

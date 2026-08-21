@@ -10,10 +10,11 @@ import lombok.Getter;
 import lombok.Setter;
 
 /**
- * 策略规则新增请求。组织范围与用户属性条件均可选（列表可为空），但服务层校验两者
- * SHALL NOT 同时为空；目标应用不能为空（spec.md"策略规则的定义与维护"需求）。请求控制
- * 条件（浏览器白名单/IP 白名单）完全可选，两者都为空表示该策略不做请求控制限制，不受
- * 组织范围/用户属性条件"至少一项非空"约束的影响（app-access-request-control change）。
+ * 策略规则新增请求。组织范围、用户属性条件、浏览器白名单、IP 白名单四者均可选（列表
+ * 可为空），但服务层校验四者 SHALL NOT 同时为空，允许"仅配置请求控制"的策略（不圈定
+ * 任何身份维度，纯粹依赖浏览器/IP 白名单收窄准入范围）；目标应用不能为空（spec.md
+ * "策略规则的定义与维护"需求，close-sso-log-and-policy-gaps change design.md
+ * Decision 3）。
  */
 @Getter
 @Setter
@@ -31,12 +32,18 @@ public class PolicyCreateRequest {
     @Schema(description = "备注")
     private String remark;
 
-    /** 组织范围条件，可选，与 {@link #userAttrs} 不能同时为空。 */
+    /**
+     * 组织范围条件，可选，与 {@link #userAttrs}/{@link #browserRules}/{@link #ipRules}
+     * 不能同时为空。
+     */
     @Valid
     @Schema(description = "组织范围条件，可选")
     private List<PolicyOrgScopeRequestItem> orgScopes;
 
-    /** 用户属性条件，可选，与 {@link #orgScopes} 不能同时为空。 */
+    /**
+     * 用户属性条件，可选，与 {@link #orgScopes}/{@link #browserRules}/{@link #ipRules}
+     * 不能同时为空。
+     */
     @Valid
     @Schema(description = "用户属性条件，可选")
     private List<PolicyUserAttrRequestItem> userAttrs;
@@ -46,11 +53,17 @@ public class PolicyCreateRequest {
     @Schema(description = "目标应用 id 列表")
     private List<Long> targetAppIds;
 
-    /** 请求控制条件-浏览器白名单编码列表，完全可选。 */
+    /**
+     * 请求控制条件-浏览器白名单编码列表，可选，与 {@link #orgScopes}/{@link #userAttrs}/
+     * {@link #ipRules} 不能同时为空。
+     */
     @Schema(description = "请求控制条件-浏览器白名单编码列表，可选")
     private List<String> browserRules;
 
-    /** 请求控制条件-IP/网段白名单列表，完全可选。 */
+    /**
+     * 请求控制条件-IP/网段白名单列表，可选，与 {@link #orgScopes}/{@link #userAttrs}/
+     * {@link #browserRules} 不能同时为空。
+     */
     @Schema(description = "请求控制条件-IP/网段白名单列表，可选")
     private List<String> ipRules;
 }

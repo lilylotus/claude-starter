@@ -15,8 +15,10 @@ public interface LoginLogRecorder {
      * @param loginAccount 本次登录尝试提交的账号
      * @param userId       登录成功的用户 id
      * @param userName     登录成功的用户姓名
+     * @param sessionId    本次建立的 SSO 会话标识（会话令牌的 SHA-256 摘要），仅 SSO
+     *                     登录成功时非空，管理端口令登录（不产生 SSO 会话）传 {@code null}
      */
-    void recordSuccess(String loginAccount, Long userId, String userName);
+    void recordSuccess(String loginAccount, Long userId, String userName, String sessionId);
 
     /**
      * 记录一次登录失败。

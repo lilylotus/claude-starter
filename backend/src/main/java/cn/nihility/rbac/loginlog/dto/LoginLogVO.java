@@ -68,6 +68,13 @@ public class LoginLogVO {
     @Schema(description = "原始 User-Agent 请求头")
     private String loginUserAgent;
 
+    /**
+     * 本次登录建立的 SSO 会话标识（会话令牌 SHA-256 摘要，非原始令牌），仅 SSO 登录成功时
+     * 非空；前端不展示该哈希值本身，仅用作查询"该会话关联的 SSO 协议调用记录"接口的参数。
+     */
+    @Schema(description = "SSO 会话标识（会话令牌摘要），仅 SSO 登录成功时非空，用于查询关联的 SSO 协议调用记录")
+    private String sessionId;
+
     /** 登录发起时间。 */
     @Schema(description = "登录发起时间")
     private LocalDateTime createTime;

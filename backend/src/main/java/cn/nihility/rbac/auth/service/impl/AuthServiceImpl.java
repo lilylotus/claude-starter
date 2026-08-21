@@ -100,7 +100,7 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException(LOGIN_FAILED_MESSAGE);
         }
 
-        loginLogRecorder.recordSuccess(account, user.getId(), user.getName());
+        loginLogRecorder.recordSuccess(account, user.getId(), user.getName(), null);
         TokenPair tokenPair = tokenService.issue(user.getId());
         boolean firstLogin = passwordService.isFirstLogin(user.getId());
         return LoginResponse.builder()

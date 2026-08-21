@@ -46,7 +46,7 @@ public class CasTicketService {
      */
     public String issue(String appId, String service, Long userId, String ssoSessionToken) {
         String ticket = TICKET_PREFIX + newHex();
-        CasTicketPayload payload = new CasTicketPayload(appId, service, userId);
+        CasTicketPayload payload = new CasTicketPayload(appId, service, userId, ssoSessionToken);
         RedisUtils.setObject(REDIS_KEY_PREFIX + ticket, payload, ssoProperties.getCasTicketExpireSeconds(),
                 TimeUnit.SECONDS);
         ssoSessionService.recordAppCredential(ssoSessionToken, appId, AuthProtocol.CAS, ticket);

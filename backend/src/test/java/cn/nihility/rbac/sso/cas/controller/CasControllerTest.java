@@ -29,7 +29,12 @@ import cn.nihility.rbac.auth.entity.UserPasswordEntity;
 import cn.nihility.rbac.auth.mapper.UserPasswordMapper;
 import cn.nihility.rbac.auth.util.PasswordDigestUtils;
 import cn.nihility.rbac.common.util.JacksonUtils;
+import cn.nihility.rbac.sso.session.SsoSessionIdHasher;
 import cn.nihility.rbac.sso.session.SsoSessionService;
+import cn.nihility.rbac.ssoprotocollog.constant.SsoProtocolLogEventType;
+import cn.nihility.rbac.ssoprotocollog.constant.SsoProtocolLogResult;
+import cn.nihility.rbac.ssoprotocollog.entity.SsoProtocolLogEntity;
+import cn.nihility.rbac.ssoprotocollog.mapper.SsoProtocolLogMapper;
 import cn.nihility.rbac.user.constant.UserStatus;
 import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
@@ -111,6 +116,10 @@ class CasControllerTest {
     /** 策略请求控制条件-浏览器白名单数据访问接口。 */
     @Autowired
     private PolicyBrowserRuleMapper policyBrowserRuleMapper;
+
+    /** SSO 协议调用记录数据访问接口（add-sso-protocol-access-log change tasks.md 6.1）。 */
+    @Autowired
+    private SsoProtocolLogMapper ssoProtocolLogMapper;
 
     /** 本用例插入的应用 id。 */
     private Long appRefId;
@@ -219,6 +228,10 @@ class CasControllerTest {
      */
     @AfterEach
     void tearDown() {
+        if (appId != null) {
+            ssoProtocolLogMapper.delete(new LambdaQueryWrapper<SsoProtocolLogEntity>()
+                    .eq(SsoProtocolLogEntity::getAppId, appId));
+        }
         if (userId != null && appRefId != null) {
             manualOverrideMapper.delete(new LambdaQueryWrapper<ManualOverrideEntity>()
                     .eq(ManualOverrideEntity::getUserId, userId).eq(ManualOverrideEntity::getAppId, appRefId));
@@ -243,13 +256,21 @@ class CasControllerTest {
 
     /**
      * service 未匹配任何已配置规则时，系统应拒绝且不发生任何重定向（无 {@code Location} 响应头），
-     * 防止开放重定向（spec.md "service 未匹配任何规则被拒绝" Scenario）。
+     * 防止开放重定向（spec.md "service 未匹配任何规则被拒绝" Scenario）。校验失败时应记录一条
+     * 失败的 SSO 协议调用记录，用户 id 为空（此时尚未查会话，add-sso-protocol-access-log change
+     * tasks.md 6.1）。
      */
     @Test
     void login_shouldReject_andNotRedirect_whenServiceNotWhitelisted() throws Exception {
         mockMvc.perform(get("/api/authn/cas/{appId}/login", appId).param("service", "https://evil.example.com/callback"))
                 .andExpect(status().isBadRequest())
                 .andExpect(header().doesNotExist("Location"));
+
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLog(SsoProtocolLogEventType.LOGIN);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.FAILED);
+        assertThat(logEntity.getUserId()).isNull();
+        assertThat(logEntity.getAppRefId()).isEqualTo(appRefId);
+        assertThat(logEntity.getSessionId()).isNull();
     }
 
     /**
@@ -261,6 +282,9 @@ class CasControllerTest {
         mockMvc.perform(get("/api/authn/cas/{appId}/login", appId).param("service", ALLOWED_SERVICE))
                 .andExpect(status().isFound())
                 .andExpect(header().string("Location", org.hamcrest.Matchers.startsWith("/sso/login?redirect=")));
+
+        assertThat(ssoProtocolLogMapper.selectList(new LambdaQueryWrapper<SsoProtocolLogEntity>()
+                .eq(SsoProtocolLogEntity::getAppId, appId))).isEmpty();
     }
 
     /**
@@ -275,6 +299,12 @@ class CasControllerTest {
         mockMvc.perform(get("/api/authn/cas/{appId}/login", appId).param("service", ALLOWED_SERVICE).cookie(cookie))
                 .andExpect(status().isFound())
                 .andExpect(header().string("Location", org.hamcrest.Matchers.startsWith(ALLOWED_SERVICE + "?ticket=ST-")));
+
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLog(SsoProtocolLogEventType.LOGIN);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.SUCCESS);
+        assertThat(logEntity.getUserId()).isEqualTo(userId);
+        assertThat(logEntity.getAppRefId()).isEqualTo(appRefId);
+        assertThat(logEntity.getSessionId()).isEqualTo(SsoSessionIdHasher.hash(sessionToken));
     }
 
     /**
@@ -297,6 +327,12 @@ class CasControllerTest {
         Map<String, Object> json = JacksonUtils.toObj(body, JacksonUtils.MAP_OBJECT_TYPE_REFERENCE);
         assertThat(json.get("code")).isEqualTo(403);
         assertThat(json.get("message")).isEqualTo("当前用户无权访问该应用");
+
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLog(SsoProtocolLogEventType.LOGIN);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.FAILED);
+        assertThat(logEntity.getUserId()).isEqualTo(userId);
+        assertThat(logEntity.getFailReason()).isEqualTo("当前用户无权访问该应用");
+        assertThat(logEntity.getSessionId()).isEqualTo(SsoSessionIdHasher.hash(sessionToken));
     }
 
     /**
@@ -320,6 +356,11 @@ class CasControllerTest {
                 .andReturn().getResponse().getContentAsString();
         Map<String, Object> json = JacksonUtils.toObj(body, JacksonUtils.MAP_OBJECT_TYPE_REFERENCE);
         assertThat(json.get("code")).isEqualTo(403);
+
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLog(SsoProtocolLogEventType.LOGIN);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.FAILED);
+        assertThat(logEntity.getUserId()).isEqualTo(userId);
+        assertThat(logEntity.getSessionId()).isEqualTo(SsoSessionIdHasher.hash(sessionToken));
     }
 
     /**
@@ -341,6 +382,11 @@ class CasControllerTest {
                         .header("User-Agent", chromeUserAgent))
                 .andExpect(status().isFound())
                 .andExpect(header().string("Location", org.hamcrest.Matchers.startsWith(ALLOWED_SERVICE + "?ticket=ST-")));
+
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLog(SsoProtocolLogEventType.LOGIN);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.SUCCESS);
+        assertThat(logEntity.getUserId()).isEqualTo(userId);
+        assertThat(logEntity.getSessionId()).isEqualTo(SsoSessionIdHasher.hash(sessionToken));
     }
 
     /**
@@ -403,11 +449,21 @@ class CasControllerTest {
         assertThat(successBody).contains("<cas:authenticationSuccess>");
         assertThat(successBody).contains("<cas:name>CAS测试用户</cas:name>");
 
+        SsoProtocolLogEntity successLog = latestSsoProtocolLog(SsoProtocolLogEventType.SERVICE_VALIDATE);
+        assertThat(successLog.getResult()).isEqualTo(SsoProtocolLogResult.SUCCESS);
+        assertThat(successLog.getUserId()).isEqualTo(userId);
+        assertThat(successLog.getSessionId()).isEqualTo(SsoSessionIdHasher.hash(sessionToken));
+
         String failureBody = mockMvc.perform(get("/api/authn/cas/{appId}/p3/serviceValidate", appId)
                         .param("service", ALLOWED_SERVICE).param("ticket", ticket).param("format", "XML"))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         assertThat(failureBody).contains("INVALID_TICKET");
+
+        SsoProtocolLogEntity failureLog = latestSsoProtocolLog(SsoProtocolLogEventType.SERVICE_VALIDATE);
+        assertThat(failureLog.getResult()).isEqualTo(SsoProtocolLogResult.FAILED);
+        assertThat(failureLog.getUserId()).isNull();
+        assertThat(failureLog.getSessionId()).isNull();
     }
 
     /**
@@ -434,6 +490,11 @@ class CasControllerTest {
         assertThat(authenticationSuccess.get("user")).isNotNull();
         assertThat(attributes.get("name")).isEqualTo("CAS测试用户");
         assertThat(attributes).containsKey("id");
+
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLog(SsoProtocolLogEventType.SERVICE_VALIDATE);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.SUCCESS);
+        assertThat(logEntity.getUserId()).isEqualTo(userId);
+        assertThat(logEntity.getSessionId()).isEqualTo(SsoSessionIdHasher.hash(sessionToken));
     }
 
     /**
@@ -454,6 +515,10 @@ class CasControllerTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         assertThat(body).contains("<cas:authenticationFailure");
+
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLog(SsoProtocolLogEventType.SERVICE_VALIDATE);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.FAILED);
+        assertThat(logEntity.getSessionId()).isNull();
     }
 
     /**
@@ -471,16 +536,29 @@ class CasControllerTest {
                 .andExpect(header().string("Location", ALLOWED_SERVICE));
 
         assertThat(ssoSessionService.verify(sessionToken)).isEmpty();
+
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLog(SsoProtocolLogEventType.LOGOUT);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.SUCCESS);
+        assertThat(logEntity.getUserId()).isEqualTo(userId);
+        assertThat(logEntity.getProtocol()).isEqualTo(cn.nihility.rbac.app.authconfig.constant.AuthProtocol.CAS);
+        assertThat(logEntity.getSessionId()).isEqualTo(SsoSessionIdHasher.hash(sessionToken));
     }
 
     /**
-     * 未持有会话时登出接口仍应正常 302 重定向到 {@code service}，不报错（幂等）。
+     * 未持有会话时登出接口仍应正常 302 重定向到 {@code service}，不报错（幂等），仍记录一条
+     * 成功的调用记录、用户 id 为空（add-sso-protocol-access-log change spec.md "未持有有效
+     * 会话时仍正常响应" Scenario）。
      */
     @Test
     void logout_shouldRedirect_evenWithoutSession() throws Exception {
         mockMvc.perform(get("/api/authn/cas/{appId}/logout", appId).param("service", ALLOWED_SERVICE))
                 .andExpect(status().isFound())
                 .andExpect(header().string("Location", ALLOWED_SERVICE));
+
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLog(SsoProtocolLogEventType.LOGOUT);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.SUCCESS);
+        assertThat(logEntity.getUserId()).isNull();
+        assertThat(logEntity.getSessionId()).isNull();
     }
 
     /**
@@ -498,6 +576,11 @@ class CasControllerTest {
                 .andExpect(header().doesNotExist("Location"));
 
         assertThat(ssoSessionService.verify(sessionToken)).contains(userId);
+
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLog(SsoProtocolLogEventType.LOGOUT);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.FAILED);
+        assertThat(logEntity.getUserId()).isNull();
+        assertThat(logEntity.getSessionId()).isNull();
     }
 
     /**
@@ -526,5 +609,21 @@ class CasControllerTest {
 
         assertThat(elapsedMillis).isLessThan(2000L);
         assertThat(ssoSessionService.verify(sessionToken)).isEmpty();
+    }
+
+    /**
+     * 查询本用例插入的应用（{@link #appId}）最近一条指定事件类型的 SSO 协议调用记录
+     * （add-sso-protocol-access-log change tasks.md 6.1），断言必须存在，否则用例失败。
+     *
+     * @param eventType 事件类型
+     * @return 最近一条对应事件类型的调用记录
+     */
+    private SsoProtocolLogEntity latestSsoProtocolLog(String eventType) {
+        List<SsoProtocolLogEntity> logs = ssoProtocolLogMapper.selectList(new LambdaQueryWrapper<SsoProtocolLogEntity>()
+                .eq(SsoProtocolLogEntity::getAppId, appId)
+                .eq(SsoProtocolLogEntity::getEventType, eventType)
+                .orderByDesc(SsoProtocolLogEntity::getId));
+        assertThat(logs).isNotEmpty();
+        return logs.get(0);
     }
 }

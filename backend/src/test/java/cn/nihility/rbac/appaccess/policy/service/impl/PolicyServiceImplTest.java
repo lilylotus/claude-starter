@@ -140,18 +140,42 @@ class PolicyServiceImplTest {
     }
 
     /**
-     * 组织范围与用户属性条件同时为空时应拒绝保存。
+     * 组织范围、用户属性条件、浏览器白名单、IP 白名单四者同时为空时应拒绝保存
+     * （close-sso-log-and-policy-gaps change tasks.md 4.5）。
      */
     @Test
-    void create_shouldReject_whenOrgScopeAndUserAttrBothEmpty() {
+    void create_shouldReject_whenAllFourConditionsEmpty() {
         PolicyCreateRequest request = validRequest();
         request.setOrgScopes(List.of());
         request.setUserAttrs(List.of());
+        request.setBrowserRules(List.of());
+        request.setIpRules(List.of());
 
         assertThatThrownBy(() -> policyService.create(request))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("不能同时为空");
+                .hasMessageContaining("组织范围、用户属性条件、请求控制条件不能同时为空");
         verify(policyMapper, never()).insert(any(PolicyEntity.class));
+    }
+
+    /**
+     * 仅配置请求控制条件（浏览器/IP 白名单），不配置组织范围与用户属性条件的策略应能正常
+     * 保存（close-sso-log-and-policy-gaps change design.md Decision 3、tasks.md 4.5）。
+     */
+    @Test
+    void create_shouldSucceed_whenOnlyRequestControlConfigured() {
+        PolicyCreateRequest request = validRequest();
+        request.setOrgScopes(List.of());
+        request.setUserAttrs(List.of());
+        request.setBrowserRules(List.of("CHROME"));
+        request.setIpRules(List.of("10.0.0.0/8"));
+
+        PolicyVO vo = policyService.create(request);
+
+        assertThat(vo.getId()).isEqualTo(100L);
+        verify(policyOrgScopeMapper, never()).insert(any(PolicyOrgScopeEntity.class));
+        verify(policyUserAttrMapper, never()).insert(any(PolicyUserAttrEntity.class));
+        verify(policyBrowserRuleMapper).insert(any(PolicyBrowserRuleEntity.class));
+        verify(policyIpRuleMapper).insert(any(PolicyIpRuleEntity.class));
     }
 
     /**

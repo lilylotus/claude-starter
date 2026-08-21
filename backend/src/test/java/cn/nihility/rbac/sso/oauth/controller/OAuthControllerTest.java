@@ -38,7 +38,12 @@ import cn.nihility.rbac.common.util.Sm4JdkUtils;
 import cn.nihility.rbac.formfield.constant.FormFieldBizType;
 import cn.nihility.rbac.metadata.entity.MetadataFieldEntity;
 import cn.nihility.rbac.metadata.mapper.MetadataFieldMapper;
+import cn.nihility.rbac.sso.session.SsoSessionIdHasher;
 import cn.nihility.rbac.sso.session.SsoSessionService;
+import cn.nihility.rbac.ssoprotocollog.constant.SsoProtocolLogEventType;
+import cn.nihility.rbac.ssoprotocollog.constant.SsoProtocolLogResult;
+import cn.nihility.rbac.ssoprotocollog.entity.SsoProtocolLogEntity;
+import cn.nihility.rbac.ssoprotocollog.mapper.SsoProtocolLogMapper;
 import cn.nihility.rbac.user.constant.UserStatus;
 import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
@@ -134,6 +139,10 @@ class OAuthControllerTest {
     /** 策略请求控制条件-IP/网段白名单数据访问接口。 */
     @Autowired
     private PolicyIpRuleMapper policyIpRuleMapper;
+
+    /** SSO 协议调用记录数据访问接口（add-sso-protocol-access-log change tasks.md 6.1）。 */
+    @Autowired
+    private SsoProtocolLogMapper ssoProtocolLogMapper;
 
     /** 测试用 client_secret 明文。 */
     private static final String CLIENT_SECRET_PLAIN = "test-client-secret";
@@ -245,6 +254,10 @@ class OAuthControllerTest {
      */
     @AfterEach
     void tearDown() {
+        if (clientId != null) {
+            ssoProtocolLogMapper.delete(new LambdaQueryWrapper<SsoProtocolLogEntity>()
+                    .eq(SsoProtocolLogEntity::getAppId, clientId));
+        }
         if (userId != null && appRefId != null) {
             manualOverrideMapper.delete(new LambdaQueryWrapper<ManualOverrideEntity>()
                     .eq(ManualOverrideEntity::getUserId, userId).eq(ManualOverrideEntity::getAppId, appRefId));
@@ -281,6 +294,12 @@ class OAuthControllerTest {
                         .param("redirect_uri", "https://evil.example.com/callback"))
                 .andExpect(status().isBadRequest())
                 .andExpect(header().doesNotExist("Location"));
+
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLog(SsoProtocolLogEventType.AUTHORIZE);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.FAILED);
+        assertThat(logEntity.getUserId()).isNull();
+        assertThat(logEntity.getAppRefId()).isEqualTo(appRefId);
+        assertThat(logEntity.getSessionId()).isNull();
     }
 
     /**
@@ -294,6 +313,9 @@ class OAuthControllerTest {
                         .param("redirect_uri", ALLOWED_REDIRECT_URI))
                 .andExpect(status().isFound())
                 .andExpect(header().string("Location", org.hamcrest.Matchers.startsWith("/sso/login?redirect=")));
+
+        assertThat(ssoProtocolLogMapper.selectList(new LambdaQueryWrapper<SsoProtocolLogEntity>()
+                .eq(SsoProtocolLogEntity::getAppId, clientId))).isEmpty();
     }
 
     /**
@@ -316,6 +338,12 @@ class OAuthControllerTest {
 
         assertThat(location).startsWith(ALLOWED_REDIRECT_URI + "?code=");
         assertThat(location).endsWith("&state=xyz-state");
+
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLog(SsoProtocolLogEventType.AUTHORIZE);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.SUCCESS);
+        assertThat(logEntity.getUserId()).isEqualTo(userId);
+        assertThat(logEntity.getAppRefId()).isEqualTo(appRefId);
+        assertThat(logEntity.getSessionId()).isEqualTo(SsoSessionIdHasher.hash(sessionToken));
     }
 
     /**
@@ -342,6 +370,12 @@ class OAuthControllerTest {
         Map<String, Object> json = JacksonUtils.toObj(body, JacksonUtils.MAP_OBJECT_TYPE_REFERENCE);
         assertThat(json.get("code")).isEqualTo(403);
         assertThat(json.get("message")).isEqualTo("当前用户无权访问该应用");
+
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLog(SsoProtocolLogEventType.AUTHORIZE);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.FAILED);
+        assertThat(logEntity.getUserId()).isEqualTo(userId);
+        assertThat(logEntity.getFailReason()).isEqualTo("当前用户无权访问该应用");
+        assertThat(logEntity.getSessionId()).isEqualTo(SsoSessionIdHasher.hash(sessionToken));
     }
 
     /**
@@ -368,6 +402,11 @@ class OAuthControllerTest {
                 .andReturn().getResponse().getContentAsString();
         Map<String, Object> json = JacksonUtils.toObj(body, JacksonUtils.MAP_OBJECT_TYPE_REFERENCE);
         assertThat(json.get("code")).isEqualTo(403);
+
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLog(SsoProtocolLogEventType.AUTHORIZE);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.FAILED);
+        assertThat(logEntity.getUserId()).isEqualTo(userId);
+        assertThat(logEntity.getSessionId()).isEqualTo(SsoSessionIdHasher.hash(sessionToken));
     }
 
     /**
@@ -392,6 +431,11 @@ class OAuthControllerTest {
                 .andReturn().getResponse().getHeader("Location");
 
         assertThat(location).startsWith(ALLOWED_REDIRECT_URI + "?code=");
+
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLog(SsoProtocolLogEventType.AUTHORIZE);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.SUCCESS);
+        assertThat(logEntity.getUserId()).isEqualTo(userId);
+        assertThat(logEntity.getSessionId()).isEqualTo(SsoSessionIdHasher.hash(sessionToken));
     }
 
     /**
@@ -440,7 +484,8 @@ class OAuthControllerTest {
      */
     @Test
     void token_authorizationCode_shouldSucceedOnce_thenRejectSecondUse() throws Exception {
-        String code = issueAuthorizationCode();
+        IssuedAuthorizationCode issuedCode = issueAuthorizationCodeWithSession();
+        String code = issuedCode.code();
 
         String body = mockMvc.perform(post("/api/authn/oauth/token")
                         .param("grant_type", "authorization_code")
@@ -455,6 +500,11 @@ class OAuthControllerTest {
         assertThat(tokenBody.get("refresh_token")).isNotNull();
         assertThat(tokenBody.get("token_type")).isEqualTo("Bearer");
 
+        SsoProtocolLogEntity successLog = latestSsoProtocolLog(SsoProtocolLogEventType.TOKEN);
+        assertThat(successLog.getResult()).isEqualTo(SsoProtocolLogResult.SUCCESS);
+        assertThat(successLog.getUserId()).isEqualTo(userId);
+        assertThat(successLog.getSessionId()).isEqualTo(SsoSessionIdHasher.hash(issuedCode.sessionToken()));
+
         mockMvc.perform(post("/api/authn/oauth/token")
                         .param("grant_type", "authorization_code")
                         .param("client_id", clientId)
@@ -462,6 +512,11 @@ class OAuthControllerTest {
                         .param("redirect_uri", ALLOWED_REDIRECT_URI)
                         .param("code", code))
                 .andExpect(status().isBadRequest());
+
+        SsoProtocolLogEntity failureLog = latestSsoProtocolLog(SsoProtocolLogEventType.TOKEN);
+        assertThat(failureLog.getResult()).isEqualTo(SsoProtocolLogResult.FAILED);
+        assertThat(failureLog.getUserId()).isNull();
+        assertThat(failureLog.getSessionId()).isNull();
     }
 
     /**
@@ -479,6 +534,12 @@ class OAuthControllerTest {
                         .param("redirect_uri", ALLOWED_REDIRECT_URI)
                         .param("code", code))
                 .andExpect(status().isUnauthorized());
+
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLog(SsoProtocolLogEventType.TOKEN);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.FAILED);
+        assertThat(logEntity.getUserId()).isNull();
+        assertThat(logEntity.getAppRefId()).isEqualTo(appRefId);
+        assertThat(logEntity.getSessionId()).isNull();
     }
 
     /**
@@ -487,15 +548,22 @@ class OAuthControllerTest {
      */
     @Test
     void token_authorizationCode_shouldReject_whenRedirectUriMismatch() throws Exception {
-        String code = issueAuthorizationCode();
+        IssuedAuthorizationCode issuedCode = issueAuthorizationCodeWithSession();
 
         mockMvc.perform(post("/api/authn/oauth/token")
                         .param("grant_type", "authorization_code")
                         .param("client_id", clientId)
                         .param("client_secret", CLIENT_SECRET_PLAIN)
                         .param("redirect_uri", "https://partner.example.com/other-callback")
-                        .param("code", code))
+                        .param("code", issuedCode.code()))
                 .andExpect(status().isBadRequest());
+
+        // 授权码本身合法（只是 redirect_uri 与签发时不一致），payload 已解析出，userId/
+        // sessionId 均不应因本次判定失败而丢弃（design.md Decision 4 "视情况而定" 分支）。
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLog(SsoProtocolLogEventType.TOKEN);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.FAILED);
+        assertThat(logEntity.getUserId()).isEqualTo(userId);
+        assertThat(logEntity.getSessionId()).isEqualTo(SsoSessionIdHasher.hash(issuedCode.sessionToken()));
     }
 
     /**
@@ -507,16 +575,17 @@ class OAuthControllerTest {
      */
     @Test
     void token_refreshToken_shouldSucceed_andRotateRefreshToken() throws Exception {
-        String code = issueAuthorizationCode();
+        IssuedAuthorizationCode issuedCode = issueAuthorizationCodeWithSession();
         String tokenResponseBody = mockMvc.perform(post("/api/authn/oauth/token")
                         .param("grant_type", "authorization_code")
                         .param("client_id", clientId)
                         .param("client_secret", CLIENT_SECRET_PLAIN)
                         .param("redirect_uri", ALLOWED_REDIRECT_URI)
-                        .param("code", code))
+                        .param("code", issuedCode.code()))
                 .andReturn().getResponse().getContentAsString();
         Map<String, Object> issued = JacksonUtils.toObj(tokenResponseBody, JacksonUtils.MAP_OBJECT_TYPE_REFERENCE);
         String refreshToken = (String) issued.get("refresh_token");
+        SsoProtocolLogEntity authorizeLog = latestSsoProtocolLog(SsoProtocolLogEventType.AUTHORIZE);
 
         String refreshedBody = mockMvc.perform(post("/api/authn/oauth/token")
                         .param("grant_type", "refresh_token")
@@ -528,12 +597,37 @@ class OAuthControllerTest {
         assertThat(refreshed.get("access_token")).isNotEqualTo(issued.get("access_token"));
         assertThat(refreshed.get("refresh_token")).isNotNull();
         assertThat(refreshed.get("refresh_token")).isNotEqualTo(refreshToken);
+        String rotatedAccessToken = (String) refreshed.get("access_token");
+
+        SsoProtocolLogEntity successLog = latestSsoProtocolLog(SsoProtocolLogEventType.TOKEN);
+        assertThat(successLog.getResult()).isEqualTo(SsoProtocolLogResult.SUCCESS);
+        assertThat(successLog.getUserId()).isEqualTo(userId);
+        assertThat(successLog.getSessionId()).isEqualTo(SsoSessionIdHasher.hash(issuedCode.sessionToken()));
+
+        // “刷新链路延续会话”核心断言：用刷新后签发的新 access token 调用 userinfo 产生的
+        // 调用记录，session_id 应与最初签发授权码时的 authorize 调用记录完全一致
+        // （add-sso-protocol-access-log change design.md Decision 6/spec.md "令牌刷新后
+        // 新令牌延续同一会话标识" Scenario，tasks.md 7.8 "刷新链路存活" 核心用例）。
+        mockMvc.perform(get("/api/authn/oauth/userinfo").header("Authorization", "Bearer " + rotatedAccessToken))
+                .andExpect(status().isOk());
+        SsoProtocolLogEntity userinfoLog = latestSsoProtocolLog(SsoProtocolLogEventType.USERINFO);
+        assertThat(userinfoLog.getResult()).isEqualTo(SsoProtocolLogResult.SUCCESS);
+        assertThat(userinfoLog.getSessionId()).isNotNull();
+        assertThat(userinfoLog.getSessionId()).isEqualTo(authorizeLog.getSessionId());
 
         // 旧 refresh token 已一次性消费失效，再次使用应被拒绝
         mockMvc.perform(post("/api/authn/oauth/token")
                         .param("grant_type", "refresh_token")
                         .param("refresh_token", refreshToken))
                 .andExpect(status().isBadRequest());
+
+        // handleRefreshTokenGrant 不要求请求携带 client_id，本次失败记录的原始 appId 为空，
+        // 无法按 clientId 过滤定位，改用不按 appId 过滤的全局查询（同
+        // token_refreshToken_shouldReject_whenRefreshTokenUnknown 用例）。
+        SsoProtocolLogEntity failureLog = latestSsoProtocolLogGlobal(SsoProtocolLogEventType.TOKEN);
+        assertThat(failureLog.getResult()).isEqualTo(SsoProtocolLogResult.FAILED);
+        assertThat(failureLog.getUserId()).isNull();
+        assertThat(failureLog.getSessionId()).isNull();
     }
 
     /**
@@ -546,6 +640,11 @@ class OAuthControllerTest {
                         .param("grant_type", "refresh_token")
                         .param("refresh_token", "unknown-refresh-token"))
                 .andExpect(status().isBadRequest());
+
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLogGlobal(SsoProtocolLogEventType.TOKEN);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.FAILED);
+        assertThat(logEntity.getUserId()).isNull();
+        assertThat(logEntity.getSessionId()).isNull();
     }
 
     /**
@@ -555,6 +654,11 @@ class OAuthControllerTest {
     void token_shouldReject_whenGrantTypeUnsupported() throws Exception {
         mockMvc.perform(post("/api/authn/oauth/token").param("grant_type", "password"))
                 .andExpect(status().isBadRequest());
+
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLogGlobal(SsoProtocolLogEventType.TOKEN);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.FAILED);
+        assertThat(logEntity.getFailReason()).isEqualTo("grant_type 不支持");
+        assertThat(logEntity.getSessionId()).isNull();
     }
 
     /**
@@ -564,13 +668,13 @@ class OAuthControllerTest {
      */
     @Test
     void userinfo_shouldReturnUserInfo_whenTokenValid() throws Exception {
-        String code = issueAuthorizationCode();
+        IssuedAuthorizationCode issuedCode = issueAuthorizationCodeWithSession();
         String tokenResponseBody = mockMvc.perform(post("/api/authn/oauth/token")
                         .param("grant_type", "authorization_code")
                         .param("client_id", clientId)
                         .param("client_secret", CLIENT_SECRET_PLAIN)
                         .param("redirect_uri", ALLOWED_REDIRECT_URI)
-                        .param("code", code))
+                        .param("code", issuedCode.code()))
                 .andReturn().getResponse().getContentAsString();
         Map<String, Object> issued = JacksonUtils.toObj(tokenResponseBody, JacksonUtils.MAP_OBJECT_TYPE_REFERENCE);
         String accessToken = (String) issued.get("access_token");
@@ -583,6 +687,11 @@ class OAuthControllerTest {
         assertThat(userInfo.get("name")).isEqualTo("OAuth测试用户");
         assertThat(userInfo).containsKey("id");
         assertThat(userInfo).doesNotContainKey("username");
+
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLog(SsoProtocolLogEventType.USERINFO);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.SUCCESS);
+        assertThat(logEntity.getUserId()).isEqualTo(userId);
+        assertThat(logEntity.getSessionId()).isEqualTo(SsoSessionIdHasher.hash(issuedCode.sessionToken()));
     }
 
     /**
@@ -636,6 +745,12 @@ class OAuthControllerTest {
         mockMvc.perform(get("/api/authn/oauth/userinfo").header("Authorization", "Bearer unknown-access-token"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(header().string("WWW-Authenticate", "Bearer"));
+
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLogGlobal(SsoProtocolLogEventType.USERINFO);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.FAILED);
+        assertThat(logEntity.getUserId()).isNull();
+        assertThat(logEntity.getAppId()).isNull();
+        assertThat(logEntity.getSessionId()).isNull();
     }
 
     /**
@@ -645,15 +760,32 @@ class OAuthControllerTest {
     void userinfo_shouldReturnUnauthorized_whenAuthorizationHeaderMissing() throws Exception {
         mockMvc.perform(get("/api/authn/oauth/userinfo"))
                 .andExpect(status().isUnauthorized());
+
+        SsoProtocolLogEntity logEntity = latestSsoProtocolLogGlobal(SsoProtocolLogEventType.USERINFO);
+        assertThat(logEntity.getResult()).isEqualTo(SsoProtocolLogResult.FAILED);
+        assertThat(logEntity.getUserId()).isNull();
+        assertThat(logEntity.getSessionId()).isNull();
     }
 
     /**
      * 走完整授权流程（登录态 + authorize）签发一枚授权码，供 {@code /token} 相关用例使用。
      *
-     * @return 签发的授权码
+     * @return 签发的授权码字符串
      * @throws Exception MockMvc 调用异常
      */
     private String issueAuthorizationCode() throws Exception {
+        return issueAuthorizationCodeWithSession().code();
+    }
+
+    /**
+     * 走完整授权流程（登录态 + authorize）签发一枚授权码，同时返回本次登录使用的 SSO 会话
+     * 令牌（供断言 {@code sessionId} 是否正确关联，add-sso-protocol-access-log change
+     * design.md Decision 6）。
+     *
+     * @return 签发的授权码与本次使用的 SSO 会话令牌
+     * @throws Exception MockMvc 调用异常
+     */
+    private IssuedAuthorizationCode issueAuthorizationCodeWithSession() throws Exception {
         String sessionToken = ssoSessionService.issue(userId);
         Cookie cookie = new Cookie("sso_session", sessionToken);
         String location = mockMvc.perform(get("/api/authn/oauth/authorize")
@@ -662,6 +794,51 @@ class OAuthControllerTest {
                         .param("redirect_uri", ALLOWED_REDIRECT_URI)
                         .cookie(cookie))
                 .andReturn().getResponse().getHeader("Location");
-        return location.substring(location.indexOf("code=") + "code=".length());
+        String code = location.substring(location.indexOf("code=") + "code=".length());
+        return new IssuedAuthorizationCode(code, sessionToken);
+    }
+
+    /**
+     * {@link #issueAuthorizationCodeWithSession()} 的返回值，携带签发的授权码与本次登录
+     * 使用的 SSO 会话令牌（原始令牌，非哈希值）。
+     *
+     * @param code         签发的授权码
+     * @param sessionToken 本次登录使用的 SSO 会话令牌
+     */
+    private record IssuedAuthorizationCode(String code, String sessionToken) {
+    }
+
+    /**
+     * 查询本用例插入的应用（{@link #clientId}）最近一条指定事件类型的 SSO 协议调用记录
+     * （add-sso-protocol-access-log change tasks.md 6.1），断言必须存在，否则用例失败。
+     *
+     * @param eventType 事件类型
+     * @return 最近一条对应事件类型的调用记录
+     */
+    private SsoProtocolLogEntity latestSsoProtocolLog(String eventType) {
+        List<SsoProtocolLogEntity> logs = ssoProtocolLogMapper.selectList(new LambdaQueryWrapper<SsoProtocolLogEntity>()
+                .eq(SsoProtocolLogEntity::getAppId, clientId)
+                .eq(SsoProtocolLogEntity::getEventType, eventType)
+                .orderByDesc(SsoProtocolLogEntity::getId));
+        assertThat(logs).isNotEmpty();
+        return logs.get(0);
+    }
+
+    /**
+     * 查询最近一条指定事件类型的 SSO 协议调用记录，不按 appId 过滤——供请求里未携带
+     * {@code client_id} 参数（如 {@code refresh_token} 授权类型、{@code userinfo} 端点未携带
+     * 有效令牌）的场景使用，此时记录的原始 {@code appId} 字段为空，无法按 {@link #clientId}
+     * 过滤定位。测试按顺序串行执行，断言紧跟在触发调用之后，取全表最新一条即为本次调用产生
+     * 的记录。
+     *
+     * @param eventType 事件类型
+     * @return 最近一条对应事件类型的调用记录
+     */
+    private SsoProtocolLogEntity latestSsoProtocolLogGlobal(String eventType) {
+        List<SsoProtocolLogEntity> logs = ssoProtocolLogMapper.selectList(new LambdaQueryWrapper<SsoProtocolLogEntity>()
+                .eq(SsoProtocolLogEntity::getEventType, eventType)
+                .orderByDesc(SsoProtocolLogEntity::getId));
+        assertThat(logs).isNotEmpty();
+        return logs.get(0);
     }
 }
