@@ -97,3 +97,11 @@ rbac:
     # OAuth2 refresh token 有效期（秒），默认 86400 秒（1 天，add-sso-single-logout change
     # design.md Decision 6，刷新时轮转签发新值，接入方须保证至少每天刷新一次）。
     oauth-refresh-token-expire-seconds: 86400
+
+  # 登录日志/操作日志定期清理配置（close-sso-log-and-policy-gaps change design.md
+  # Decision 4），两张表共用同一份 cron/保留天数配置，全部为默认值，此处显式列出便于按需覆盖。
+  log-cleanup:
+    # 清理任务执行时间点的 cron 表达式，默认每天凌晨 1 点执行一次。
+    cron: "0 0 1 * * ?"
+    # 日志保留天数，默认 180 天（半年），创建时间早于"当前时间 - 保留天数"的记录会被清理。
+    retention-days: 180
