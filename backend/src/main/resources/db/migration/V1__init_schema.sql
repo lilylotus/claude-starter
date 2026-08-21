@@ -1,19 +1,20 @@
 -- ----------------------------------------------------------------------------
 -- RBAC 权限管理系统 - 数据库基线脚本（Flyway 迁移版本 V1）
--- 本文件由原 V1~V7 共 7 个迁移文件合并而来（第四次基线合并，上一次是 V1~V11 合并为
--- 本文件的第三次基线合并），代表这些迁移按顺序执行完毕后的最终数据库状态（全部 30
--- 张表的建表语句 + 全部种子数据），不再保留中间过程中的 ALTER/UPDATE/TRUNCATE 步骤
--- 与已被后续存量数据回填但对全新数据库无意义的 INSERT...SELECT。整体按"先建表、后
--- 插入有依赖关系的种子数据"的顺序线性组织。
+-- 本文件由原 V1~V10 共 10 个迁移文件合并而来（openspec change
+-- consolidate-flyway-migrations-v4，此前三次分别是 consolidate-flyway-migrations/
+-- -v2/-v3），代表这些迁移按顺序执行完毕后的最终数据库状态（全部 40 张表的建表语句 +
+-- 全部种子数据），不再保留中间过程中的 ALTER/UPDATE/DROP 步骤与已被后续存量数据
+-- 回填但对全新数据库无意义的 INSERT...SELECT。整体按"先建表、后插入有依赖关系的
+-- 种子数据"的顺序线性组织。
 -- 数据库需提前手动创建，例如：
 --   CREATE DATABASE rbac_demo DEFAULT CHARACTER SET utf8mb4;
--- 注意：本地开发库如果已经跑过旧的 V1~V7，需要先清空该库（或删除
+-- 注意：本地开发库如果已经跑过旧的 V1~V10，需要先清空该库（或删除
 -- flyway_schema_history 表）后重新执行本文件，否则 Flyway 会因为找不到对应版本号
 -- 的历史文件而报错。
 -- ----------------------------------------------------------------------------
 
 -- ============================================================================
--- 第一部分：建表语句（共 30 张表）
+-- 第一部分：建表语句（共 40 张表）
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -220,18 +221,21 @@ CREATE TABLE IF NOT EXISTS `tab_app` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '应用主数据表';
 
 -- 应用对外接口凭证配置表：与 tab_app 一对一，存放 AppId/AccessKey/SecretKey、签名
--- 算法与基础同步配置（同步方式 + 通知回调地址/参数）。列名已核对
+-- 算法与基础同步配置（同步方式 + 通知回调地址/参数 + 同步总开关）。列名已核对
 -- MySQL/PostgreSQL/Oracle/SQL Server 保留字：app_id/open_app_id/access_key/
--- secret_key/sign_algorithm/sync_mode/notify_url/notify_params 均非保留字。
+-- secret_key/sign_algorithm/sync_master_enabled/sync_mode/notify_url/notify_params
+-- 均非保留字。
 CREATE TABLE IF NOT EXISTS `tab_app_config` (
-    `id`             BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
-    `app_id`         BIGINT       NOT NULL COMMENT '所属应用 id，关联 tab_app.id，一对一唯一',
-    `open_app_id`    VARCHAR(64)  NOT NULL COMMENT '对外应用标识（AppId），系统生成，全局唯一，24 位随机十六进制，不带前缀',
-    `access_key`     VARCHAR(64)  NOT NULL COMMENT '对外接口 AccessKey，系统生成，全局唯一，32 位随机十六进制，不带前缀',
-    `secret_key`     VARCHAR(255) NOT NULL COMMENT '对外接口 SecretKey，落库前经 SM4 对称加密（Base64），不存明文，仅重置接口单次返回明文',
-    `sign_algorithm` VARCHAR(16)  NOT NULL DEFAULT 'SHA256' COMMENT '接口签名算法：SHA256 或 SM3',
-    `need_sign`      TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '是否需要签名/验签校验',
-    `sync_mode`      VARCHAR(16)  NOT NULL DEFAULT 'PULL' COMMENT '同步方式：NOTIFY=通知（本系统主动回调外部接口），PULL=拉取（外部系统主动调用本系统接口）',
+    `id`                   BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `app_id`               BIGINT       NOT NULL COMMENT '所属应用 id，关联 tab_app.id，一对一唯一',
+    `open_app_id`          VARCHAR(64)  NOT NULL COMMENT '对外应用标识（AppId），系统生成，全局唯一，24 位随机十六进制，不带前缀',
+    `access_key`           VARCHAR(64)  NOT NULL COMMENT '对外接口 AccessKey，系统生成，全局唯一，32 位随机十六进制，不带前缀',
+    `secret_key`           VARCHAR(255) NOT NULL COMMENT '对外接口 SecretKey，落库前经 SM4 对称加密（Base64），不存明文，仅重置接口单次返回明文',
+    `sign_algorithm`       VARCHAR(16)  NOT NULL DEFAULT 'SHA256' COMMENT '接口签名算法：SHA256 或 SM3',
+    `need_sign`            TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '是否需要签名/验签校验',
+    `sync_master_enabled`  TINYINT(1)   NOT NULL DEFAULT 1
+        COMMENT '同步总开关：1=开启，0=关闭，关闭后不再产生该应用的数据变更记录、不发送通知、拉取接口返回空结果',
+    `sync_mode`            VARCHAR(16)  NOT NULL DEFAULT 'PULL' COMMENT '同步方式：NOTIFY=通知（本系统主动回调外部接口），PULL=拉取（外部系统主动调用本系统接口）',
     `notify_url`     VARCHAR(255)          DEFAULT NULL COMMENT '通知回调接口地址（http/https），sync_mode=NOTIFY 时必填',
     `notify_params`  TEXT                  DEFAULT NULL COMMENT '通知请求自定义参数，JSON 对象（key-value 均为字符串），sync_mode=PULL 时通常为空',
     `create_by`      VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
@@ -245,24 +249,53 @@ CREATE TABLE IF NOT EXISTS `tab_app_config` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
   COMMENT = '应用对外接口凭证配置表，与 tab_app 一对一，无独立 status，随所属应用整体维护';
 
--- 应用单点登录协议配置表：与 tab_app 一对一，仅存协议类型（无/CAS/OAuth2.0）与回跳地址
--- 匹配规则列表，不含运行时票据/令牌数据（app-auth-protocol-config change design.md
--- Decision 1）。列名已核对 MySQL/PostgreSQL/Oracle/SQL Server 保留字：
--- auth_protocol/cas_service_patterns/oauth2_redirect_uri_patterns 均非保留字。
+-- 应用单点登录协议配置表：与 tab_app 一对一，仅存协议类型（无/CAS/OAuth2.0）、回跳
+-- 地址匹配规则列表（CAS/OAuth2.0 等协议共用同一列，unify-app-auth-service-patterns
+-- change design.md Decision 1/2）与登出通知回调地址（add-sso-single-logout change
+-- design.md Decision 2/3），不含运行时票据/令牌数据（app-auth-protocol-config
+-- change design.md Decision 1）。列名已核对 MySQL/PostgreSQL/Oracle/SQL Server
+-- 保留字：auth_protocol/service_patterns/logout_notify_url 均非保留字。
 CREATE TABLE IF NOT EXISTS `tab_app_auth_config` (
-    `id`                           BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
-    `app_id`                       BIGINT      NOT NULL COMMENT '所属应用 id，关联 tab_app.id，一对一唯一',
-    `auth_protocol`                VARCHAR(16) NOT NULL DEFAULT 'NONE' COMMENT '单点登录协议类型：NONE/CAS/OAUTH2',
-    `cas_service_patterns`         TEXT                 DEFAULT NULL COMMENT 'CAS service 参数 ANT 匹配规则列表，JSON 字符串数组，auth_protocol=NONE 时为空',
-    `oauth2_redirect_uri_patterns` TEXT                 DEFAULT NULL COMMENT 'OAuth2 redirect_uri ANT 匹配规则列表，JSON 字符串数组，auth_protocol=NONE 时为空',
-    `create_by`                    VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
-    `create_time`                  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    `update_by`                    VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
-    `update_time`                  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `id`                BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `app_id`            BIGINT      NOT NULL COMMENT '所属应用 id，关联 tab_app.id，一对一唯一',
+    `auth_protocol`     VARCHAR(16) NOT NULL DEFAULT 'NONE' COMMENT '单点登录协议类型：NONE/CAS/OAUTH2',
+    `service_patterns`  TEXT                 DEFAULT NULL COMMENT '回跳地址 ANT 匹配规则列表（JSON 字符串数组），CAS/OAuth2.0 等协议共用，auth_protocol=NONE 时为空',
+    `logout_notify_url` VARCHAR(255)         DEFAULT NULL COMMENT '登出通知回调地址，POST 回调该地址通知应用登出事件，未配置时登出不通知该应用',
+    `create_by`         VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`       DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`         VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`       DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_tab_app_auth_config_app_id` (`app_id`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
-  COMMENT = '应用单点登录协议配置表，与 tab_app 一对一，仅存协议类型与回跳地址匹配规则，不含运行时票据/令牌数据';
+  COMMENT = '应用单点登录协议配置表，与 tab_app 一对一，仅存协议类型、回跳地址匹配规则与登出通知回调地址，不含运行时票据/令牌数据';
+
+-- 应用用户信息响应字段映射表：每个应用一份（CAS/OAuth2.0 协议共用），驱动 CAS
+-- <cas:attributes>（含 JSON 对应节点）与 OAuth2 userinfo 响应体中除各自协议规定的固定
+-- 标识（cas:user/sub）外的其余字段生成。metadata_field_id 允许为空：非空表示关联一条
+-- tab_metadata_field（bizType=USER）记录，为空表示固定的"用户ID"伪字段（tab_user.id，
+-- 主键，不在 tab_metadata_field 目录里）。未保存过任何记录的应用视为默认两行（用户ID、
+-- 姓名），不落库，由查询接口与运行时解析组件现算兜底（add-sso-userinfo-field-mapping
+-- change design.md Decision 2/4）。列名已核对 MySQL/PostgreSQL/Oracle/SQL Server
+-- 保留字：app_id/metadata_field_id/app_field_name/app_field_code/transform_type/
+-- transform_value 均非保留字。全新数据库上无种子数据。
+CREATE TABLE IF NOT EXISTS `tab_app_userinfo_field_mapping` (
+    `id`                BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `app_id`            BIGINT       NOT NULL COMMENT '所属应用 id，关联 tab_app.id',
+    `metadata_field_id` BIGINT       NULL COMMENT '本地字段，关联 tab_metadata_field.id；为空表示固定的“用户ID”伪字段',
+    `app_field_name`    VARCHAR(128) NOT NULL COMMENT '应用侧目标字段名称，管理员手工填写',
+    `app_field_code`    VARCHAR(128) NOT NULL COMMENT '应用侧目标字段编码，管理员手工填写',
+    `transform_type`    VARCHAR(16)  NOT NULL DEFAULT 'NO_TRANSFORM'
+        COMMENT '转换方式：NO_TRANSFORM=不转换，FIXED_VALUE=固定值，SCRIPT=转换脚本',
+    `transform_value`   TEXT         NULL COMMENT '转换取值：固定值的具体值，或脚本源码，NO_TRANSFORM 时为空',
+    `create_by`         VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
+    `create_time`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`         VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
+    `update_time`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_app_userinfo_field_mapping` (`app_id`, `app_field_code`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+  COMMENT = '应用用户信息响应字段映射表，CAS/OAuth2.0 协议共用，驱动 CAS 属性/OAuth2 userinfo 响应字段动态生成';
 
 -- 应用同步数据域配置表：每个应用固定 5 行，分别对应组织/用户/应用/角色/字典五个
 -- 数据域，每行携带"是否启用"与"每次拉取分页大小"两个属性。列名已核对
@@ -313,45 +346,54 @@ CREATE TABLE IF NOT EXISTS `tab_app_sync_field_mapping` (
 -- 应用数据同步通知/拉取模块
 -- ----------------------------------------------------------------------------
 
--- 应用数据变更记录表：按目标应用各自记录（id 自增列全局单调递增，直接作为对外序列号，
--- 不额外维护计数器；sequence 属于 SQL 保留字/对象类型，不作为列名）；只追加不更新不
--- 删除。列名已核对 MySQL/PostgreSQL/Oracle/SQL Server 保留字：app_ref_id/data_type/
--- biz_id/operation_type 均非保留字。
-CREATE TABLE IF NOT EXISTS `tab_app_data_change_log` (
-    `id`             BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id，全局单调递增，直接作为对外的序列号（sequence）',
-    `app_ref_id`     BIGINT      NOT NULL COMMENT '目标应用 id（tab_app.id）',
-    `data_type`      VARCHAR(20) NOT NULL COMMENT '数据类型：ORG/USER/POSITION/APP/ROLE',
-    `biz_id`         BIGINT      NOT NULL COMMENT '变更对象主键 id',
-    `operation_type` TINYINT     NOT NULL COMMENT '操作类型：1=新增，2=编辑，3=启用，4=停用，5=删除',
-    `create_by`      VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
-    `create_time`    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    `update_by`      VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
-    `update_time`    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    PRIMARY KEY (`id`),
-    KEY `idx_tab_app_data_change_log_type_biz` (`data_type`, `biz_id`),
-    KEY `idx_tab_app_data_change_log_app_type` (`app_ref_id`, `data_type`, `id`)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
-  COMMENT = '应用数据变更记录表，按目标应用各自记录，id 自增列本身即对外序列号，只追加不更新不删除';
-
--- 应用通知发送记录表：仅用于问题排查/展示，不驱动自动重试。列名已核对
--- MySQL/PostgreSQL/Oracle/SQL Server 保留字：change_log_id/app_ref_id/notify_status/
--- http_status/error_msg 均非保留字。
+-- 应用通知发送记录表：仅用于问题排查/展示，不驱动自动重试。定位通知记录直接使用
+-- data_type/biz_id 两列，通知也改为数据变更时直接判定候选应用并即时触发，不再有
+-- 任何"变更记录"表居中转发（app-sync-drop-changelog change design.md Migration
+-- Plan）。notify_url 记录本次回调实际使用的地址快照，不依赖 tab_app_config.notify_url
+-- 的当前值，避免管理员事后改了回调地址导致历史记录被误导（add-app-sync-notify-pull-logs
+-- change design.md Decision 1）。列名已核对 MySQL/PostgreSQL/Oracle/SQL Server
+-- 保留字：app_ref_id/data_type/biz_id/notify_status/http_status/error_msg/notify_url
+-- 均非保留字。
 CREATE TABLE IF NOT EXISTS `tab_app_notify_record` (
     `id`            BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
-    `change_log_id` BIGINT       NOT NULL COMMENT '关联 tab_app_data_change_log.id',
     `app_ref_id`    BIGINT       NOT NULL COMMENT '关联 tab_app.id',
+    `data_type`     VARCHAR(20)  NULL COMMENT '数据类型：ORG/USER/POSITION/APP/ROLE，历史数据为空',
+    `biz_id`        BIGINT       NULL COMMENT '被变更对象 id，历史数据为空',
     `notify_status` TINYINT      NOT NULL COMMENT '通知状态：1=成功，2=失败',
     `http_status`   INT          NULL COMMENT '外部接口返回的 HTTP 状态码，失败且未收到响应时为空',
     `error_msg`     VARCHAR(500) NULL COMMENT '失败原因摘要',
+    `notify_url`    VARCHAR(255) NULL COMMENT '本次回调实际使用的地址快照，历史数据为空',
     `create_by`     VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
     `create_time`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `update_by`     VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
     `update_time`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),
-    KEY `idx_tab_app_notify_record_change_log_id` (`change_log_id`),
-    KEY `idx_tab_app_notify_record_app_ref_id` (`app_ref_id`)
+    KEY `idx_tab_app_notify_record_app_ref_id` (`app_ref_id`),
+    KEY `idx_tab_app_notify_record_app_time` (`app_ref_id`, `create_time`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
   COMMENT = '应用通知发送记录表，仅用于问题排查/展示，不驱动自动重试';
+
+-- 应用拉取变更数据请求记录表：记录外部应用调用分页拉取接口的请求，仅用于问题排查/
+-- 展示，不驱动任何业务逻辑，不涉及日志保留/清理策略（add-app-sync-notify-pull-logs
+-- change design.md Decision 2，proposal.md Non-Goals）。拉取接口后来改为直接分页
+-- 查询业务表当前数据，原按 id/按序列号两种拉取方式合并为统一分页拉取接口，
+-- pull_mode 列随之下线（app-sync-drop-changelog change design.md Migration Plan）。
+-- 列名已核对 MySQL/PostgreSQL/Oracle/SQL Server 保留字：app_ref_id/data_type/
+-- request_summary/result_count 均非保留字。
+CREATE TABLE IF NOT EXISTS `tab_app_pull_record` (
+    `id`              BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `app_ref_id`      BIGINT       NOT NULL COMMENT '发起拉取的应用 id，关联 tab_app.id',
+    `data_type`       VARCHAR(20)  NULL COMMENT '请求的数据类型，未传时为空',
+    `request_summary` VARCHAR(255) NULL COMMENT '请求参数摘要',
+    `result_count`    INT          NOT NULL DEFAULT 0 COMMENT '本次返回的记录条数',
+    `create_by`       VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
+    `create_time`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`       VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
+    `update_time`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_tab_app_pull_record_app_time` (`app_ref_id`, `create_time`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+  COMMENT = '应用拉取变更数据请求记录，仅用于问题排查/展示';
 
 -- ----------------------------------------------------------------------------
 -- 应用同步组织范围模块
@@ -375,6 +417,146 @@ CREATE TABLE IF NOT EXISTS `tab_app_sync_org_scope` (
     KEY `idx_tab_app_sync_org_scope_app_domain` (`app_ref_id`, `sync_domain`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
   COMMENT = '应用同步组织范围配置表，零行=全部数据，>=1 行=指定组织范围';
+
+-- ----------------------------------------------------------------------------
+-- 应用访问授权模块（app-access-authorization / app-access-request-control change）
+-- ----------------------------------------------------------------------------
+-- 八张表：策略规则本身、策略的组织范围条件、策略的用户属性条件（关联
+-- tab_metadata_field，biz_type=USER）、策略的目标应用、策略的浏览器白名单条件、策略
+-- 的 IP/网段白名单条件、策略计算结果（POLICY 来源授权记录，按 policy_id 整体重建），
+-- 以及独立的人工例外表（GRANT/DENY，与策略结果表物理隔离，互不影响）。请求控制
+-- （浏览器/IP 白名单）是运行时校验，不参与策略"执行"的批量身份计算，不影响
+-- tab_app_access_policy_grant 表结构（app-access-request-control change design.md
+-- Decision 2）。全部不建物理外键，字段命名已核对 MySQL/PostgreSQL/Oracle/SQL Server
+-- 保留字：name/remark/status/last_exec_time/last_exec_by/policy_id/org_id/
+-- include_children/metadata_field_id/operator/attr_value/app_id/browser_code/
+-- ip_cidr/user_id/override_type 均非保留字。
+
+-- 策略规则主表：名称、备注、启用状态、最近一次执行时间/执行人。
+CREATE TABLE IF NOT EXISTS `tab_app_access_policy` (
+    `id`             BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `name`           VARCHAR(128) NOT NULL COMMENT '策略名称',
+    `remark`         VARCHAR(255) NULL COMMENT '备注',
+    `status`         INT          NOT NULL DEFAULT 2000 COMMENT '状态：2000=启用，3000=停用',
+    `last_exec_time` DATETIME     NULL COMMENT '最近一次执行时间，从未执行过为空',
+    `last_exec_by`   VARCHAR(64)  NULL COMMENT '最近一次执行人',
+    `create_by`      VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
+    `create_time`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`      VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
+    `update_time`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_tab_app_access_policy_status` (`status`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '应用访问授权策略规则表';
+
+-- 策略组织范围条件：零条或多条，整体替换语义（先删后插），字段形状对齐
+-- tab_admin_org_scope 范式。
+CREATE TABLE IF NOT EXISTS `tab_app_access_policy_org_scope` (
+    `id`               BIGINT     NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `policy_id`        BIGINT     NOT NULL COMMENT '所属策略 id，关联 tab_app_access_policy.id，不建物理外键',
+    `org_id`           BIGINT     NOT NULL COMMENT '组织 id，关联 tab_org.id，不建物理外键',
+    `include_children` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否包含递归子组织：0=否，1=是',
+    `create_by`        VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`      DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`        VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`      DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_app_access_policy_org_scope` (`policy_id`, `org_id`),
+    KEY `idx_tab_app_access_policy_org_scope_org_id` (`org_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '应用访问授权策略组织范围条件表';
+
+-- 策略用户属性条件：零条或多条，关联 tab_metadata_field（biz_type=USER）的
+-- metadata_field_id，运算符仅 EQ/NE/IN 三种，IN 时 attr_value 为逗号分隔多值。
+CREATE TABLE IF NOT EXISTS `tab_app_access_policy_user_attr` (
+    `id`                BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `policy_id`         BIGINT       NOT NULL COMMENT '所属策略 id，关联 tab_app_access_policy.id，不建物理外键',
+    `metadata_field_id` BIGINT       NOT NULL COMMENT '关联的元数据字段 id，关联 tab_metadata_field.id（biz_type=USER），不建物理外键',
+    `operator`          VARCHAR(8)   NOT NULL COMMENT '运算符：EQ=等于，NE=不等于，IN=属于多值',
+    `attr_value`        VARCHAR(255) NOT NULL COMMENT '比较值，EQ/NE 为单个值，IN 为逗号分隔的多个值',
+    `create_by`         VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
+    `create_time`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`         VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
+    `update_time`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_app_access_policy_user_attr` (`policy_id`, `metadata_field_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '应用访问授权策略用户属性条件表';
+
+-- 策略目标应用：一条策略对应一批具体应用 id，多选，至少一个。
+CREATE TABLE IF NOT EXISTS `tab_app_access_policy_target_app` (
+    `id`          BIGINT   NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `policy_id`   BIGINT   NOT NULL COMMENT '所属策略 id，关联 tab_app_access_policy.id，不建物理外键',
+    `app_id`      BIGINT   NOT NULL COMMENT '目标应用 id，关联 tab_app.id，不建物理外键',
+    `create_by`   VARCHAR(64)        DEFAULT NULL COMMENT '创建人',
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`   VARCHAR(64)        DEFAULT NULL COMMENT '更新人',
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_app_access_policy_target_app` (`policy_id`, `app_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '应用访问授权策略目标应用表';
+
+-- 策略浏览器白名单条件：零条或多条，browser_code 取值枚举 CHROME/FIREFOX/SAFARI/
+-- EDGE/OPERA/IE，与 UserAgentParser.parseBrowser 能识别的浏览器一一对应。
+CREATE TABLE IF NOT EXISTS `tab_app_access_policy_browser_rule` (
+    `id`           BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `policy_id`    BIGINT      NOT NULL COMMENT '所属策略 id，关联 tab_app_access_policy.id，不建物理外键',
+    `browser_code` VARCHAR(16) NOT NULL COMMENT '浏览器编码：CHROME/FIREFOX/SAFARI/EDGE/OPERA/IE',
+    `create_by`    VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`    VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_app_access_policy_browser_rule` (`policy_id`, `browser_code`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '应用访问授权策略浏览器白名单条件表';
+
+-- 策略 IP/网段白名单条件：零条或多条，ip_cidr 存原始字符串（单 IP 或 CIDR 网段），保存前
+-- 由服务层用 IpCidrMatcher.isValidRule 校验格式合法。
+CREATE TABLE IF NOT EXISTS `tab_app_access_policy_ip_rule` (
+    `id`           BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `policy_id`    BIGINT      NOT NULL COMMENT '所属策略 id，关联 tab_app_access_policy.id，不建物理外键',
+    `ip_cidr`      VARCHAR(64) NOT NULL COMMENT '单个 IP 地址或 CIDR 网段，如 192.168.1.100 或 192.168.1.0/24',
+    `create_by`    VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`    VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_app_access_policy_ip_rule` (`policy_id`, `ip_cidr`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '应用访问授权策略 IP/网段白名单条件表';
+
+-- 策略计算结果表（POLICY 来源授权记录）：点击"执行"后按 policy_id 整体重建
+-- （DELETE ... WHERE policy_id=:id 后批量插入），只存策略计算结果，不存人工例外
+-- （与 tab_app_access_manual_override 物理隔离）。同一 user_id+app_id 组合可能出现
+-- 在多条不同 policy_id 下（多个策略都命中同一人同一应用是正常场景），故唯一约束含
+-- policy_id。
+CREATE TABLE IF NOT EXISTS `tab_app_access_policy_grant` (
+    `id`          BIGINT   NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `policy_id`   BIGINT   NOT NULL COMMENT '产生该授权记录的策略 id，关联 tab_app_access_policy.id，不建物理外键',
+    `user_id`     BIGINT   NOT NULL COMMENT '用户 id，关联 tab_user.id，不建物理外键',
+    `app_id`      BIGINT   NOT NULL COMMENT '应用 id，关联 tab_app.id，不建物理外键',
+    `create_by`   VARCHAR(64)        DEFAULT NULL COMMENT '创建人',
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`   VARCHAR(64)        DEFAULT NULL COMMENT '更新人',
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_app_access_policy_grant` (`policy_id`, `user_id`, `app_id`),
+    KEY `idx_tab_app_access_policy_grant_user_app` (`user_id`, `app_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+  COMMENT = '应用访问授权策略计算结果表，按 policy_id 整体重建，SHALL NOT 影响人工例外记录';
+
+-- 人工例外表：对具体"用户+应用"组合手动追加授权（GRANT）或手动收回授权（DENY），
+-- 优先级最高，与策略计算结果表物理隔离。每个用户+应用组合同一时刻至多一条记录，
+-- upsert 语义（重复提交更新已有记录而不是新增）。
+CREATE TABLE IF NOT EXISTS `tab_app_access_manual_override` (
+    `id`             BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `user_id`        BIGINT      NOT NULL COMMENT '用户 id，关联 tab_user.id，不建物理外键',
+    `app_id`         BIGINT      NOT NULL COMMENT '应用 id，关联 tab_app.id，不建物理外键',
+    `override_type`  VARCHAR(8)  NOT NULL COMMENT '例外类型：GRANT=手动追加授权，DENY=手动收回授权',
+    `remark`         VARCHAR(255) NULL COMMENT '备注',
+    `create_by`      VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
+    `create_time`    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`      VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
+    `update_time`    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_app_access_manual_override` (`user_id`, `app_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '应用访问授权人工例外表（GRANT/DENY），优先级高于策略计算结果';
 
 -- ----------------------------------------------------------------------------
 -- 角色管理模块
@@ -1046,6 +1228,33 @@ VALUES ('新增管理员', 'AdminManagement:admin:add', @admin_id, 2, 60, NULL, 
        ('停用管理员', 'AdminManagement:admin:disable', @admin_id, 2, 20, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
        ('删除管理员', 'AdminManagement:admin:delete', @admin_id, 2, 10, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
 
+-- 应用访问授权（挂在 permission 一级分组下，排在权限管理分组现有子菜单的最后）
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('应用访问授权', 'AppAccessManagement:appAccess:view', @permission_id, 1, 1,
+        '应用访问授权页面访问（含最终生效权限查询板块的只读查询）', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+SET @app_access_menu_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'AppAccessManagement:appAccess:view');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('新增策略规则', 'AppAccessManagement:policy:add', @app_access_menu_id, 2, 80, NULL, 2000, @admin_user_id_text,
+        NOW(), @admin_user_id_text, NOW()),
+       ('编辑策略规则', 'AppAccessManagement:policy:edit', @app_access_menu_id, 2, 70, NULL, 2000, @admin_user_id_text,
+        NOW(), @admin_user_id_text, NOW()),
+       ('启用策略规则', 'AppAccessManagement:policy:enable', @app_access_menu_id, 2, 60, NULL, 2000, @admin_user_id_text,
+        NOW(), @admin_user_id_text, NOW()),
+       ('停用策略规则', 'AppAccessManagement:policy:disable', @app_access_menu_id, 2, 50, NULL, 2000, @admin_user_id_text,
+        NOW(), @admin_user_id_text, NOW()),
+       ('执行策略规则', 'AppAccessManagement:policy:execute', @app_access_menu_id, 2, 40, NULL, 2000, @admin_user_id_text,
+        NOW(), @admin_user_id_text, NOW()),
+       ('删除策略规则', 'AppAccessManagement:policy:delete', @app_access_menu_id, 2, 30, NULL, 2000, @admin_user_id_text,
+        NOW(), @admin_user_id_text, NOW()),
+       ('新增/编辑人工例外', 'AppAccessManagement:override:add', @app_access_menu_id, 2, 20, NULL, 2000,
+        @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('删除人工例外', 'AppAccessManagement:override:delete', @app_access_menu_id, 2, 10, NULL, 2000,
+        @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
 -- 操作日志、登录日志（挂在"日志管理"一级分组下，只读，没有按钮资源）
 INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
                          `create_time`, `update_by`, `update_time`)
@@ -1129,13 +1338,15 @@ VALUES ('新增上游数据源', 'UpstreamManagement:source:add', @upstream_id, 
         '手动触发一次同步，不等定时调度到点', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
 
 -- ----------------------------------------------------------------------------
--- 权限点种子数据（108 条，按 权限资源.txt 模块分段插入）
+-- 权限点种子数据（118 条，按 权限资源.txt 模块分段插入）
 -- ----------------------------------------------------------------------------
 -- 组织/用户/任职/应用/角色/权限点/管理员/菜单/字典/元数据配置/表单管理/操作日志
--- 共 94 条源自 权限资源.txt（一次性脚本 gen_permission_seed.py 解析生成），登录日志
--- 1 条、应用配置（页面访问 + 重置 SecretKey + 修改签名算法 + 修改同步配置）4 条、
--- 上游数据管理（页面访问 + 新增 + 编辑基础信息 + 删除 + 启用 + 停用 + 进入配置页 +
--- 修改数据源配置 + 立即同步一次）9 条均为后续新增能力追加，合计 108 条。
+-- 共 95 条源自 权限资源.txt（一次性脚本 gen_permission_seed.py 解析生成，此前版本的
+-- 注释误记为 94 条），登录日志 1 条、应用配置（页面访问 + 重置 SecretKey + 修改签名
+-- 算法 + 修改同步配置）4 条、上游数据管理（页面访问 + 新增 + 编辑基础信息 + 删除 +
+-- 启用 + 停用 + 进入配置页 + 修改数据源配置 + 立即同步一次）9 条、应用访问授权
+-- （页面访问 + 策略规则新增/编辑/启用/停用/执行/删除 + 人工例外新增编辑/删除）9 条
+-- 均为后续新增能力追加，合计 118 条。
 
 -- OrgManagement（组织管理，/identity/orgs）
 INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
@@ -1303,9 +1514,22 @@ VALUES
     ('修改数据源配置', 'UpstreamManagement:source:config:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
     ('立即同步一次', 'UpstreamManagement:source:manualSync', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
 
+-- AppAccessManagement（应用访问授权，/permission/app-access）
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES
+    ('应用访问授权页面访问', 'AppAccessManagement:appAccess:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('新增策略规则', 'AppAccessManagement:policy:add', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('编辑策略规则', 'AppAccessManagement:policy:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('启用策略规则', 'AppAccessManagement:policy:enable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('停用策略规则', 'AppAccessManagement:policy:disable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('执行策略规则', 'AppAccessManagement:policy:execute', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('删除策略规则', 'AppAccessManagement:policy:delete', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('新增/编辑人工例外', 'AppAccessManagement:override:add', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+    ('删除人工例外', 'AppAccessManagement:override:delete', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
 -- ----------------------------------------------------------------------------
--- 超级管理员角色，关联全部种子权限点（含上面新增的 UpstreamManagement 系列权限点，
--- 因为本 INSERT...SELECT 在其之后执行，天然覆盖，不需要再单独补一次授权）
+-- 超级管理员角色，关联全部种子权限点（含上面新增的 UpstreamManagement/AppAccessManagement
+-- 系列权限点，因为本 INSERT...SELECT 在其之后执行，天然覆盖，不需要再单独补一次授权）
 -- ----------------------------------------------------------------------------
 
 INSERT INTO `tab_role` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
