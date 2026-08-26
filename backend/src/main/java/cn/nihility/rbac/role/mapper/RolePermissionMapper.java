@@ -8,12 +8,20 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 /**
- * 角色权限点关联数据访问接口。单表 CRUD（整体同步用的批量插入/按角色 id 删除）直接复用
- * {@link BaseMapper}；按角色 id 查询关联权限点需要关联 {@code tab_permission} 回填名称/编码，
- * SQL 写在 {@code resources/mybatis/mapper/RolePermissionMapper.xml} 里，用单条 JOIN 完成。
+ * 角色权限点关联数据访问接口。按角色 id 删除复用 {@link BaseMapper}，整体同步用的批量插入
+ * 和关联 {@code tab_permission} 回填名称/编码的查询写在
+ * {@code resources/mybatis/mapper/RolePermissionMapper.xml} 里。
  */
 @Mapper
 public interface RolePermissionMapper extends BaseMapper<RolePermissionEntity> {
+
+    /**
+     * 使用单条多值插入语句批量保存角色权限点关联。
+     *
+     * @param entities 待保存的角色权限点关联实体列表，不能为空
+     * @return 插入的关联记录数
+     */
+    int insertBatch(@Param("entities") List<RolePermissionEntity> entities);
 
     /**
      * 按角色 id 查询其全部权限点关联，关联回填权限点名称、编码；权限点若已被逻辑删除则不返回

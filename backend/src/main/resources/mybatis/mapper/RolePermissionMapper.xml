@@ -7,6 +7,16 @@
      展示价值，直接不返回，风格对齐 AdminRoleMapper.xml。 -->
 <mapper namespace="cn.nihility.rbac.role.mapper.RolePermissionMapper">
 
+    <insert id="insertBatch">
+        INSERT INTO tab_role_permission
+        (role_id, permission_id, create_by, create_time, update_by, update_time)
+        VALUES
+        <foreach collection="entities" item="entity" separator=",">
+            (#{entity.roleId}, #{entity.permissionId}, #{entity.createBy}, #{entity.createTime},
+            #{entity.updateBy}, #{entity.updateTime})
+        </foreach>
+    </insert>
+
     <select id="selectPermissionsByRoleId" resultType="cn.nihility.rbac.permission.dto.PermissionOptionVO">
         SELECT
         p.id AS id,

@@ -34,11 +34,13 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 /**
  * 角色管理业务逻辑实现。角色权限点关联（{@code tab_role_permission}）在每次创建/更新时
- * 采用"先删后插"的整体同步策略，不做按行 diff，风格对齐 {@code AdminServiceImpl#syncRoles}。
+ * 采用"先删后批量插入"的整体同步策略，不做按行 diff，避免权限点数量较多时产生逐条数据库往返。
  */
 @Service
 @RequiredArgsConstructor
@@ -97,6 +99,7 @@ public class RoleServiceImpl implements RoleService {
      * {@inheritDoc}
      */
     @Override
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public RoleVO create(RoleCreateRequest request) {
         checkCodeUnique(request.getCode(), null);
 
@@ -129,6 +132,7 @@ public class RoleServiceImpl implements RoleService {
      * {@inheritDoc}
      */
     @Override
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public RoleVO update(Long id, RoleUpdateRequest request) {
         RoleEntity entity = getExistingEntity(id);
         checkCodeUnique(request.getCode(), id);
@@ -285,17 +289,17 @@ public class RoleServiceImpl implements RoleService {
         }
 
         LocalDateTime now = LocalDateTime.now();
-        for (Long permissionId : permissionIds) {
-            RolePermissionEntity entity = RolePermissionEntity.builder()
-                    .roleId(roleId)
-                    .permissionId(permissionId)
-                    .createBy(operator)
-                    .createTime(now)
-                    .updateBy(operator)
-                    .updateTime(now)
-                    .build();
-            rolePermissionMapper.insert(entity);
-        }
+        List<RolePermissionEntity> entities = permissionIds.stream()
+                .map(permissionId -> RolePermissionEntity.builder()
+                        .roleId(roleId)
+                        .permissionId(permissionId)
+                        .createBy(operator)
+                        .createTime(now)
+                        .updateBy(operator)
+                        .updateTime(now)
+                        .build())
+                .toList();
+        rolePermissionMapper.insertBatch(entities);
     }
 
     /**

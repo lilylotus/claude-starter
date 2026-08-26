@@ -26,6 +26,7 @@ import cn.nihility.rbac.sync.event.DomainEventPublisher;
 import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import java.lang.reflect.Method;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -35,6 +36,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * {@link RoleServiceImpl} 的单元测试，重点覆盖分页查询、新增默认启用、编码唯一性校验、
@@ -129,6 +132,20 @@ class RoleServiceImplTest {
     }
 
     /**
+     * 新增和编辑角色均包含主表及权限关联的多步写入，应由 Spring 事务保证整体原子性。
+     *
+     * @throws NoSuchMethodException 被测服务方法签名发生非预期变化时抛出
+     */
+    @Test
+    void createAndUpdate_shouldDefineTransactionBoundary() throws NoSuchMethodException {
+        Method createMethod = RoleServiceImpl.class.getMethod("create", RoleCreateRequest.class);
+        Method updateMethod = RoleServiceImpl.class.getMethod("update", Long.class, RoleUpdateRequest.class);
+
+        assertTransactionPolicy(createMethod);
+        assertTransactionPolicy(updateMethod);
+    }
+
+    /**
      * 创建角色成功后，应紧邻 {@code operationLogRecorder.recordCreate} 之后发布一次角色
      * 新增的同步事件（app-sync-notify-pull-api change design.md Decision 5）。
      */
@@ -184,11 +201,17 @@ class RoleServiceImplTest {
         roleService.create(request);
 
         verify(rolePermissionMapper).delete(any(LambdaQueryWrapper.class));
-        ArgumentCaptor<RolePermissionEntity> captor = ArgumentCaptor.forClass(RolePermissionEntity.class);
-        verify(rolePermissionMapper, org.mockito.Mockito.times(2)).insert(captor.capture());
-        assertThat(captor.getAllValues()).extracting(RolePermissionEntity::getPermissionId)
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<RolePermissionEntity>> captor = ArgumentCaptor.forClass(List.class);
+        verify(rolePermissionMapper).insertBatch(captor.capture());
+        assertThat(captor.getValue()).extracting(RolePermissionEntity::getPermissionId)
                 .containsExactly(1L, 2L);
-        assertThat(captor.getAllValues()).allMatch(entity -> entity.getRoleId().equals(10L));
+        assertThat(captor.getValue()).allMatch(entity -> entity.getRoleId().equals(10L));
+        assertThat(captor.getValue()).allMatch(entity -> "1".equals(entity.getCreateBy()));
+        assertThat(captor.getValue()).allMatch(entity -> "1".equals(entity.getUpdateBy()));
+        assertThat(captor.getValue()).allMatch(entity -> entity.getCreateTime() != null);
+        assertThat(captor.getValue()).allMatch(entity -> entity.getUpdateTime() != null);
+        verify(rolePermissionMapper, never()).insert(any(RolePermissionEntity.class));
     }
 
     /**
@@ -209,6 +232,7 @@ class RoleServiceImplTest {
         roleService.create(request);
 
         verify(rolePermissionMapper).delete(any(LambdaQueryWrapper.class));
+        verify(rolePermissionMapper, never()).insertBatch(any());
         verify(rolePermissionMapper, never()).insert(any(RolePermissionEntity.class));
     }
 
@@ -266,15 +290,18 @@ class RoleServiceImplTest {
         request.setName("新名称");
         request.setCode("role002");
         request.setShowOrder(1);
-        request.setPermissionIds(List.of(3L));
+        request.setPermissionIds(List.of(3L, 4L));
 
         roleService.update(10L, request);
 
         verify(rolePermissionMapper).delete(any(LambdaQueryWrapper.class));
-        ArgumentCaptor<RolePermissionEntity> captor = ArgumentCaptor.forClass(RolePermissionEntity.class);
-        verify(rolePermissionMapper).insert(captor.capture());
-        assertThat(captor.getValue().getPermissionId()).isEqualTo(3L);
-        assertThat(captor.getValue().getRoleId()).isEqualTo(10L);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<RolePermissionEntity>> captor = ArgumentCaptor.forClass(List.class);
+        verify(rolePermissionMapper).insertBatch(captor.capture());
+        assertThat(captor.getValue()).extracting(RolePermissionEntity::getPermissionId)
+                .containsExactly(3L, 4L);
+        assertThat(captor.getValue()).allMatch(rolePermission -> rolePermission.getRoleId().equals(10L));
+        verify(rolePermissionMapper, never()).insert(any(RolePermissionEntity.class));
     }
 
     /**
@@ -296,6 +323,7 @@ class RoleServiceImplTest {
         roleService.update(10L, request);
 
         verify(rolePermissionMapper).delete(any(LambdaQueryWrapper.class));
+        verify(rolePermissionMapper, never()).insertBatch(any());
         verify(rolePermissionMapper, never()).insert(any(RolePermissionEntity.class));
     }
 
@@ -453,5 +481,18 @@ class RoleServiceImplTest {
                 .updateBy("admin")
                 .updateTime(now)
                 .build();
+    }
+
+    /**
+     * 断言角色写方法显式使用 REQUIRED 传播行为，并对所有 Exception 回滚。
+     *
+     * @param method 待检查的角色服务写方法
+     */
+    private void assertTransactionPolicy(Method method) {
+        Transactional transactional = method.getAnnotation(Transactional.class);
+        assertThat(transactional).isNotNull();
+        assertThat(transactional.propagation()).isEqualTo(Propagation.REQUIRED);
+        assertThat(transactional.rollbackFor()).containsExactly(Exception.class);
+        assertThat(transactional.transactionManager()).isEmpty();
     }
 }
