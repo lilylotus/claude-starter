@@ -1,6 +1,7 @@
 package cn.nihility.rbac.sso.cas.controller;
 
 import cn.nihility.rbac.app.authconfig.constant.AuthProtocol;
+import cn.nihility.rbac.auth.service.PasswordService;
 import cn.nihility.rbac.common.result.Result;
 import cn.nihility.rbac.common.util.ClientRequestUtils;
 import cn.nihility.rbac.sso.cas.dto.CasTicketPayload;
@@ -62,6 +63,9 @@ public class CasController {
     /** SSO 浏览器会话业务逻辑接口。 */
     private final SsoSessionService ssoSessionService;
 
+    /** 密码业务逻辑接口，用于阻止待首次登录改密账号获取 CAS 票据。 */
+    private final PasswordService passwordService;
+
     /** 单点登出主流程公共执行组件，登出接口复用其撤销会话/清 Cookie/触发通知/302 重定向逻辑。 */
     private final SsoLogoutExecutor ssoLogoutExecutor;
 
@@ -104,6 +108,11 @@ public class CasController {
         Optional<Long> userIdOpt = ssoSessionService.verify(sessionToken);
         if (userIdOpt.isEmpty()) {
             ProtocolResponseWriter.redirect(response, ProtocolResponseWriter.ssoLoginRedirectLocation(request));
+            return;
+        }
+        if (passwordService.isFirstLogin(userIdOpt.get())) {
+            ProtocolResponseWriter.redirect(response,
+                    ProtocolResponseWriter.ssoLoginRedirectLocation(request, true));
             return;
         }
 

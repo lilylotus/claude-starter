@@ -11,7 +11,11 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import type { ApiResponse } from '@/types/api'
-import type { SsoPublicKeyResult } from '@/types/sso'
+import type {
+  SsoChangePasswordRequest,
+  SsoLoginResult,
+  SsoPublicKeyResult,
+} from '@/types/sso'
 
 const ssoRequest = axios.create({
   baseURL: '/api',
@@ -41,7 +45,12 @@ export function getSsoPublicKey(): Promise<SsoPublicKeyResult> {
 }
 
 // SSO 账号密码登录：account/password 均为调用方已用 RSA-OAEP 加密好的密文。
-// 登录成功后后端下发 HttpOnly 的 sso_session Cookie，本函数本身不返回业务数据。
-export function ssoLogin(account: string, password: string): Promise<void> {
+// 登录成功后后端下发 HttpOnly 的 sso_session Cookie，并返回是否需要首次登录改密。
+export function ssoLogin(account: string, password: string): Promise<SsoLoginResult> {
   return ssoRequest.post('/authn/sso/login', { account, password })
+}
+
+// 使用浏览器自动携带的 HttpOnly SSO 会话完成首次登录改密。
+export function ssoChangePassword(request: SsoChangePasswordRequest): Promise<void> {
+  return ssoRequest.post('/authn/sso/password', request)
 }

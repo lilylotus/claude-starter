@@ -3,17 +3,20 @@
 // 登录页，完全独立于管理端登录（不接入 stores/auth.ts / api/request.ts）。
 // 登录成功后必须整页跳转（window.location.href）回 redirect 指向的后端原生 URL
 // （/api/authn/cas/**、/api/authn/oauth/** 等），不能用 router.push。
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { User, Lock } from '@element-plus/icons-vue'
-import type { FormInstance, FormRules } from 'element-plus'
-import { getSsoPublicKey, ssoLogin } from '@/api/sso'
+import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import { getSsoPublicKey, ssoChangePassword, ssoLogin } from '@/api/sso'
 import { rsaEncrypt } from '@/utils/rsa'
 
 const route = useRoute()
 
 const formRef = ref<FormInstance>()
+const passwordFormRef = ref<FormInstance>()
 const submitting = ref(false)
+const changingPassword = ref(false)
+const isPasswordChange = ref(route.query.forcePasswordChange === 'true')
 
 const form = reactive({
   username: '',
@@ -23,6 +26,43 @@ const form = reactive({
 const rules: FormRules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
+}
+
+const passwordForm = reactive({
+  oldPassword: '',
+  newPassword: '',
+  confirmPassword: '',
+})
+
+const passwordRules: FormRules = {
+  oldPassword: [{ required: true, message: '请输入原密码', trigger: 'blur' }],
+  newPassword: [
+    { required: true, message: '请输入新密码', trigger: 'blur' },
+    { min: 6, max: 64, message: '新密码长度需在 6-64 个字符之间', trigger: 'blur' },
+  ],
+  confirmPassword: [
+    { required: true, message: '请再次输入新密码', trigger: 'blur' },
+    {
+      validator: (_rule, value, callback) => {
+        if (value !== passwordForm.newPassword) {
+          callback(new Error('两次输入的新密码不一致'))
+          return
+        }
+        callback()
+      },
+      trigger: 'blur',
+    },
+  ],
+}
+
+const title = computed(() => (isPasswordChange.value ? '首次登录修改密码' : '单点登录'))
+const subtitle = computed(() =>
+  isPasswordChange.value ? '为保障账号安全，请修改初始密码后继续' : '登录后将自动跳转回目标应用',
+)
+
+function redirectToTarget() {
+  // 必须整页跳转：redirect 指向后端原生 URL（如 /api/authn/cas/**），不是 SPA 内部路由
+  window.location.href = (route.query.redirect as string) || '/'
 }
 
 async function handleSubmit() {
@@ -36,13 +76,37 @@ async function handleSubmit() {
       rsaEncrypt(publicKey, form.username),
       rsaEncrypt(publicKey, form.password),
     ])
-    await ssoLogin(account, password)
-    // 必须整页跳转：redirect 指向后端原生 URL（如 /api/authn/cas/**），不是 SPA 内部路由
-    window.location.href = (route.query.redirect as string) || '/'
+    const result = await ssoLogin(account, password)
+    if (result.firstLogin) {
+      passwordForm.oldPassword = form.password
+      form.password = ''
+      isPasswordChange.value = true
+      return
+    }
+    redirectToTarget()
   } catch {
     // 错误提示已由 api/sso.ts 的响应拦截器统一展示，这里不重复弹提示
   } finally {
     submitting.value = false
+  }
+}
+
+async function handlePasswordChange() {
+  const valid = await passwordFormRef.value?.validate().catch(() => false)
+  if (!valid) return
+
+  changingPassword.value = true
+  try {
+    await ssoChangePassword({
+      oldPassword: passwordForm.oldPassword,
+      newPassword: passwordForm.newPassword,
+    })
+    ElMessage.success('密码修改成功，正在跳转')
+    redirectToTarget()
+  } catch {
+    // 错误提示已由 api/sso.ts 的响应拦截器统一展示，这里不重复弹提示
+  } finally {
+    changingPassword.value = false
   }
 }
 </script>
@@ -93,10 +157,17 @@ async function handleSubmit() {
 
     <section class="sso-login__panel">
       <div class="sso-login__form-wrap">
-        <h1 class="sso-login__title">单点登录</h1>
-        <p class="sso-login__subtitle">登录后将自动跳转回目标应用</p>
+        <h1 class="sso-login__title">{{ title }}</h1>
+        <p class="sso-login__subtitle">{{ subtitle }}</p>
 
-        <el-form ref="formRef" :model="form" :rules="rules" size="large" @keyup.enter="handleSubmit">
+        <el-form
+          v-if="!isPasswordChange"
+          ref="formRef"
+          :model="form"
+          :rules="rules"
+          size="large"
+          @keyup.enter="handleSubmit"
+        >
           <el-form-item prop="username">
             <el-input v-model="form.username" placeholder="用户名" :prefix-icon="User" />
           </el-form-item>
@@ -114,7 +185,59 @@ async function handleSubmit() {
           </el-button>
         </el-form>
 
-        <p class="sso-login__hint">用户名为分配的用户编码，密码为初始密码或管理员重置后的默认密码</p>
+        <el-form
+          v-else
+          ref="passwordFormRef"
+          :model="passwordForm"
+          :rules="passwordRules"
+          size="large"
+          @keyup.enter="handlePasswordChange"
+        >
+          <el-form-item prop="oldPassword">
+            <el-input
+              v-model="passwordForm.oldPassword"
+              type="password"
+              placeholder="原密码"
+              :prefix-icon="Lock"
+              show-password
+            />
+          </el-form-item>
+          <el-form-item prop="newPassword">
+            <el-input
+              v-model="passwordForm.newPassword"
+              type="password"
+              placeholder="新密码（6-64 个字符）"
+              :prefix-icon="Lock"
+              show-password
+            />
+          </el-form-item>
+          <el-form-item prop="confirmPassword">
+            <el-input
+              v-model="passwordForm.confirmPassword"
+              type="password"
+              placeholder="确认新密码"
+              :prefix-icon="Lock"
+              show-password
+            />
+          </el-form-item>
+          <el-button
+            class="sso-login__submit"
+            type="primary"
+            size="large"
+            :loading="changingPassword"
+            @click="handlePasswordChange"
+          >
+            修改密码并继续
+          </el-button>
+        </el-form>
+
+        <p class="sso-login__hint">
+          {{
+            isPasswordChange
+              ? '修改成功后将继续原 CAS/OAuth2.0 登录流程'
+              : '用户名为分配的用户编码，密码为初始密码或管理员重置后的默认密码'
+          }}
+        </p>
       </div>
     </section>
   </div>

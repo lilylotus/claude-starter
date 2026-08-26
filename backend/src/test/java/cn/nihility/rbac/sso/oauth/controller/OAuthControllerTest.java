@@ -48,6 +48,7 @@ import cn.nihility.rbac.user.constant.UserStatus;
 import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import jakarta.servlet.http.Cookie;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -344,6 +345,33 @@ class OAuthControllerTest {
         assertThat(logEntity.getUserId()).isEqualTo(userId);
         assertThat(logEntity.getAppRefId()).isEqualTo(appRefId);
         assertThat(logEntity.getSessionId()).isEqualTo(SsoSessionIdHasher.hash(sessionToken));
+    }
+
+    /**
+     * 浏览器会话有效但账号仍待首次登录改密时，不得签发 OAuth2 授权码，应携带原始授权请求
+     * 和强制改密标识重定向到 SSO 登录页。
+     */
+    @Test
+    void authorize_shouldRedirectToPasswordChangeAndNotIssueCode_whenFirstLogin() throws Exception {
+        userPasswordMapper.update(null, new LambdaUpdateWrapper<UserPasswordEntity>()
+                .eq(UserPasswordEntity::getUserId, userId)
+                .set(UserPasswordEntity::getFirstLogin, true));
+        String sessionToken = ssoSessionService.issue(userId);
+
+        String location = mockMvc.perform(get("/api/authn/oauth/authorize")
+                        .param("response_type", "code")
+                        .param("client_id", clientId)
+                        .param("redirect_uri", ALLOWED_REDIRECT_URI)
+                        .param("state", "first-login-state")
+                        .cookie(new Cookie("sso_session", sessionToken)))
+                .andExpect(status().isFound())
+                .andReturn().getResponse().getHeader("Location");
+
+        assertThat(location).startsWith("/sso/login?redirect=");
+        assertThat(location).endsWith("&forcePasswordChange=true");
+        assertThat(location).doesNotContain("code=");
+        assertThat(ssoProtocolLogMapper.selectList(new LambdaQueryWrapper<SsoProtocolLogEntity>()
+                .eq(SsoProtocolLogEntity::getAppId, clientId))).isEmpty();
     }
 
     /**

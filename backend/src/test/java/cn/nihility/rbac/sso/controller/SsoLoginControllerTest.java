@@ -3,11 +3,13 @@ package cn.nihility.rbac.sso.controller;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import cn.nihility.rbac.auth.config.RbacLoginProperties;
 import cn.nihility.rbac.auth.entity.UserPasswordEntity;
 import cn.nihility.rbac.auth.mapper.UserPasswordMapper;
+import cn.nihility.rbac.auth.service.PasswordService;
 import cn.nihility.rbac.auth.util.PasswordDigestUtils;
 import cn.nihility.rbac.common.util.JacksonUtils;
 import cn.nihility.rbac.common.util.RsaJdkUtils;
@@ -22,6 +24,7 @@ import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import jakarta.servlet.http.Cookie;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -63,6 +66,10 @@ class SsoLoginControllerTest {
     /** 用户密码数据访问接口。 */
     @Autowired
     private UserPasswordMapper userPasswordMapper;
+
+    /** 密码业务逻辑接口，用于校验首次登录改密结果。 */
+    @Autowired
+    private PasswordService passwordService;
 
     /** 登录日志数据访问接口，用于断言写入的日志字段。 */
     @Autowired
@@ -144,6 +151,7 @@ class SsoLoginControllerTest {
                         .content(loginRequestJson(userCode, PASSWORD_PLAIN)))
                 .andExpect(status().isOk())
                 .andExpect(header().exists("Set-Cookie"))
+                .andExpect(jsonPath("$.data.firstLogin").value(false))
                 .andReturn().getResponse().getHeader("Set-Cookie");
         String sessionToken = extractSessionToken(setCookieHeader);
 
@@ -154,6 +162,107 @@ class SsoLoginControllerTest {
         assertThat(logs.get(0).getLoginAccount()).isEqualTo(userCode);
         assertThat(logs.get(0).getUserId()).isEqualTo(userId);
         assertThat(logs.get(0).getSessionId()).isEqualTo(SsoSessionIdHasher.hash(sessionToken));
+    }
+
+    /**
+     * 待首次登录改密账号完成 SSO 登录后，应在响应中返回 {@code firstLogin=true}，同时仍签发
+     * 浏览器 SSO 会话，供后续改密接口识别当前用户。
+     */
+    @Test
+    void login_shouldReturnFirstLoginTrueAndIssueSession_whenPasswordChangeRequired() throws Exception {
+        setFirstLogin(true);
+
+        mockMvc.perform(post("/api/authn/sso/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(loginRequestJson(userCode, PASSWORD_PLAIN)))
+                .andExpect(status().isOk())
+                .andExpect(header().exists("Set-Cookie"))
+                .andExpect(jsonPath("$.data.firstLogin").value(true));
+    }
+
+    /**
+     * 待首次登录改密账号携带有效 SSO 会话且原密码正确时，应更新密码并清除首次登录标识。
+     */
+    @Test
+    void changePassword_shouldUpdatePasswordAndClearFirstLogin_whenSessionAndOldPasswordValid() throws Exception {
+        setFirstLogin(true);
+        String sessionToken = loginAndExtractSessionToken();
+        String newPassword = "Changed#123456";
+
+        mockMvc.perform(post("/api/authn/sso/password")
+                        .cookie(new Cookie(SsoSessionCookieUtils.COOKIE_NAME, sessionToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(JacksonUtils.toJson(Map.of(
+                                "oldPassword", PASSWORD_PLAIN,
+                                "newPassword", newPassword))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        assertThat(passwordService.verifyPassword(userId, newPassword)).isTrue();
+        assertThat(passwordService.isFirstLogin(userId)).isFalse();
+    }
+
+    /**
+     * 未携带有效 SSO 会话时，不得根据请求体猜测或接收用户身份，也不得修改密码。
+     */
+    @Test
+    void changePassword_shouldReject_whenSessionMissing() throws Exception {
+        setFirstLogin(true);
+
+        mockMvc.perform(post("/api/authn/sso/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(JacksonUtils.toJson(Map.of(
+                                "oldPassword", PASSWORD_PLAIN,
+                                "newPassword", "Changed#123456"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(org.hamcrest.Matchers.not(0)))
+                .andExpect(jsonPath("$.message").value("SSO 会话无效，请重新登录"));
+
+        assertThat(passwordService.verifyPassword(userId, PASSWORD_PLAIN)).isTrue();
+        assertThat(passwordService.isFirstLogin(userId)).isTrue();
+    }
+
+    /**
+     * 原密码错误时应拒绝首次登录改密，并保持原密码和首次登录标识不变。
+     */
+    @Test
+    void changePassword_shouldRejectAndKeepState_whenOldPasswordIncorrect() throws Exception {
+        setFirstLogin(true);
+        String sessionToken = loginAndExtractSessionToken();
+
+        mockMvc.perform(post("/api/authn/sso/password")
+                        .cookie(new Cookie(SsoSessionCookieUtils.COOKIE_NAME, sessionToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(JacksonUtils.toJson(Map.of(
+                                "oldPassword", "wrong-password",
+                                "newPassword", "Changed#123456"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(org.hamcrest.Matchers.not(0)))
+                .andExpect(jsonPath("$.message").value("原密码不正确"));
+
+        assertThat(passwordService.verifyPassword(userId, PASSWORD_PLAIN)).isTrue();
+        assertThat(passwordService.isFirstLogin(userId)).isTrue();
+    }
+
+    /**
+     * 首次登录状态已经清除时，即使会话和原密码仍有效，也不得再次使用专用端点修改密码。
+     */
+    @Test
+    void changePassword_shouldReject_whenFirstLoginAlreadyCleared() throws Exception {
+        String sessionToken = loginAndExtractSessionToken();
+
+        mockMvc.perform(post("/api/authn/sso/password")
+                        .cookie(new Cookie(SsoSessionCookieUtils.COOKIE_NAME, sessionToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(JacksonUtils.toJson(Map.of(
+                                "oldPassword", PASSWORD_PLAIN,
+                                "newPassword", "Changed#123456"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(org.hamcrest.Matchers.not(0)))
+                .andExpect(jsonPath("$.message").value("当前账号无需首次登录改密"));
+
+        assertThat(passwordService.verifyPassword(userId, PASSWORD_PLAIN)).isTrue();
+        assertThat(passwordService.isFirstLogin(userId)).isFalse();
     }
 
     /**
@@ -296,6 +405,33 @@ class SsoLoginControllerTest {
         int start = setCookieHeader.indexOf(prefix) + prefix.length();
         int end = setCookieHeader.indexOf(';', start);
         return setCookieHeader.substring(start, end);
+    }
+
+    /**
+     * 执行一次成功的 SSO 登录并提取响应 Cookie 中的会话令牌。
+     *
+     * @return SSO 会话令牌
+     * @throws Exception 请求执行失败
+     */
+    private String loginAndExtractSessionToken() throws Exception {
+        String setCookieHeader = mockMvc.perform(post("/api/authn/sso/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(loginRequestJson(userCode, PASSWORD_PLAIN)))
+                .andExpect(status().isOk())
+                .andExpect(header().exists("Set-Cookie"))
+                .andReturn().getResponse().getHeader("Set-Cookie");
+        return extractSessionToken(setCookieHeader);
+    }
+
+    /**
+     * 更新测试用户的首次登录标识。
+     *
+     * @param firstLogin 首次登录标识
+     */
+    private void setFirstLogin(boolean firstLogin) {
+        userPasswordMapper.update(null, new LambdaUpdateWrapper<UserPasswordEntity>()
+                .eq(UserPasswordEntity::getUserId, userId)
+                .set(UserPasswordEntity::getFirstLogin, firstLogin));
     }
 
     /**

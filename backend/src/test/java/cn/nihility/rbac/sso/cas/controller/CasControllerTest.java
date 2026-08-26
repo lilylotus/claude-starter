@@ -39,6 +39,7 @@ import cn.nihility.rbac.user.constant.UserStatus;
 import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import jakarta.servlet.http.Cookie;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -306,6 +307,30 @@ class CasControllerTest {
         assertThat(logEntity.getUserId()).isEqualTo(userId);
         assertThat(logEntity.getAppRefId()).isEqualTo(appRefId);
         assertThat(logEntity.getSessionId()).isEqualTo(SsoSessionIdHasher.hash(sessionToken));
+    }
+
+    /**
+     * 浏览器会话有效但账号仍待首次登录改密时，不得签发 CAS 票据，应携带原始协议请求和强制
+     * 改密标识重定向到 SSO 登录页。
+     */
+    @Test
+    void login_shouldRedirectToPasswordChangeAndNotIssueTicket_whenFirstLogin() throws Exception {
+        userPasswordMapper.update(null, new LambdaUpdateWrapper<UserPasswordEntity>()
+                .eq(UserPasswordEntity::getUserId, userId)
+                .set(UserPasswordEntity::getFirstLogin, true));
+        String sessionToken = ssoSessionService.issue(userId);
+
+        String location = mockMvc.perform(get("/api/authn/cas/{appId}/login", appId)
+                        .param("service", ALLOWED_SERVICE)
+                        .cookie(new Cookie("sso_session", sessionToken)))
+                .andExpect(status().isFound())
+                .andReturn().getResponse().getHeader("Location");
+
+        assertThat(location).startsWith("/sso/login?redirect=");
+        assertThat(location).endsWith("&forcePasswordChange=true");
+        assertThat(location).doesNotContain("ticket=ST-");
+        assertThat(ssoProtocolLogMapper.selectList(new LambdaQueryWrapper<SsoProtocolLogEntity>()
+                .eq(SsoProtocolLogEntity::getAppId, appId))).isEmpty();
     }
 
     /**

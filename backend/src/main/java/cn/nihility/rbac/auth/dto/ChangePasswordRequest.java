@@ -7,8 +7,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 /**
- * 修改密码请求参数。当前登录用户身份取自 {@code identity-token}（通过
- * {@link cn.nihility.rbac.auth.context.CurrentUserContext} 读取），不通过请求体传入。
+ * 修改密码请求参数。当前登录用户身份由调用接口从已认证会话中读取，不通过请求体传入。
  */
 @Getter
 @Setter

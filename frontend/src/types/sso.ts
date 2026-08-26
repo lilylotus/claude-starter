@@ -12,3 +12,14 @@ export interface SsoLoginRequest {
   account: string
   password: string
 }
+
+// POST /api/authn/sso/login 响应
+export interface SsoLoginResult {
+  firstLogin: boolean
+}
+
+// POST /api/authn/sso/password 请求体，用户身份由 HttpOnly SSO 会话确定
+export interface SsoChangePasswordRequest {
+  oldPassword: string
+  newPassword: string
+}

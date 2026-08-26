@@ -89,10 +89,23 @@ public final class ProtocolResponseWriter {
      * @return SSO 登录页重定向地址
      */
     public static String ssoLoginRedirectLocation(HttpServletRequest request) {
+        return ssoLoginRedirectLocation(request, false);
+    }
+
+    /**
+     * 构造重定向到 SSO 登录页的目标地址，并按需携带强制改密标识。
+     *
+     * @param request             当前请求
+     * @param forcePasswordChange 是否要求登录页直接进入首次登录改密流程
+     * @return SSO 登录页重定向地址
+     */
+    public static String ssoLoginRedirectLocation(HttpServletRequest request, boolean forcePasswordChange) {
         StringBuilder fullUrl = new StringBuilder(request.getRequestURL());
         if (request.getQueryString() != null) {
             fullUrl.append('?').append(request.getQueryString());
         }
-        return SSO_LOGIN_PATH + "?redirect=" + URLEncoder.encode(fullUrl.toString(), StandardCharsets.UTF_8);
+        String location = SSO_LOGIN_PATH + "?redirect="
+                + URLEncoder.encode(fullUrl.toString(), StandardCharsets.UTF_8);
+        return forcePasswordChange ? location + "&forcePasswordChange=true" : location;
     }
 }

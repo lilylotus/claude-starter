@@ -3,6 +3,7 @@ package cn.nihility.rbac.sso.oauth.controller;
 import cn.nihility.rbac.app.authconfig.constant.AuthProtocol;
 import cn.nihility.rbac.app.config.AppSecretProperties;
 import cn.nihility.rbac.app.entity.AppConfigEntity;
+import cn.nihility.rbac.auth.service.PasswordService;
 import cn.nihility.rbac.common.result.Result;
 import cn.nihility.rbac.common.util.ClientRequestUtils;
 import cn.nihility.rbac.common.util.Sm4JdkUtils;
@@ -69,6 +70,9 @@ public class OAuthController {
     /** SSO 浏览器会话业务逻辑接口。 */
     private final SsoSessionService ssoSessionService;
 
+    /** 密码业务逻辑接口，用于阻止待首次登录改密账号获取 OAuth2 授权码。 */
+    private final PasswordService passwordService;
+
     /** 应用对外接口凭证相关配置，提供 SM4 解密主密钥（校验 client_secret 时复用）。 */
     private final AppSecretProperties appSecretProperties;
 
@@ -126,6 +130,11 @@ public class OAuthController {
         Optional<Long> userIdOpt = ssoSessionService.verify(sessionToken);
         if (userIdOpt.isEmpty()) {
             ProtocolResponseWriter.redirect(response, ProtocolResponseWriter.ssoLoginRedirectLocation(request));
+            return;
+        }
+        if (passwordService.isFirstLogin(userIdOpt.get())) {
+            ProtocolResponseWriter.redirect(response,
+                    ProtocolResponseWriter.ssoLoginRedirectLocation(request, true));
             return;
         }
 
