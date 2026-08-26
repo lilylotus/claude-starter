@@ -51,9 +51,13 @@ export interface SsoProtocolLogRow {
   protocol: string
   eventType: string
   userId: number | null
+  // 关联用户姓名，userId 为空或关联的用户已不存在时为空
+  userName: string | null
   result: number
   resultLabel: string
   failReason: string | null
+  // 拒绝来源的策略名称，仅失败原因为"应用访问授权策略拒绝"时非空，其余情况为空
+  deniedPolicyName: string | null
   clientIp: string | null
   userAgent: string | null
   createTime: string

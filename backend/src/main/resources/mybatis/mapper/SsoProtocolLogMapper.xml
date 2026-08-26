@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- SSO 协议调用记录的动态条件分页查询：LEFT JOIN tab_user/tab_app_access_policy 关联查出
+     用户姓名、拒绝策略名称（关联记录不存在时对应列为 NULL），筛选条件（应用/协议类型/
+     事件类型/结果/会话标识/时间范围）均可选，按需拼接，按调用发生时间（create_time）降序
+     排列（fix-sso-protocol-log-detail-display change design.md Decision 1）。 -->
+<mapper namespace="cn.nihility.rbac.ssoprotocollog.mapper.SsoProtocolLogMapper">
+
+    <select id="selectSsoProtocolLogPage" resultType="cn.nihility.rbac.ssoprotocollog.dto.SsoProtocolLogVO">
+        SELECT
+        t.id AS id,
+        t.app_ref_id AS appRefId,
+        t.app_id AS appId,
+        t.protocol AS protocol,
+        t.event_type AS eventType,
+        t.user_id AS userId,
+        u.name AS userName,
+        t.result AS result,
+        t.fail_reason AS failReason,
+        t.denied_policy_id AS deniedPolicyId,
+        p.name AS deniedPolicyName,
+        t.client_ip AS clientIp,
+        t.session_id AS sessionId,
+        t.user_agent AS userAgent,
+        t.create_time AS createTime
+        FROM tab_sso_protocol_log t
+        LEFT JOIN tab_user u ON u.id = t.user_id
+        LEFT JOIN tab_app_access_policy p ON p.id = t.denied_policy_id
+        <where>
+            <if test="query.appRefId != null">
+                AND t.app_ref_id = #{query.appRefId}
+            </if>
+            <if test="query.protocol != null and query.protocol != ''">
+                AND t.protocol = #{query.protocol}
+            </if>
+            <if test="query.eventType != null and query.eventType != ''">
+                AND t.event_type = #{query.eventType}
+            </if>
+            <if test="query.result != null">
+                AND t.result = #{query.result}
+            </if>
+            <if test="query.sessionId != null and query.sessionId != ''">
+                AND t.session_id = #{query.sessionId}
+            </if>
+            <if test="query.startTime != null">
+                AND t.create_time &gt;= #{query.startTime}
+            </if>
+            <if test="query.endTime != null">
+                AND t.create_time &lt;= #{query.endTime}
+            </if>
+        </where>
+        ORDER BY t.create_time DESC, t.id DESC
+    </select>
+
+</mapper>

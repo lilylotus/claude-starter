@@ -44,6 +44,10 @@ public class SsoProtocolLogVO {
     @Schema(description = "关联的用户 id，处理链路尚未解析出用户身份时为空")
     private Long userId;
 
+    /** 关联用户的姓名，userId 为空或关联的用户已不存在时为空。 */
+    @Schema(description = "关联用户的姓名，userId 为空或关联的用户已不存在时为空")
+    private String userName;
+
     /** 调用结果：1=成功，2=失败。 */
     @Schema(description = "调用结果：1=成功，2=失败")
     private Integer result;
@@ -59,6 +63,10 @@ public class SsoProtocolLogVO {
     /** 拒绝来源的策略 id，仅失败原因为"应用访问授权策略拒绝"时非空，其余情况均为空。 */
     @Schema(description = "拒绝来源的策略 id，仅失败原因为\"应用访问授权策略拒绝\"时非空")
     private Long deniedPolicyId;
+
+    /** 拒绝来源的策略名称，deniedPolicyId 为空或关联的策略已不存在时为空。 */
+    @Schema(description = "拒绝来源的策略名称，deniedPolicyId 为空或关联的策略已不存在时为空")
+    private String deniedPolicyName;
 
     /** 客户端 IP，可为空。 */
     @Schema(description = "客户端 IP")

@@ -110,8 +110,8 @@ function displayValue(value: string | number | null | undefined): string {
       <el-table-column label="应用" min-width="120">
         <template #default="{ row }">{{ displayValue((row as SsoProtocolLogRow).appId) }}</template>
       </el-table-column>
-      <el-table-column label="用户ID" width="90">
-        <template #default="{ row }">{{ displayValue((row as SsoProtocolLogRow).userId) }}</template>
+      <el-table-column label="用户" width="120">
+        <template #default="{ row }">{{ displayValue((row as SsoProtocolLogRow).userName) }}</template>
       </el-table-column>
       <el-table-column label="结果" width="90">
         <template #default="{ row }">
@@ -122,6 +122,9 @@ function displayValue(value: string | number | null | undefined): string {
       </el-table-column>
       <el-table-column label="失败原因" min-width="160">
         <template #default="{ row }">{{ displayValue((row as SsoProtocolLogRow).failReason) }}</template>
+      </el-table-column>
+      <el-table-column label="拒绝策略" min-width="160">
+        <template #default="{ row }">{{ displayValue((row as SsoProtocolLogRow).deniedPolicyName) }}</template>
       </el-table-column>
       <el-table-column label="客户端IP" width="140">
         <template #default="{ row }">{{ displayValue((row as SsoProtocolLogRow).clientIp) }}</template>
