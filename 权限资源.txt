@@ -198,6 +198,11 @@ FormFieldManagement（表单管理，/system/form-fields）
 并禁用对应开关，没有独立的 detail/enable/disable）
 
 
+PluginManagement（插件管理，/system/plugins，见 openspec/changes/plugin-jar-upgrade）
+- PluginManagement:plugin:view      插件管理页面访问（查询插件 Bean 定义注册阶段状态、失败原因、覆盖关系列表）
+（只读页面，仅支持查询，没有 add/edit/enable/disable/delete；插件本身通过 plugins/ 目录 + 重启应用加载，不提供页面上传/启停/重新扫描操作）
+
+
 日志管理
 --------
 

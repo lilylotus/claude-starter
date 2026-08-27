@@ -5,6 +5,11 @@ spring:
   application:
     name: RBAC
 
+  main:
+    # 允许同名 Bean 定义重复注册（后注册覆盖先注册），插件覆盖主程序 Bean 依赖该开关
+    # （plugin-jar-upgrade change design.md Decision 3）。
+    allow-bean-definition-overriding: true
+
   # Excel 批量导入上传文件的大小限制，默认的 1MB 单文件上限不足以覆盖上限 1000 行
   # 的导入场景，适当调大；具体行数上限由业务层（BatchImportServiceImpl）控制。
   servlet:
@@ -17,7 +22,7 @@ spring:
   # 不要把生产凭据提交到仓库。
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://127.0.0.1:3306/rbac?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+    url: jdbc:mysql://10.4.100.124:3306/rbac?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
     username: root
     password: mysql
 
@@ -25,7 +30,7 @@ spring:
     redis:
       database: 8
       password: redis
-      host: 127.0.0.1
+      host: 10.4.100.124
       port: 6379
       connect-timeout: 3000ms
 
@@ -105,3 +110,17 @@ rbac:
     cron: "0 0 1 * * ?"
     # 日志保留天数，默认 180 天（半年），创建时间早于"当前时间 - 保留天数"的记录会被清理。
     retention-days: 180
+
+  # 插件包升级相关配置（plugin-jar-upgrade change design.md Decision 1/5/6），全部为默认值，
+  # 此处显式列出便于按需覆盖；插件目录路径为相对路径时相对于应用当前工作目录解析。
+  plugin:
+    # 插件目录路径，应用启动时（主程序组件扫描完成后、任何 Bean 实例化前）扫描该目录下的
+    # .jar 文件；目录不存在时跳过插件加载流程，不影响主程序正常启动。
+    directory: plugins
+    override:
+      # 覆盖黑名单：命中的目标类全限定名禁止被插件覆盖（安全关键组件），默认包含认证过滤器、
+      # 全局异常处理器、全局响应包装器；部署方可追加，不建议移除默认项。
+      deny-list:
+        - cn.nihility.rbac.auth.filter.IdentityAuthFilter
+        - cn.nihility.rbac.common.exception.GlobalExceptionHandler
+        - cn.nihility.rbac.common.advice.GlobalResponseAdvice
