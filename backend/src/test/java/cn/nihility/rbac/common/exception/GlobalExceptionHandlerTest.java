@@ -6,12 +6,15 @@ import cn.nihility.rbac.common.result.Result;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpMethod;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * {@link GlobalExceptionHandler} 的单元测试，覆盖业务异常、必填参数缺失、参数类型不匹配、
- * 兜底未预期异常四类场景的响应结构（fix-app-sync-pull-live-data change tasks.md 1.3）。
+ * 未匹配路由/静态资源、兜底未预期异常五类场景的响应结构（fix-app-sync-pull-live-data
+ * change tasks.md 1.3；fix-no-resource-found-returns-404 change tasks.md 2.1）。
  */
 @ExtendWith(MockitoExtension.class)
 class GlobalExceptionHandlerTest {
@@ -73,5 +76,19 @@ class GlobalExceptionHandlerTest {
 
         assertThat(result.getCode()).isEqualTo(500);
         assertThat(result.getMessage()).isEqualTo("服务器内部错误");
+    }
+
+    /**
+     * 未匹配路由/静态资源时应返回 404，且提示信息明确指出具体请求路径
+     * （fix-no-resource-found-returns-404 change tasks.md 2.1）。
+     */
+    @Test
+    void handleNoResourceFound_shouldReturn404WithResourcePath() {
+        NoResourceFoundException ex = new NoResourceFoundException(HttpMethod.GET, "/not-exist-xyz");
+
+        Result<Void> result = handler.handleNoResourceFound(ex);
+
+        assertThat(result.getCode()).isEqualTo(404);
+        assertThat(result.getMessage()).isEqualTo("请求的资源不存在：/not-exist-xyz");
     }
 }

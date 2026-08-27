@@ -2,12 +2,15 @@ package cn.nihility.rbac.common.exception;
 
 import cn.nihility.rbac.common.result.Result;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * 全局异常处理器，把业务异常和参数校验异常统一转换为 {@link Result} 结构返回，
@@ -22,6 +25,9 @@ public class GlobalExceptionHandler {
 
     /** 未预期的系统异常状态码。 */
     private static final int SYSTEM_ERROR_CODE = 500;
+
+    /** 未匹配路由/静态资源的状态码。 */
+    private static final int NOT_FOUND_CODE = 404;
 
     /**
      * 处理业务异常。
@@ -73,6 +79,24 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public Result<Void> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
         return Result.error(VALIDATION_ERROR_CODE, "参数 " + ex.getName() + " 格式不正确");
+    }
+
+    /**
+     * 处理请求未命中任何 Controller 路由、也不是已注册静态资源的异常，返回真实的
+     * HTTP 404 状态码（本处理器是本类里唯一一个改变 HTTP 状态码的方法：其余异常类型都是
+     * "接口命中了、但这次调用有问题"，统一用 HTTP 200 + {@code Result.code} 表达；本异常
+     * 是"根本没有命中任何接口"，继续返回 HTTP 200 会让只看 HTTP 状态码的调用方（监控探针、
+     * 反向代理健康检查、API 调试工具）误判为请求成功，fix-no-resource-found-returns-404
+     * change design.md Decision 1）。不当作未预期的系统异常记录 ERROR 日志——大概率是浏览器
+     * 自动请求 favicon、爬虫探测路径等常规噪音，而不是系统真的出了问题。
+     *
+     * @param ex 未匹配路由/静态资源异常
+     * @return 携带具体请求路径的 404 响应
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public Result<Void> handleNoResourceFound(NoResourceFoundException ex) {
+        return Result.error(NOT_FOUND_CODE, "请求的资源不存在：" + ex.getResourcePath());
     }
 
     /**
