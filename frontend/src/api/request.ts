@@ -80,8 +80,18 @@ request.interceptors.response.use(
     // 里的 code 是 401（未登录/access-key 过期/menu 头缺失或非法）或 4010（首登强制改密），
     // 因此这两种情况都会走到成功回调这里，而不是下面的错误处理函数
     if (body.code === 401) {
-      const originalConfig = response.config
-      if (!isAuthWhitelisted(originalConfig.url) && useAuthStore().isRefreshValid) {
+      // originalConfig 上打的 _retriedAfterRefresh 标记用于限制"刷新后重试"最多发生一次：
+      // 如果重试后的这次请求依然拿到 401（说明问题不是 access-key 过期能解决的，比如后端
+      // 对这个具体请求的鉴权判断本身有问题），旧代码会在这里再次判定 isRefreshValid 为真
+      // 从而无限重复"刷新 -> 重试 -> 401 -> 刷新"，表现为不断请求 /api/auth/refresh 并
+      // 卡死界面；加上这个标记后，同一个原始请求最多只触发一次静默刷新重试
+      const originalConfig = response.config as typeof response.config & { _retriedAfterRefresh?: boolean }
+      if (
+        !isAuthWhitelisted(originalConfig.url) &&
+        !originalConfig._retriedAfterRefresh &&
+        useAuthStore().isRefreshValid
+      ) {
+        originalConfig._retriedAfterRefresh = true
         try {
           const newAccessKey = await triggerRefresh()
           originalConfig.headers.set('identity-token', newAccessKey)

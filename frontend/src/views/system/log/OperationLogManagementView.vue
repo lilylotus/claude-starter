@@ -163,8 +163,8 @@ function openDetailDialog(row: OperationLogRow) {
 
       <el-table v-loading="listLoading" :data="list" empty-text="暂无操作日志">
         <el-table-column prop="createTime" label="操作时间" width="170" />
-        <el-table-column prop="module" label="操作模块" min-width="110" />
-        <el-table-column prop="resourceName" label="资源类型" width="100" />
+        <el-table-column prop="module" label="操作模块" min-width="120" show-overflow-tooltip />
+        <el-table-column prop="resourceName" label="资源类型" min-width="100" show-overflow-tooltip />
         <el-table-column label="操作类型" width="160">
           <template #default="{ row }">
             <el-tag :type="operationTagType((row as OperationLogRow).operationType)">
@@ -180,8 +180,8 @@ function openDetailDialog(row: OperationLogRow) {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="targetName" label="被操作对象" min-width="140" />
-        <el-table-column prop="createBy" label="操作人" width="110" />
+        <el-table-column prop="targetName" label="被操作对象" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="createBy" label="操作人" min-width="160" show-overflow-tooltip />
         <el-table-column label="操作发起 IP" width="140">
           <template #default="{ row }">{{ displayValue((row as OperationLogRow).operateIp) }}</template>
         </el-table-column>
