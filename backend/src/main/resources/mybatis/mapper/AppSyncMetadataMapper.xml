@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 保留窗口下界游标的原子推进（app-sync-changelog-pull change design.md Decision 8）：
+     GREATEST(现值, 新值) 保证 floor 只能单调递增，不先查后写，不需要额外的 WHERE 大小
+     比较条件。metadata_value 存储为 VARCHAR，比较/写回前用 CAST(... AS SIGNED)/
+     CAST(... AS CHAR) 与数值互转，兼容 MySQL 5.7，不使用窗口函数/CTE。 -->
+<mapper namespace="cn.nihility.rbac.sync.changelog.mapper.AppSyncMetadataMapper">
+
+    <update id="advanceRetentionFloorSeqIfGreater">
+        UPDATE tab_app_sync_metadata
+        SET metadata_value = CAST(GREATEST(CAST(metadata_value AS SIGNED), CAST(#{newValue} AS SIGNED)) AS CHAR),
+            update_time = #{updateTime}
+        WHERE metadata_key = #{key}
+    </update>
+
+</mapper>

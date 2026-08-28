@@ -16,6 +16,7 @@ import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.app.sync.constant.SyncDomain;
 import cn.nihility.rbac.org.constant.OrgStatus;
 import cn.nihility.rbac.org.dto.OrgCreateRequest;
+import cn.nihility.rbac.org.dto.OrgPathVersionRow;
 import cn.nihility.rbac.org.dto.OrgTreeNodeVO;
 import cn.nihility.rbac.org.dto.OrgUpdateRequest;
 import cn.nihility.rbac.org.dto.OrgVO;
@@ -39,6 +40,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -46,6 +48,7 @@ import org.springframework.util.StringUtils;
 /**
  * 组织机构业务逻辑实现。
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class OrgServiceImpl implements OrgService {
@@ -196,6 +199,7 @@ public class OrgServiceImpl implements OrgService {
         OrgEntity entity = OrgConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(OrgStatus.ENABLED);
+        entity.setVersion(1L);
         OrgEntity parent = resolveParent(request.getParentId());
         entity.setParentCode(parent == null ? null : parent.getCode());
         entity.setCreateBy(operator);
@@ -215,6 +219,9 @@ public class OrgServiceImpl implements OrgService {
                 .bizId(entity.getId())
                 .operationType(OperationType.CREATE)
                 .operator(entity.getCreateBy())
+                .entityVersion(entity.getVersion())
+                .orgScopePathBefore(null)
+                .orgScopePathAfter(entity.getOrgPath())
                 .occurredAt(LocalDateTime.now())
                 .build());
 
@@ -258,6 +265,14 @@ public class OrgServiceImpl implements OrgService {
             throw new BusinessException("上级组织不能是当前组织的下级组织");
         }
 
+        // 上级组织变化前，先按旧路径前缀采集自身与全部子孙组织当前的 id/路径/版本快照，
+        // 供级联更新完成后计算每个受影响组织各自的 orgScopePathBefore/entityVersion
+        // （app-sync-changelog-pull change design.md Decision 2）。必须在任何 UPDATE 语句
+        // 执行之前查询，否则采集到的就不是"旧"路径了。
+        List<OrgPathVersionRow> affectedBefore = parentChanged
+                ? orgMapper.selectPathAndVersionByPrefix(previousOrgPath)
+                : List.of();
+
         OrgConvert.INSTANCE.updateEntity(request, entity);
         if (parentChanged) {
             entity.setParentCode(newParent == null ? null : newParent.getCode());
@@ -276,12 +291,17 @@ public class OrgServiceImpl implements OrgService {
             entity.setOrgNamePath(newNamePath);
         }
         if (parentChanged) {
+            // cascadeUpdateOrgPath 已经把自身与全部子孙组织的 version 一并原子递增 1，
+            // 不能再对自身重复调用 incrementVersion，否则自身版本会多加 1 次。
             String newParentPath = newParent == null ? null : newParent.getOrgPath();
             String newOrgPath = joinPath(newParentPath, id.toString());
             orgMapper.cascadeUpdateOrgPath(previousOrgPath, newOrgPath, operator, pathUpdateTime);
             entity.setOrgParentPath(newParentPath);
             entity.setOrgPath(newOrgPath);
+        } else {
+            orgMapper.incrementVersion(id);
         }
+        entity.setVersion(entity.getVersion() == null ? 2L : entity.getVersion() + 1L);
 
         if (!Objects.equals(previousCode, entity.getCode())) {
             orgMapper.updateChildrenParentCode(id, entity.getCode());
@@ -289,15 +309,61 @@ public class OrgServiceImpl implements OrgService {
 
         operationLogRecorder.recordUpdate(OperationLogResourceType.ORG, id, entity.getName(),
                 beforeSnapshot, toLogSnapshot(entity));
-        domainEventPublisher.publish(DomainChangeEvent.builder()
-                .dataType(SyncDomain.ORG)
-                .bizId(id)
-                .operationType(OperationType.UPDATE)
-                .operator(entity.getUpdateBy())
-                .occurredAt(LocalDateTime.now())
-                .build());
+        publishUpdateEvents(id, entity, parentChanged, affectedBefore);
 
         return getById(id);
+    }
+
+    /**
+     * 上级组织未变化时，为自身发布一条 {@code before=after=当前路径} 的 UPDATE 事件；
+     * 上级组织已变化时，按级联更新前采集的快照逐一查询级联更新后的新路径/新版本，为自身与
+     * 全部子孙组织各发布一条携带正确前后路径与递增后版本的 UPDATE 事件，避免子孙组织因为
+     * "没人直接操作它"而漏发事件（design.md Decision 2）。
+     *
+     * @param id             被直接编辑的组织 id
+     * @param entity         已完成本次更新后的组织实体（{@code parentChanged=false} 时使用其
+     *                       {@code version}/{@code orgPath}）
+     * @param parentChanged  本次更新是否变更了上级组织
+     * @param affectedBefore 上级组织变化前采集的自身与全部子孙组织 id/旧路径/旧版本快照
+     */
+    private void publishUpdateEvents(Long id, OrgEntity entity, boolean parentChanged,
+            List<OrgPathVersionRow> affectedBefore) {
+        if (!parentChanged) {
+            domainEventPublisher.publish(DomainChangeEvent.builder()
+                    .dataType(SyncDomain.ORG)
+                    .bizId(id)
+                    .operationType(OperationType.UPDATE)
+                    .operator(entity.getUpdateBy())
+                    .entityVersion(entity.getVersion())
+                    .orgScopePathBefore(entity.getOrgPath())
+                    .orgScopePathAfter(entity.getOrgPath())
+                    .occurredAt(LocalDateTime.now())
+                    .build());
+            return;
+        }
+
+        List<OrgPathVersionRow> affectedAfter = orgMapper.selectPathAndVersionByPrefix(entity.getOrgPath());
+        Map<Long, OrgPathVersionRow> afterById = affectedAfter.stream()
+                .collect(Collectors.toMap(OrgPathVersionRow::getId, row -> row, (left, right) -> left));
+        for (OrgPathVersionRow before : affectedBefore) {
+            OrgPathVersionRow after = afterById.get(before.getId());
+            if (after == null) {
+                // 级联更新只改路径/版本，不改变行数，理论上不会发生；出现说明级联更新与本次
+                // 查询之间发生了并发变更，记录日志并跳过，不让个别子孙的异常阻断整个事务。
+                log.warn("组织[{}]级联迁移后查不到子孙组织[{}]的新路径，跳过该条变更事件", id, before.getId());
+                continue;
+            }
+            domainEventPublisher.publish(DomainChangeEvent.builder()
+                    .dataType(SyncDomain.ORG)
+                    .bizId(before.getId())
+                    .operationType(OperationType.UPDATE)
+                    .operator(entity.getUpdateBy())
+                    .entityVersion(after.getVersion())
+                    .orgScopePathBefore(before.getOrgPath())
+                    .orgScopePathAfter(after.getOrgPath())
+                    .occurredAt(LocalDateTime.now())
+                    .build());
+        }
     }
 
     /**
@@ -358,6 +424,9 @@ public class OrgServiceImpl implements OrgService {
     public void delete(Long id) {
         OrgEntity entity = getExistingEntityInScope(id);
 
+        // 存在未删除的下级组织时直接拒绝，组织删除不做级联删除子孙，因此不存在"子孙组织
+        // 需要各自产生 tombstone 事件"的场景，delete 只需为自身发布一条 tombstone
+        // （app-sync-changelog-pull change design.md Decision 3）。
         Long childCount = orgMapper.selectCount(new LambdaQueryWrapper<OrgEntity>()
                 .eq(OrgEntity::getParentId, id)
                 .ne(OrgEntity::getStatus, OrgStatus.DELETED));
@@ -366,10 +435,13 @@ public class OrgServiceImpl implements OrgService {
         }
 
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
+        String deletedOrgPath = entity.getOrgPath();
         entity.setStatus(OrgStatus.DELETED);
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         orgMapper.updateById(entity);
+        orgMapper.incrementVersion(id);
+        entity.setVersion(entity.getVersion() == null ? 2L : entity.getVersion() + 1L);
 
         operationLogRecorder.recordDelete(OperationLogResourceType.ORG, id, entity.getName(), beforeSnapshot);
         domainEventPublisher.publish(DomainChangeEvent.builder()
@@ -377,6 +449,9 @@ public class OrgServiceImpl implements OrgService {
                 .bizId(id)
                 .operationType(OperationType.DELETE)
                 .operator(entity.getUpdateBy())
+                .entityVersion(entity.getVersion())
+                .orgScopePathBefore(deletedOrgPath)
+                .orgScopePathAfter(null)
                 .occurredAt(LocalDateTime.now())
                 .build());
     }
@@ -416,6 +491,8 @@ public class OrgServiceImpl implements OrgService {
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         orgMapper.updateById(entity);
+        orgMapper.incrementVersion(id);
+        entity.setVersion(entity.getVersion() == null ? 2L : entity.getVersion() + 1L);
 
         operationLogRecorder.recordStatusChange(OperationLogResourceType.ORG, id, entity.getName(),
                 status == OrgStatus.ENABLED, beforeSnapshot, toLogSnapshot(entity));
@@ -424,6 +501,9 @@ public class OrgServiceImpl implements OrgService {
                 .bizId(id)
                 .operationType(status == OrgStatus.ENABLED ? OperationType.ENABLE : OperationType.DISABLE)
                 .operator(entity.getUpdateBy())
+                .entityVersion(entity.getVersion())
+                .orgScopePathBefore(entity.getOrgPath())
+                .orgScopePathAfter(entity.getOrgPath())
                 .occurredAt(LocalDateTime.now())
                 .build());
         return getById(id);

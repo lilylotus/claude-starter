@@ -1,6 +1,8 @@
 package cn.nihility.rbac.sync.event.support;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -29,7 +31,10 @@ class DisruptorDomainEventPublisherTest {
         processor = mock(DomainChangeEventProcessor.class);
         SyncProperties properties = new SyncProperties();
         properties.setRingBufferSize(16);
-        publisher = new DisruptorDomainEventPublisher(processor, properties);
+        DomainEntityVersionResolver versionResolver = mock(DomainEntityVersionResolver.class);
+        lenient().when(versionResolver.resolve(any())).thenReturn(1L);
+        publisher = new DisruptorDomainEventPublisher(processor, properties, new SnowflakeIdGenerator(properties),
+                versionResolver);
         publisher.start();
     }
 
@@ -39,6 +44,36 @@ class DisruptorDomainEventPublisherTest {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.clearSynchronization();
         }
+    }
+
+    /**
+     * {@code start}/{@code stop} 应正确切换 {@code isRunning} 状态（Spring {@code SmartLifecycle}
+     * 启动/优雅停机场景）；{@code stop} 后再次 {@code start} 应能重新建立 RingBuffer 并恢复
+     * 正常投递，验证优雅停机不会遗留半启动状态。本阶段仍是进程内 Disruptor，只覆盖
+     * "单实例正常运行与优雅停机条件下可靠处理"；异常崩溃（非本类 {@code stop} 触发的场景）
+     * 仍可能在业务提交后、事件入队或流水持久化前丢失事件，由 digest/全量对账发现并修复
+     * （app-sync-changelog-pull change design.md Context/Risks，proposal.md"阶段性可靠性
+     * 边界"，与本类 Javadoc 一致）。
+     */
+    @Test
+    void startAndStop_shouldToggleRunningState_andSupportRestart() throws InterruptedException {
+        assertThat(publisher.isRunning()).isTrue();
+
+        publisher.stop();
+        assertThat(publisher.isRunning()).isFalse();
+
+        publisher.start();
+        assertThat(publisher.isRunning()).isTrue();
+
+        CountDownLatch latch = new CountDownLatch(1);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            latch.countDown();
+            return null;
+        }).when(processor).process(org.mockito.ArgumentMatchers.any());
+
+        publisher.publish(DomainChangeEvent.builder().dataType("ROLE").bizId(3L).build());
+
+        assertThat(latch.await(2, TimeUnit.SECONDS)).isTrue();
     }
 
     /**

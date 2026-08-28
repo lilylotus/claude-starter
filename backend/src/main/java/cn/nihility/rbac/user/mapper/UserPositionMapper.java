@@ -2,7 +2,7 @@ package cn.nihility.rbac.user.mapper;
 
 import cn.nihility.rbac.user.dto.PositionVO;
 import cn.nihility.rbac.user.entity.UserPositionEntity;
-import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import cn.nihility.rbac.common.mapper.VersionedBaseMapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -17,7 +17,7 @@ import org.apache.ibatis.annotations.Param;
  * 完成，不在应用层拆成多次查询再拼装。
  */
 @Mapper
-public interface UserPositionMapper extends BaseMapper<UserPositionEntity> {
+public interface UserPositionMapper extends VersionedBaseMapper<UserPositionEntity> {
 
     /**
      * 按所属组织 id 分页查询任职记录，关联回填所属用户姓名、所属组织名称。
@@ -82,4 +82,16 @@ public interface UserPositionMapper extends BaseMapper<UserPositionEntity> {
      */
     List<PositionVO> selectAllForExport(@Param("allowedOrgIds") Set<Long> allowedOrgIds,
             @Param("deletedStatus") int deletedStatus);
+
+    /**
+     * 按 {@code id} 升序游标式批量查询任职当前数据，供对账摘要接口流式扫描全部可见记录使用
+     * （app-sync-changelog-pull change design.md Decision 10）。
+     *
+     * @param lastId        上一批最后一条记录的 id，{@code null} 表示从头开始
+     * @param batchSize     本批最多查询的记录数
+     * @param allowedOrgIds 组织范围过滤下推的允许组织 id 全集，{@code null} 表示不限制
+     * @return 本批查询结果，按 id 升序排列
+     */
+    List<UserPositionEntity> selectDigestBatch(@Param("lastId") Long lastId, @Param("batchSize") int batchSize,
+            @Param("allowedOrgIds") Set<Long> allowedOrgIds);
 }

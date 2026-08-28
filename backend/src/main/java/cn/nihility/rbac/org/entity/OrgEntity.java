@@ -1,6 +1,8 @@
 package cn.nihility.rbac.org.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import java.time.LocalDateTime;
@@ -45,6 +47,10 @@ public class OrgEntity {
 
     /** 当前组织的父级 id 路径，顶级组织为空。 */
     private String orgParentPath;
+
+    /** 面向外部同步消费者的实体版本，创建为 1，每次写操作递增。 */
+    @TableField(updateStrategy = FieldStrategy.NEVER)
+    private Long version;
 
     /** 状态：2000=启用，3000=停用，-1000=已删除。 */
     private Integer status;

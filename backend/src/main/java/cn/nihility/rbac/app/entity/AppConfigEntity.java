@@ -83,6 +83,9 @@ public class AppConfigEntity {
      */
     private String notifyParams;
 
+    /** 应用级同步配置纪元，任一同步配置变化时原子递增。 */
+    private Long configEpoch;
+
     /** 创建人。 */
     private String createBy;
 

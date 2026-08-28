@@ -107,6 +107,7 @@ public class RoleServiceImpl implements RoleService {
         RoleEntity entity = RoleConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(RoleStatus.ENABLED);
+        entity.setVersion(1L);
         entity.setCreateBy(operator);
         entity.setCreateTime(now);
         entity.setUpdateBy(operator);
@@ -143,6 +144,8 @@ public class RoleServiceImpl implements RoleService {
         entity.setUpdateBy(operator);
         entity.setUpdateTime(LocalDateTime.now());
         roleMapper.updateById(entity);
+        roleMapper.incrementVersion(id);
+        entity.setVersion(entity.getVersion() == null ? 2L : entity.getVersion() + 1L);
 
         syncPermissions(id, request.getPermissionIds(), operator);
 
@@ -187,6 +190,8 @@ public class RoleServiceImpl implements RoleService {
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         roleMapper.updateById(entity);
+        roleMapper.incrementVersion(id);
+        entity.setVersion(entity.getVersion() == null ? 2L : entity.getVersion() + 1L);
 
         operationLogRecorder.recordDelete(OperationLogResourceType.ROLE, id, entity.getName(), beforeSnapshot);
         domainEventPublisher.publish(DomainChangeEvent.builder()
@@ -225,6 +230,8 @@ public class RoleServiceImpl implements RoleService {
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         roleMapper.updateById(entity);
+        roleMapper.incrementVersion(id);
+        entity.setVersion(entity.getVersion() == null ? 2L : entity.getVersion() + 1L);
 
         operationLogRecorder.recordStatusChange(OperationLogResourceType.ROLE, id, entity.getName(),
                 status == RoleStatus.ENABLED, beforeSnapshot, toLogSnapshot(entity));

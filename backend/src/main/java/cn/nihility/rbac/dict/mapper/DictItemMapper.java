@@ -33,4 +33,14 @@ public interface DictItemMapper extends BaseMapper<DictItemEntity> {
     List<DictItemEntity> selectSyncPullPage(@Param("offset") int offset, @Param("limit") int limit,
             @Param("updateTimeFrom") LocalDateTime updateTimeFrom, @Param("updateTimeTo") LocalDateTime updateTimeTo,
             @Param("ids") List<Long> ids, @Param("codes") List<String> codes);
+
+    /**
+     * 按 {@code id} 升序游标式批量查询字典项当前数据，供对账摘要接口流式扫描全部可见记录
+     * 使用（app-sync-changelog-pull change design.md Decision 10）。
+     *
+     * @param lastId    上一批最后一条记录的 id，{@code null} 表示从头开始
+     * @param batchSize 本批最多查询的记录数
+     * @return 本批查询结果，按 id 升序排列
+     */
+    List<DictItemEntity> selectDigestBatch(@Param("lastId") Long lastId, @Param("batchSize") int batchSize);
 }

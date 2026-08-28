@@ -125,4 +125,27 @@
         </choose>
     </select>
 
+    <!-- 对账摘要接口游标式批量查询：按 id 升序、id > lastId 翻页（app-sync-changelog-pull
+         change design.md Decision 10），不做 updateTime/ids/codes/mobile 过滤；组织范围
+         过滤复用与 selectSyncPullPage 相同的"存在至少一条未删除任职落在范围内"子查询。 -->
+    <select id="selectDigestBatch" resultType="cn.nihility.rbac.user.entity.UserEntity">
+        SELECT * FROM tab_user
+        <where>
+            <if test="lastId != null">AND id &gt; #{lastId}</if>
+            <if test="allowedOrgIds != null">
+                <if test="allowedOrgIds.isEmpty()">AND id = -1</if>
+                <if test="!allowedOrgIds.isEmpty()">
+                    AND id IN (
+                        SELECT DISTINCT user_id FROM tab_user_position
+                        WHERE status &lt;&gt; -1000
+                        AND org_id IN
+                        <foreach collection="allowedOrgIds" item="orgId" open="(" separator="," close=")">#{orgId}</foreach>
+                    )
+                </if>
+            </if>
+        </where>
+        ORDER BY id ASC
+        LIMIT #{batchSize}
+    </select>
+
 </mapper>

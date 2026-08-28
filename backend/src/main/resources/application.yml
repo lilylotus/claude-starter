@@ -128,6 +128,34 @@ rbac:
   sync:
     ring-buffer-size: 1024
 
+    # 全局变更流水表定期清理配置（app-sync-changelog-pull change design.md Decision 8），
+    # 全部为默认值，此处显式列出便于按需覆盖。
+    change-log-cleanup:
+      # 清理任务执行时间点的 cron 表达式，默认每天凌晨 1 点 30 分执行一次。
+      cron: "0 30 1 * * ?"
+      # 变更流水保留天数，默认 90 天。
+      retention-days: 90
+      # 每批删除的记录数上限，默认 1000。
+      batch-size: 1000
+
+    # 通知任务重试/死信状态机配置（app-sync-changelog-pull change design.md Decision 6），
+    # 全部为默认值，此处显式列出便于按需覆盖。
+    notify-retry:
+      # 第一次失败后的重试等待（秒）。
+      initial-interval-seconds: 30
+      # 指数退避倍数。
+      multiplier: 2.0
+      # 单次退避等待上限（秒）。
+      max-interval-seconds: 3600
+      # 达到后转 DEAD 的最大尝试次数。
+      max-attempts: 8
+      # PROCESSING 状态的租约时长（秒），需明显大于通知请求响应超时（3 秒）。
+      lease-seconds: 60
+      # 独立调度器扫描到期任务的轮询间隔（秒）。
+      scheduler-poll-interval-seconds: 10
+      # 调度器单轮最多抢占的任务数。
+      scheduler-batch-size: 100
+
   # SSO 单点登录运行时配置（app-sso-protocol-runtime change design.md Decision 2/5/6），
   # 全部为默认值，此处显式列出便于按需覆盖。
   sso:

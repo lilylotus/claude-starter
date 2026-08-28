@@ -3,6 +3,7 @@ package cn.nihility.rbac.sync.event.support;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -13,9 +14,10 @@ import cn.nihility.rbac.appaccess.policy.entity.PolicyEntity;
 import cn.nihility.rbac.appaccess.policy.mapper.PolicyMapper;
 import cn.nihility.rbac.appaccess.policy.service.PolicyExecutionService;
 import cn.nihility.rbac.operationlog.constant.OperationType;
+import cn.nihility.rbac.sync.changelog.entity.AppDataChangeLogEntity;
 import cn.nihility.rbac.sync.event.DomainChangeEvent;
-import cn.nihility.rbac.sync.notify.service.AppNotifyService;
-import cn.nihility.rbac.sync.notify.support.NotifyCandidateResolver;
+import cn.nihility.rbac.sync.notify.entity.AppNotifyRecordEntity;
+import cn.nihility.rbac.sync.notify.support.NotifySendCoordinator;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,22 +27,23 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * {@link DomainChangeEventProcessor} 的单元测试：验证"直接判定候选应用并逐个触发通知"
- * 的调用顺序，候选判定/单个应用通知异常都不应向外传播（app-sync-drop-changelog change
- * design.md Decision 6，避免 Disruptor 消费者线程因单条事件异常而阻塞后续事件处理；单个
- * 应用通知异常不影响其余应用见 app-sync-notify-pull spec"一个应用通知失败不影响其他应用"
- * 场景），以及"组织/用户/任职变更后策略自动重新执行"分支（close-sso-log-and-policy-gaps
- * change design.md Decision 2）：命中数据域时逐条重新执行全部启用策略、单条策略执行失败
- * 不影响其余策略、非命中数据域不触发任何策略执行。
+ * {@link DomainChangeEventProcessor} 的单元测试：验证"先调用 {@link DomainChangeRecorder}
+ * 完成落库（流水 + 全部候选应用 PENDING 通知任务同事务），落库成功后对每个新建任务提交一次
+ * 即时发送优化"的调用顺序与先后依赖关系（app-sync-changelog-pull change design.md
+ * Decision 6）；落库失败时不应触发任何即时发送；单个任务提交异常不影响其余任务（避免
+ * Disruptor 消费者线程因单条事件异常而阻塞后续事件处理）；以及"组织/用户/任职变更后策略
+ * 自动重新执行"分支（close-sso-log-and-policy-gaps change design.md Decision 2）：命中数据
+ * 域时逐条重新执行全部启用策略、单条策略执行失败不影响其余策略、非命中数据域不触发任何
+ * 策略执行、且不卷入落库是否成功。
  */
 @ExtendWith(MockitoExtension.class)
 class DomainChangeEventProcessorTest {
 
     @Mock
-    private NotifyCandidateResolver notifyCandidateResolver;
+    private DomainChangeRecorder domainChangeRecorder;
 
     @Mock
-    private AppNotifyService appNotifyService;
+    private NotifySendCoordinator notifySendCoordinator;
 
     @Mock
     private PolicyMapper policyMapper;
@@ -52,47 +55,63 @@ class DomainChangeEventProcessorTest {
 
     @BeforeEach
     void setUp() {
-        processor = new DomainChangeEventProcessor(notifyCandidateResolver, appNotifyService, policyMapper,
+        processor = new DomainChangeEventProcessor(domainChangeRecorder, notifySendCoordinator, policyMapper,
                 policyExecutionService);
+        // 默认打桩为落库成功但没有候选应用，聚焦策略重新执行分支的用例无需关心通知分支的
+        // 调用细节，只需保证 result != null 从而不影响流程继续；关注落库/通知分支本身行为
+        // 的用例（见下方）会用更具体的打桩覆盖这个默认值。
+        lenient().when(domainChangeRecorder.record(any()))
+                .thenReturn(new DomainChangeRecordResult(AppDataChangeLogEntity.builder().changeSeq(1L).build(),
+                        List.of()));
     }
 
     /**
-     * 正常场景下应先判定候选应用列表，再对每个匹配应用各自触发通知。
+     * 正常场景下应先调用落库编排组件，落库成功后对每个新建任务各自提交一次即时发送优化。
      */
     @Test
-    void process_shouldResolveCandidatesThenNotifyEachApp() {
+    void process_shouldRecordThenSubmitImmediateSendForEachTask() {
         DomainChangeEvent event = sampleEvent();
-        when(notifyCandidateResolver.resolveCandidateAppRefIds(event)).thenReturn(List.of(1L, 2L));
+        AppDataChangeLogEntity changeLog = AppDataChangeLogEntity.builder().changeSeq(100L).build();
+        AppNotifyRecordEntity task1 = AppNotifyRecordEntity.builder().id(1L).appRefId(1L).build();
+        AppNotifyRecordEntity task2 = AppNotifyRecordEntity.builder().id(2L).appRefId(2L).build();
+        when(domainChangeRecorder.record(event)).thenReturn(new DomainChangeRecordResult(changeLog,
+                List.of(task1, task2)));
 
         processor.process(event);
 
-        verify(notifyCandidateResolver).resolveCandidateAppRefIds(event);
-        verify(appNotifyService).notifyIfConfigured(event, 1L);
-        verify(appNotifyService).notifyIfConfigured(event, 2L);
+        verify(domainChangeRecorder).record(event);
+        verify(notifySendCoordinator).submitImmediateSend(task1);
+        verify(notifySendCoordinator).submitImmediateSend(task2);
     }
 
     /**
-     * 候选判定阶段抛异常时，不应向外传播（消费者线程需要继续处理后续事件）。
+     * 落库失败时，不应向外传播异常，且不应触发任何即时发送优化。
      */
     @Test
-    void process_shouldNotPropagateExceptionWhenResolveCandidatesFails() {
+    void process_shouldSkipImmediateSend_whenRecordFails() {
         DomainChangeEvent event = sampleEvent();
-        when(notifyCandidateResolver.resolveCandidateAppRefIds(event)).thenThrow(new RuntimeException("db error"));
+        when(domainChangeRecorder.record(event)).thenThrow(new RuntimeException("db error"));
 
         assertThatCode(() -> processor.process(event)).doesNotThrowAnyException();
+
+        verify(notifySendCoordinator, never()).submitImmediateSend(any());
     }
 
     /**
-     * 其中一个应用的通知阶段抛异常时，不应向外传播，且不影响其余应用继续触发通知。
+     * 其中一个任务的即时发送提交阶段抛异常时，不应向外传播，且不影响其余任务继续提交。
      */
     @Test
-    void process_shouldContinueOtherAppsWhenOneNotifyFails() {
+    void process_shouldContinueOtherTasksWhenOneSubmitFails() {
         DomainChangeEvent event = sampleEvent();
-        when(notifyCandidateResolver.resolveCandidateAppRefIds(event)).thenReturn(List.of(1L, 2L));
-        doThrow(new RuntimeException("notify error")).when(appNotifyService).notifyIfConfigured(event, 1L);
+        AppDataChangeLogEntity changeLog = AppDataChangeLogEntity.builder().changeSeq(100L).build();
+        AppNotifyRecordEntity task1 = AppNotifyRecordEntity.builder().id(1L).appRefId(1L).build();
+        AppNotifyRecordEntity task2 = AppNotifyRecordEntity.builder().id(2L).appRefId(2L).build();
+        when(domainChangeRecorder.record(event)).thenReturn(new DomainChangeRecordResult(changeLog,
+                List.of(task1, task2)));
+        doThrow(new RuntimeException("submit error")).when(notifySendCoordinator).submitImmediateSend(task1);
 
         assertThatCode(() -> processor.process(event)).doesNotThrowAnyException();
-        verify(appNotifyService).notifyIfConfigured(event, 2L);
+        verify(notifySendCoordinator).submitImmediateSend(task2);
     }
 
     /**
@@ -101,7 +120,6 @@ class DomainChangeEventProcessorTest {
     @Test
     void process_shouldReExecuteAllEnabledPolicies_whenDataTypeIsUser() {
         DomainChangeEvent event = userEvent();
-        when(notifyCandidateResolver.resolveCandidateAppRefIds(event)).thenReturn(List.of());
         when(policyMapper.selectList(any())).thenReturn(List.of(
                 PolicyEntity.builder().id(10L).status(PolicyStatus.ENABLED).build(),
                 PolicyEntity.builder().id(20L).status(PolicyStatus.ENABLED).build()));
@@ -124,7 +142,6 @@ class DomainChangeEventProcessorTest {
                 .operator("1")
                 .occurredAt(LocalDateTime.now())
                 .build();
-        when(notifyCandidateResolver.resolveCandidateAppRefIds(event)).thenReturn(List.of());
 
         processor.process(event);
 
@@ -138,7 +155,6 @@ class DomainChangeEventProcessorTest {
     @Test
     void process_shouldContinueOtherPolicies_whenOnePolicyExecutionFails() {
         DomainChangeEvent event = userEvent();
-        when(notifyCandidateResolver.resolveCandidateAppRefIds(event)).thenReturn(List.of());
         when(policyMapper.selectList(any())).thenReturn(List.of(
                 PolicyEntity.builder().id(10L).status(PolicyStatus.ENABLED).build(),
                 PolicyEntity.builder().id(20L).status(PolicyStatus.ENABLED).build()));
@@ -156,7 +172,6 @@ class DomainChangeEventProcessorTest {
     @Test
     void process_shouldNotPropagateException_whenPolicyQueryFails() {
         DomainChangeEvent event = userEvent();
-        when(notifyCandidateResolver.resolveCandidateAppRefIds(event)).thenReturn(List.of());
         when(policyMapper.selectList(any())).thenThrow(new RuntimeException("db error"));
 
         assertThatCode(() -> processor.process(event)).doesNotThrowAnyException();

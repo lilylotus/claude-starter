@@ -249,6 +249,8 @@ class DomainChangeEventProcessorPolicyReExecutionTest {
                 .bizId(1L)
                 .operationType(OperationType.CREATE)
                 .operator("1")
+                .eventId(System.nanoTime())
+                .entityVersion(1L)
                 .occurredAt(LocalDateTime.now())
                 .build();
 
@@ -405,7 +407,12 @@ class DomainChangeEventProcessorPolicyReExecutionTest {
     }
 
     /**
-     * 构造一条 {@code USER} 数据域的领域变更事件。
+     * 构造一条 {@code USER} 数据域的领域变更事件。{@code eventId}/{@code entityVersion}
+     * 显式填充固定测试值：{@code process} 现在会先把事件写入全局变更流水表
+     * （{@code tab_app_data_change_log.event_id}/{@code entity_version} 均为 {@code NOT NULL}
+     * 列，app-sync-changelog-pull change design.md Decision 6），不填充会导致流水写入失败、
+     * 被 {@code process} 内部 catch 吞掉后跳过通知分支，虽不影响本类关注的策略重新执行分支
+     * （两者各自独立 try/catch），但会在测试输出中产生无意义的异常日志噪音。
      *
      * @param userId        用户 id
      * @param operationType 操作类型
@@ -417,6 +424,8 @@ class DomainChangeEventProcessorPolicyReExecutionTest {
                 .bizId(userId)
                 .operationType(operationType)
                 .operator("test")
+                .eventId(System.nanoTime())
+                .entityVersion(1L)
                 .occurredAt(LocalDateTime.now())
                 .build();
     }

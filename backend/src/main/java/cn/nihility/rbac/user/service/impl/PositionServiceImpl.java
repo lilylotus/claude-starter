@@ -9,6 +9,8 @@ import cn.nihility.rbac.app.sync.constant.SyncDomain;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.constant.OperationType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.org.entity.OrgEntity;
+import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.sync.event.DomainChangeEvent;
 import cn.nihility.rbac.sync.event.DomainEventPublisher;
 import cn.nihility.rbac.user.constant.PositionStatus;
@@ -46,6 +48,13 @@ public class PositionServiceImpl implements PositionService {
 
     /** 用户任职记录数据访问接口。 */
     private final UserPositionMapper userPositionMapper;
+
+    /**
+     * 组织数据访问接口，用于在任职记录所属组织变更时读取新旧组织当前的 {@code orgPath}，
+     * 作为同步事件的 {@code orgScopePathBefore}/{@code orgScopePathAfter}
+     * （app-sync-changelog-pull change design.md Decision 3）。
+     */
+    private final OrgMapper orgMapper;
 
     /** 操作日志记录组件。 */
     private final OperationLogRecorder operationLogRecorder;
@@ -153,6 +162,7 @@ public class PositionServiceImpl implements PositionService {
         UserPositionEntity entity = PositionConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(PositionStatus.ENABLED);
+        entity.setVersion(1L);
         entity.setCreateBy(operator);
         entity.setCreateTime(now);
         entity.setUpdateBy(operator);
@@ -166,6 +176,9 @@ public class PositionServiceImpl implements PositionService {
                 .bizId(entity.getId())
                 .operationType(OperationType.CREATE)
                 .operator(entity.getCreateBy())
+                .entityVersion(entity.getVersion())
+                .orgScopePathBefore(null)
+                .orgScopePathAfter(resolveOrgPath(entity.getOrgId()))
                 .occurredAt(LocalDateTime.now())
                 .build());
 
@@ -174,6 +187,11 @@ public class PositionServiceImpl implements PositionService {
 
     /**
      * {@inheritDoc}
+     * <p>
+     * 所属组织（{@code orgId}）变更时，写入前先读取旧组织当前的 {@code orgPath} 作为事件的
+     * {@code orgScopePathBefore}，写入后用新组织的 {@code orgPath} 作为
+     * {@code orgScopePathAfter}；未变更所属组织时前后路径相同（app-sync-changelog-pull
+     * change design.md Decision 3）。
      */
     @Override
     public PositionVO update(Long id, PositionUpdateRequest request) {
@@ -182,11 +200,17 @@ public class PositionServiceImpl implements PositionService {
         positionDynamicFieldSupport.validate(request, false, id);
         Map<String, Object> beforeSnapshot = positionLogSnapshotSupport.snapshot(entity);
 
+        boolean orgChanged = !Objects.equals(request.getOrgId(), entity.getOrgId());
+        String previousOrgPath = orgChanged ? resolveOrgPath(entity.getOrgId()) : null;
+
         PositionConvert.INSTANCE.updateEntity(request, entity);
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         userPositionMapper.updateById(entity);
+        userPositionMapper.incrementVersion(id);
+        entity.setVersion(entity.getVersion() == null ? 2L : entity.getVersion() + 1L);
 
+        String currentOrgPath = resolveOrgPath(entity.getOrgId());
         operationLogRecorder.recordUpdate(OperationLogResourceType.POSITION, id,
                 positionLogSnapshotSupport.targetName(entity), beforeSnapshot,
                 positionLogSnapshotSupport.snapshot(entity));
@@ -195,6 +219,9 @@ public class PositionServiceImpl implements PositionService {
                 .bizId(id)
                 .operationType(OperationType.UPDATE)
                 .operator(entity.getUpdateBy())
+                .entityVersion(entity.getVersion())
+                .orgScopePathBefore(orgChanged ? previousOrgPath : currentOrgPath)
+                .orgScopePathAfter(currentOrgPath)
                 .occurredAt(LocalDateTime.now())
                 .build());
 
@@ -224,11 +251,14 @@ public class PositionServiceImpl implements PositionService {
     public void delete(Long id) {
         UserPositionEntity entity = getExistingEntityInScope(id);
         Map<String, Object> beforeSnapshot = positionLogSnapshotSupport.snapshot(entity);
+        String deletedOrgPath = resolveOrgPath(entity.getOrgId());
 
         entity.setStatus(PositionStatus.DELETED);
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         userPositionMapper.updateById(entity);
+        userPositionMapper.incrementVersion(id);
+        entity.setVersion(entity.getVersion() == null ? 2L : entity.getVersion() + 1L);
 
         operationLogRecorder.recordDelete(OperationLogResourceType.POSITION, id,
                 positionLogSnapshotSupport.targetName(entity), beforeSnapshot);
@@ -237,6 +267,9 @@ public class PositionServiceImpl implements PositionService {
                 .bizId(id)
                 .operationType(OperationType.DELETE)
                 .operator(entity.getUpdateBy())
+                .entityVersion(entity.getVersion())
+                .orgScopePathBefore(deletedOrgPath)
+                .orgScopePathAfter(null)
                 .occurredAt(LocalDateTime.now())
                 .build());
     }
@@ -256,7 +289,10 @@ public class PositionServiceImpl implements PositionService {
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         userPositionMapper.updateById(entity);
+        userPositionMapper.incrementVersion(id);
+        entity.setVersion(entity.getVersion() == null ? 2L : entity.getVersion() + 1L);
 
+        String orgPath = resolveOrgPath(entity.getOrgId());
         operationLogRecorder.recordStatusChange(OperationLogResourceType.POSITION, id,
                 positionLogSnapshotSupport.targetName(entity), status == PositionStatus.ENABLED, beforeSnapshot,
                 positionLogSnapshotSupport.snapshot(entity));
@@ -265,9 +301,27 @@ public class PositionServiceImpl implements PositionService {
                 .bizId(id)
                 .operationType(status == PositionStatus.ENABLED ? OperationType.ENABLE : OperationType.DISABLE)
                 .operator(entity.getUpdateBy())
+                .entityVersion(entity.getVersion())
+                .orgScopePathBefore(orgPath)
+                .orgScopePathAfter(orgPath)
                 .occurredAt(LocalDateTime.now())
                 .build());
         return getById(id);
+    }
+
+    /**
+     * 按组织 id 查询其当前的 {@code orgPath}，供任职记录同步事件的
+     * {@code orgScopePathBefore}/{@code orgScopePathAfter} 使用（design.md Decision 3）。
+     *
+     * @param orgId 组织 id，可为 {@code null}
+     * @return 组织当前的 {@code orgPath}，{@code orgId} 为空或组织不存在时返回 {@code null}
+     */
+    private String resolveOrgPath(Long orgId) {
+        if (orgId == null) {
+            return null;
+        }
+        OrgEntity org = orgMapper.selectById(orgId);
+        return org != null ? org.getOrgPath() : null;
     }
 
     /**

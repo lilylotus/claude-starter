@@ -6,8 +6,8 @@ import cn.nihility.rbac.appaccess.policy.entity.PolicyEntity;
 import cn.nihility.rbac.appaccess.policy.mapper.PolicyMapper;
 import cn.nihility.rbac.appaccess.policy.service.PolicyExecutionService;
 import cn.nihility.rbac.sync.event.DomainChangeEvent;
-import cn.nihility.rbac.sync.notify.service.AppNotifyService;
-import cn.nihility.rbac.sync.notify.support.NotifyCandidateResolver;
+import cn.nihility.rbac.sync.notify.entity.AppNotifyRecordEntity;
+import cn.nihility.rbac.sync.notify.support.NotifySendCoordinator;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.util.List;
 import java.util.Set;
@@ -16,13 +16,17 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
- * 领域变更事件的真正处理逻辑："直接判定当前哪些应用是本次事件的候选应用（数据域启用+总
- * 开关开启+同步方式为通知+组织范围匹配），对每个匹配应用各自触发一次通知"，不再经过任何
- * 持久化中转（app-sync-drop-changelog change design.md Decision 6）。不依赖 Disruptor
- * API，供 {@link DomainChangeEventHandler}（Disruptor 消费者）与未来外部 MQ 消费者共同调用，
- * 切换消息载体时本类逻辑可直接复用。同时承担"组织/用户/任职变更后策略自动重新执行"这一
- * 独立副作用（close-sso-log-and-policy-gaps change design.md Decision 2），与通知候选逻辑
- * 各自独立 try/catch，互不影响。
+ * 领域变更事件的真正处理逻辑：先调用 {@link DomainChangeRecorder#record}，在一个本地数据库
+ * 事务内写入一条全局变更流水，并为全部候选应用（数据域启用+总开关开启+同步方式为通知+
+ * 组织范围匹配）创建/复用一条 {@code PENDING} 通知任务，候选解析或任一任务插入失败均整体
+ * 回滚（app-sync-changelog-pull change design.md Decision 6）；事务提交成功后，对每个新建
+ * 的任务提交一次"即时发送优化"（异步、不阻塞本方法），实际发送与状态机流转由
+ * {@link NotifySendCoordinator} 及独立的 {@code NotifyRetryScheduler} 负责，即使即时发送
+ * 优化因进程崩溃等原因没有执行，任务已是 {@code PENDING} 落库状态，调度器的到期扫描仍能
+ * 兜底捞到它。不依赖 Disruptor API，供 {@link DomainChangeEventHandler}（Disruptor 消费者）
+ * 与未来外部 MQ 消费者共同调用，切换消息载体时本类逻辑可直接复用。同时承担
+ * "组织/用户/任职变更后策略自动重新执行"这一独立副作用（close-sso-log-and-policy-gaps
+ * change design.md Decision 2），与流水/通知逻辑各自独立 try/catch，互不影响。
  */
 @Slf4j
 @Component
@@ -33,11 +37,11 @@ public class DomainChangeEventProcessor {
     private static final Set<String> POLICY_RE_EXECUTE_DATA_TYPES = Set.of(SyncDomain.ORG, SyncDomain.USER,
             SyncDomain.POSITION);
 
-    /** 通知候选应用判定组件。 */
-    private final NotifyCandidateResolver notifyCandidateResolver;
+    /** 领域变更事件的落库编排组件："流水 + 全部候选应用 PENDING 通知任务"同事务落库。 */
+    private final DomainChangeRecorder domainChangeRecorder;
 
-    /** 应用通知发送业务逻辑接口。 */
-    private final AppNotifyService appNotifyService;
+    /** 通知任务"抢占 + 发送 + 状态流转"编排组件，负责即时发送优化。 */
+    private final NotifySendCoordinator notifySendCoordinator;
 
     /** 策略规则数据访问接口，查询全部当前启用状态的策略 id。 */
     private final PolicyMapper policyMapper;
@@ -46,27 +50,31 @@ public class DomainChangeEventProcessor {
     private final PolicyExecutionService policyExecutionService;
 
     /**
-     * 处理一条领域变更事件：判定当前匹配的候选应用列表，逐个应用触发"该应用当前是否为
-     * NOTIFY 模式"的通知判断，单个应用通知异常不影响其余应用（沿用既有 catch 风格）；随后
-     * 独立触发"组织/用户/任职变更后策略自动重新执行"副作用。两段逻辑各自整体 catch 所有
-     * 异常，避免消费者线程因单条事件处理异常而中断，导致 RingBuffer 阻塞、后续事件无法消费。
+     * 处理一条领域变更事件：先落库（流水 + 候选应用 PENDING 通知任务同事务），落库失败时
+     * 记录 ERROR 日志并直接跳过通知分支；落库成功后，对每个新建任务提交一次即时发送优化，
+     * 单个任务提交异常不影响其余任务（沿用既有 catch 风格）；随后独立触发
+     * "组织/用户/任职变更后策略自动重新执行"副作用，不卷入落库的事务。
      *
      * @param event 领域变更事件
      */
     public void process(DomainChangeEvent event) {
+        DomainChangeRecordResult result = null;
         try {
-            List<Long> matchedAppRefIds = notifyCandidateResolver.resolveCandidateAppRefIds(event);
-            for (Long appRefId : matchedAppRefIds) {
+            result = domainChangeRecorder.record(event);
+        } catch (Exception e) {
+            log.error("写入全局变更流水与候选应用通知任务失败，跳过本次事件的通知分支：dataType={}, bizId={}, operationType={}",
+                    event.getDataType(), event.getBizId(), event.getOperationType(), e);
+        }
+
+        if (result != null) {
+            for (AppNotifyRecordEntity task : result.tasks()) {
                 try {
-                    appNotifyService.notifyIfConfigured(event, appRefId);
+                    notifySendCoordinator.submitImmediateSend(task);
                 } catch (Exception e) {
-                    log.warn("向应用[{}]触发变更通知失败，跳过并继续处理其余应用：dataType={}, bizId={}", appRefId,
-                            event.getDataType(), event.getBizId(), e);
+                    log.warn("提交应用[{}]变更通知即时发送任务失败，等待调度器下一轮到期扫描兜底：taskId={}, dataType={}, bizId={}",
+                            task.getAppRefId(), task.getId(), event.getDataType(), event.getBizId(), e);
                 }
             }
-        } catch (Exception e) {
-            log.error("处理领域变更事件失败：dataType={}, bizId={}, operationType={}",
-                    event.getDataType(), event.getBizId(), event.getOperationType(), e);
         }
 
         try {

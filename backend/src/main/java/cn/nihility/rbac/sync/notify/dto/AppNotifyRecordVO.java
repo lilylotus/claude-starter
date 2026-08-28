@@ -54,4 +54,19 @@ public class AppNotifyRecordVO {
     /** 通知发起时间。 */
     @Schema(description = "通知发起时间")
     private LocalDateTime createTime;
+
+    /**
+     * 任务状态：PENDING/PROCESSING/RETRY/SUCCESS/DEAD（app-sync-changelog-pull change
+     * design.md Decision 6）。仅 {@code DEAD} 状态的记录可调用手动重推接口。
+     */
+    @Schema(description = "任务状态：PENDING/PROCESSING/RETRY/SUCCESS/DEAD，仅 DEAD 可手动重推")
+    private String taskStatus;
+
+    /** 已失败尝试次数。 */
+    @Schema(description = "已失败尝试次数")
+    private Integer retryCount;
+
+    /** 下次允许重试时间，{@code taskStatus} 不是 {@code RETRY} 时通常为空。 */
+    @Schema(description = "下次允许重试时间")
+    private LocalDateTime nextRetryTime;
 }

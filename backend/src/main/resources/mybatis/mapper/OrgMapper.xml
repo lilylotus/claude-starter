@@ -8,6 +8,10 @@
      与其他状态常量类保持一致，不再单独传参。 -->
 <mapper namespace="cn.nihility.rbac.org.mapper.OrgMapper">
 
+    <!-- 级联更新受影响组织（自身 + 全部子孙）的 org_path/org_parent_path，同时把 version
+         原子递增 1：子孙组织"路径变了但没人直接操作它"也必须体现在版本号上，否则客户端
+         会因为版本号未变化而忽略这次路径迁移（app-sync-changelog-pull change design.md
+         Decision 2）。 -->
     <update id="cascadeUpdateOrgPath">
         UPDATE tab_org
         SET org_path = CONCAT(#{newPrefix}, SUBSTRING(org_path, CHAR_LENGTH(#{oldPrefix}) + 1)),
@@ -19,12 +23,23 @@
                     CHAR_LENGTH(#{oldPrefix}) + 1))) - LOCATE('/', REVERSE(CONCAT(#{newPrefix},
                     SUBSTRING(org_path, CHAR_LENGTH(#{oldPrefix}) + 1)))))
             END,
+            version = version + 1,
             update_by = #{updateBy},
             update_time = #{updateTime}
         WHERE org_path = #{oldPrefix}
            OR (LEFT(org_path, CHAR_LENGTH(#{oldPrefix})) = #{oldPrefix}
                AND SUBSTRING(org_path, CHAR_LENGTH(#{oldPrefix}) + 1, 1) = '/')
     </update>
+
+    <!-- 按边界安全的路径前缀查询自身与全部子孙组织当前的 id/路径/版本，供 OrgServiceImpl.update
+         在级联更新前后各调用一次，采集受影响组织的旧/新路径与版本快照（design.md Decision 2）。 -->
+    <select id="selectPathAndVersionByPrefix" resultType="cn.nihility.rbac.org.dto.OrgPathVersionRow">
+        SELECT id, org_path, version
+        FROM tab_org
+        WHERE org_path = #{prefix}
+           OR (LEFT(org_path, CHAR_LENGTH(#{prefix})) = #{prefix}
+               AND SUBSTRING(org_path, CHAR_LENGTH(#{prefix}) + 1, 1) = '/')
+    </select>
 
     <update id="cascadeUpdateOrgNamePath">
         UPDATE tab_org
@@ -78,6 +93,24 @@
         </where>
         ORDER BY update_time ASC, id ASC
         LIMIT #{offset}, #{limit}
+    </select>
+
+    <!-- 对账摘要接口游标式批量查询：按 id 升序、id > lastId 翻页（app-sync-changelog-pull
+         change design.md Decision 10），不做 updateTime/ids/codes 过滤。 -->
+    <select id="selectDigestBatch" resultType="cn.nihility.rbac.org.entity.OrgEntity">
+        SELECT * FROM tab_org
+        <where>
+            <if test="lastId != null">AND id &gt; #{lastId}</if>
+            <if test="allowedOrgIds != null">
+                <if test="allowedOrgIds.isEmpty()">AND id = -1</if>
+                <if test="!allowedOrgIds.isEmpty()">
+                    AND id IN
+                    <foreach collection="allowedOrgIds" item="orgId" open="(" separator="," close=")">#{orgId}</foreach>
+                </if>
+            </if>
+        </where>
+        ORDER BY id ASC
+        LIMIT #{batchSize}
     </select>
 
 </mapper>

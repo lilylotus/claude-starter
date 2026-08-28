@@ -17,4 +17,7 @@ public class SyncProperties {
 
     /** Disruptor 环形缓冲区大小，必须是 2 的幂，默认 1024。 */
     private int ringBufferSize = 1024;
+
+    /** 当前实例的雪花 worker id，范围 0 到 1023，多实例部署时必须唯一。 */
+    private long workerId = 0;
 }

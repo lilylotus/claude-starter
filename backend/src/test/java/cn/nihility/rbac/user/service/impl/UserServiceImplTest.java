@@ -24,7 +24,9 @@ import cn.nihility.rbac.formfield.dto.FormFieldDefinitionVO;
 import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
 import cn.nihility.rbac.formfield.support.FormFieldSnapshotSupport;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.org.entity.OrgEntity;
 import cn.nihility.rbac.org.mapper.OrgMapper;
+import cn.nihility.rbac.sync.event.DomainChangeEvent;
 import cn.nihility.rbac.sync.event.DomainEventPublisher;
 import cn.nihility.rbac.user.constant.PositionStatus;
 import cn.nihility.rbac.user.constant.UserStatus;
@@ -318,11 +320,15 @@ class UserServiceImplTest {
                 .updateBy("admin").updateTime(LocalDateTime.now())
                 .build();
         UserPositionEntity removed = UserPositionEntity.builder()
-                .id(11L).userId(1L).orgId(101L).positionType("part_time").showOrder(0)
+                .id(11L).userId(1L).orgId(101L).positionType("part_time").showOrder(0).version(4L)
                 .createBy("admin").createTime(LocalDateTime.now())
                 .updateBy("admin").updateTime(LocalDateTime.now())
                 .build();
         when(userPositionMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(kept, removed));
+        when(orgMapper.selectById(101L)).thenReturn(OrgEntity.builder().id(101L).orgPath("1/101").build());
+        // PositionLogSnapshotSupport.snapshot 对保留的记录也会回查一次所属组织（id=100）
+        // 用于日志快照展示名；此处不关心该值，只需避免 Mockito 严格打桩报参数不匹配。
+        lenient().when(orgMapper.selectById(100L)).thenReturn(null);
 
         UserPositionRequest keptRequest = new UserPositionRequest();
         keptRequest.setId(10L);
@@ -340,6 +346,62 @@ class UserServiceImplTest {
         assertThat(captor.getValue()).containsExactly(11L);
         verify(userPositionMapper, never()).insert(any(UserPositionEntity.class));
         verify(operationLogRecorder).recordDelete(eq("position"), eq(11L), any(), any(Map.class));
+
+        // 物理删除前必须采集所属组织的当前路径与"旧版本 + 1"的最终 tombstone 版本
+        // （app-sync-changelog-pull change design.md Decision 3/5，tasks.md 2.5）。
+        ArgumentCaptor<DomainChangeEvent> eventCaptor = ArgumentCaptor.forClass(DomainChangeEvent.class);
+        verify(domainEventPublisher, org.mockito.Mockito.atLeastOnce()).publish(eventCaptor.capture());
+        DomainChangeEvent tombstoneEvent = eventCaptor.getAllValues().stream()
+                .filter(event -> cn.nihility.rbac.app.sync.constant.SyncDomain.POSITION.equals(event.getDataType())
+                        && Long.valueOf(11L).equals(event.getBizId()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(tombstoneEvent.getOperationType())
+                .isEqualTo(cn.nihility.rbac.operationlog.constant.OperationType.DELETE);
+        assertThat(tombstoneEvent.getOrgScopePathBefore()).isEqualTo("1/101");
+        assertThat(tombstoneEvent.getOrgScopePathAfter()).isNull();
+        assertThat(tombstoneEvent.getEntityVersion()).isEqualTo(5L);
+    }
+
+    /**
+     * 更新用户时，内嵌任职子表单中某条既有记录的所属组织变更，应发布携带正确前后路径与
+     * 显式递增后版本的 POSITION UPDATE 事件（app-sync-changelog-pull change design.md
+     * Decision 3，tasks.md 2.4）。
+     */
+    @Test
+    void update_shouldPublishEventWithOrgPathSnapshot_whenEmbeddedPositionOrgChanged() {
+        UserEntity entity = buildUserEntity(1L, "张三", "U001", UserStatus.ENABLED);
+        when(userMapper.selectById(1L)).thenReturn(entity);
+        when(userMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+
+        UserPositionEntity existingPosition = UserPositionEntity.builder()
+                .id(10L).userId(1L).orgId(100L).positionType("primary").showOrder(0).version(2L)
+                .createBy("admin").createTime(LocalDateTime.now())
+                .updateBy("admin").updateTime(LocalDateTime.now())
+                .build();
+        when(userPositionMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(existingPosition));
+        when(orgMapper.selectById(100L)).thenReturn(OrgEntity.builder().id(100L).orgPath("1/100").build());
+        when(orgMapper.selectById(200L)).thenReturn(OrgEntity.builder().id(200L).orgPath("1/200").build());
+
+        UserPositionRequest positionRequest = new UserPositionRequest();
+        positionRequest.setId(10L);
+        positionRequest.setOrgId(200L);
+        positionRequest.setPositionType("primary");
+        positionRequest.setShowOrder(0);
+
+        UserUpdateRequest request = buildUpdateRequest("张三", "U001", null, List.of(positionRequest));
+
+        userService.update(1L, request);
+
+        ArgumentCaptor<DomainChangeEvent> eventCaptor = ArgumentCaptor.forClass(DomainChangeEvent.class);
+        verify(domainEventPublisher, org.mockito.Mockito.atLeastOnce()).publish(eventCaptor.capture());
+        DomainChangeEvent positionEvent = eventCaptor.getAllValues().stream()
+                .filter(event -> cn.nihility.rbac.app.sync.constant.SyncDomain.POSITION.equals(event.getDataType()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(positionEvent.getOrgScopePathBefore()).isEqualTo("1/100");
+        assertThat(positionEvent.getOrgScopePathAfter()).isEqualTo("1/200");
+        assertThat(positionEvent.getEntityVersion()).isEqualTo(3L);
     }
 
     /**

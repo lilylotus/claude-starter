@@ -25,4 +25,17 @@
         ORDER BY create_time DESC, id DESC
     </select>
 
+    <!-- 状态机到期任务扫描（app-sync-changelog-pull change design.md Decision 6）：
+         PENDING/RETRY 状态且到期，或 PROCESSING 状态且租约已超时，按 id 升序取前 limit 条，
+         具体的原子抢占（UPDATE ... WHERE task_status = 期望值）由 AppNotifyTaskServiceImpl
+         另行执行，本查询本身不加锁、不修改数据。 -->
+    <select id="selectDueTasks" resultType="cn.nihility.rbac.sync.notify.entity.AppNotifyRecordEntity">
+        SELECT *
+        FROM tab_app_notify_record
+        WHERE (task_status IN ('PENDING', 'RETRY') AND (next_retry_time IS NULL OR next_retry_time &lt;= #{now}))
+           OR (task_status = 'PROCESSING' AND lease_until IS NOT NULL AND lease_until &lt; #{now})
+        ORDER BY id ASC
+        LIMIT #{limit}
+    </select>
+
 </mapper>

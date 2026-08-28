@@ -12,13 +12,12 @@ import cn.nihility.rbac.sync.openapi.dto.SyncPullRequest;
 import cn.nihility.rbac.sync.openapi.service.SyncPullService;
 import cn.nihility.rbac.sync.pull.record.service.AppPullRecordService;
 import cn.nihility.rbac.sync.scope.AppSyncOrgScopeResolver;
-import cn.nihility.rbac.sync.transform.FieldMappingTransformer;
 import cn.nihility.rbac.sync.transform.SyncBizPageQuery;
 import cn.nihility.rbac.sync.transform.SyncBizPageQueryResolver;
 import cn.nihility.rbac.sync.transform.SyncBizPageRow;
+import cn.nihility.rbac.sync.transform.SyncRecordAssembler;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.time.LocalDateTime;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -53,8 +52,8 @@ public class SyncPullServiceImpl implements SyncPullService {
     /** 业务表当前数据分页查询解析器。 */
     private final SyncBizPageQueryResolver syncBizPageQueryResolver;
 
-    /** 字段映射转换执行器。 */
-    private final FieldMappingTransformer fieldMappingTransformer;
+    /** 记录组装器，与对账摘要接口共用同一份"字段映射后的完整输出记录"组装逻辑。 */
+    private final SyncRecordAssembler syncRecordAssembler;
 
     /** 拉取日志写入业务逻辑接口，记录外部应用调用拉取接口的请求，仅用于问题排查/展示。 */
     private final AppPullRecordService appPullRecordService;
@@ -96,7 +95,7 @@ public class SyncPullServiceImpl implements SyncPullService {
                     .allowedOrgIds(resolveAllowedOrgIds(appRefId, dataType))
                     .build();
             List<SyncBizPageRow> rows = syncBizPageQueryResolver.query(dataType, query);
-            records = rows.stream().map(row -> toRecord(appRefId, dataType, row)).toList();
+            records = rows.stream().map(row -> syncRecordAssembler.assemble(appRefId, dataType, row)).toList();
             if (!rows.isEmpty()) {
                 latestUpdateTime = rows.get(rows.size() - 1).getUpdateTime();
             }
@@ -194,44 +193,6 @@ public class SyncPullServiceImpl implements SyncPullService {
             return requestedPageSize;
         }
         return configuredPageSize != null && configuredPageSize > 0 ? configuredPageSize : DEFAULT_PAGE_SIZE;
-    }
-
-    /**
-     * 把一条业务表查询结果行转换为拉取接口 {@code records} 里的一条元素：先放入按该应用该
-     * 数据域字段映射配置转换后的业务字段，再用 {@code bizId}/{@code bizCode}/
-     * {@code bizStatus}/{@code updateTime} 四个通用固定键覆盖式写入，保证响应结构稳定可预期
-     * （app-sync-drop-changelog change design.md Decision 2 修订版）。其中
-     * {@code bizStatus} 直接取自业务表原始 {@code status} 字段，不经过字段映射转换，
-     * 保证该数据域即使配置了字段映射（转换结果可能不包含原始 {@code status} 字段）也始终能
-     * 稳定拿到记录当前状态（2000 启用/3000 停用/-1000 已删除），不受字段映射配置影响
-     * （app-sync-drop-changelog change design.md Decision 1）。四个通用固定键之后，再按
-     * 领域特定固定键各自的值是否非空条件写入 {@code userCode}/{@code orgCode}（仅
-     * POSITION）/{@code dictTypeCode}（仅 DICT）——与四个通用固定键不同，这些键在值为空的
-     * 数据域里不出现（键本身不存在，不是"键存在值为 null"），同样遵循不被字段映射结果覆盖的
-     * 规则（design.md Decision 7/8，五次实现后修正）。
-     *
-     * @param appRefId 应用 id
-     * @param dataType 数据类型
-     * @param row      业务表查询结果行
-     * @return 合并后的记录字段 Map
-     */
-    private Map<String, Object> toRecord(Long appRefId, String dataType, SyncBizPageRow row) {
-        Map<String, Object> data = fieldMappingTransformer.transform(appRefId, dataType, row.getData());
-        Map<String, Object> record = new LinkedHashMap<>(data);
-        record.put("bizId", row.getId());
-        record.put("bizCode", row.getCode());
-        record.put("bizStatus", row.getStatus());
-        record.put("updateTime", row.getUpdateTime());
-        if (row.getUserCode() != null) {
-            record.put("userCode", row.getUserCode());
-        }
-        if (row.getOrgCode() != null) {
-            record.put("orgCode", row.getOrgCode());
-        }
-        if (row.getDictTypeCode() != null) {
-            record.put("dictTypeCode", row.getDictTypeCode());
-        }
-        return record;
     }
 
     /**

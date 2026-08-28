@@ -1,55 +1,43 @@
 package cn.nihility.rbac.sync.notify.service.impl;
 
 import cn.nihility.rbac.app.config.AppSecretProperties;
-import cn.nihility.rbac.app.constant.SyncMode;
 import cn.nihility.rbac.app.entity.AppConfigEntity;
 import cn.nihility.rbac.app.mapper.AppConfigMapper;
 import cn.nihility.rbac.common.util.HttpClientUtils;
-import cn.nihility.rbac.common.util.JacksonUtils;
 import cn.nihility.rbac.common.util.Sm4JdkUtils;
-import cn.nihility.rbac.sync.constant.SyncOperationType;
-import cn.nihility.rbac.sync.event.DomainChangeEvent;
-import cn.nihility.rbac.sync.notify.constant.NotifyStatus;
-import cn.nihility.rbac.sync.notify.dto.NotifyPayload;
+import cn.nihility.rbac.sync.notify.dto.NotifyAttemptOutcome;
 import cn.nihility.rbac.sync.notify.entity.AppNotifyRecordEntity;
-import cn.nihility.rbac.sync.notify.mapper.AppNotifyRecordMapper;
 import cn.nihility.rbac.sync.notify.service.AppNotifyService;
 import cn.nihility.rbac.sync.sign.NotifySignatureAppender;
-import cn.nihility.rbac.sync.transform.BizSnapshotResolver;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 
 /**
- * 应用通知发送业务逻辑实现。
+ * 应用通知实际发送业务逻辑实现：只负责发起一次 HTTP 请求并把结果归类为
+ * 成功/可重试失败/不可重试失败，不做状态机流转（由 {@code NotifySendCoordinator} 负责，
+ * app-sync-changelog-pull change design.md Decision 6）。
  */
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AppNotifyServiceImpl implements AppNotifyService {
 
-    /** 通知请求响应超时（毫秒），比全局默认更短，避免拖慢 Disruptor 消费者线程太久（design.md Risks）。 */
+    /** 通知请求响应超时（毫秒），比全局默认更短，避免拖慢发送线程池太久（design.md Risks）。 */
     private static final long NOTIFY_RESPONSE_TIMEOUT_MILLIS = 3000L;
-
-    /** 通知/落库场景下审计字段的固定操作人标识：变更事件消费发生在后台线程，无登录用户上下文。 */
-    private static final String SYSTEM_OPERATOR = "system";
 
     /** {@code tab_app_notify_record.error_msg} 列的长度上限。 */
     private static final int ERROR_MSG_MAX_LENGTH = 500;
 
-    /** {@code tab_app_notify_record.notify_url} 列的长度上限。 */
-    private static final int NOTIFY_URL_MAX_LENGTH = 255;
+    /** HTTP 状态码 408（请求超时），归类为可重试。 */
+    private static final int HTTP_REQUEST_TIMEOUT = 408;
 
-    /** 应用对外接口凭证配置数据访问接口，按 {@code appRefId} 查询目标应用当前的同步方式与通知配置。 */
+    /** HTTP 状态码 429（请求过多），归类为可重试。 */
+    private static final int HTTP_TOO_MANY_REQUESTS = 429;
+
+    /** 应用对外接口凭证配置数据访问接口，按 {@code appRefId} 查询目标应用当前的签名配置。 */
     private final AppConfigMapper appConfigMapper;
-
-    /** 应用通知发送记录数据访问接口。 */
-    private final AppNotifyRecordMapper appNotifyRecordMapper;
 
     /** 出站通知请求签名参数构造工具。 */
     private final NotifySignatureAppender notifySignatureAppender;
@@ -57,126 +45,51 @@ public class AppNotifyServiceImpl implements AppNotifyService {
     /** 应用对外接口凭证相关配置，提供 SM4 解密主密钥。 */
     private final AppSecretProperties appSecretProperties;
 
-    /** 业务对象当前快照解析器，用于现查被变更对象的业务编码字段（{@code bizCode}）。 */
-    private final BizSnapshotResolver bizSnapshotResolver;
-
     /**
      * {@inheritDoc}
      */
     @Override
-    public void notifyIfConfigured(DomainChangeEvent event, Long appRefId) {
-        AppConfigEntity target = appConfigMapper.selectOne(new LambdaQueryWrapper<AppConfigEntity>()
-                .eq(AppConfigEntity::getAppRefId, appRefId));
-        if (target == null || !SyncMode.NOTIFY.equals(target.getSyncMode())) {
-            return;
+    public NotifyAttemptOutcome sendOnce(AppNotifyRecordEntity task) {
+        AppConfigEntity target = appConfigMapper.selectOne(
+                new LambdaQueryWrapper<AppConfigEntity>().eq(AppConfigEntity::getAppRefId, task.getAppRefId()));
+        if (target == null) {
+            // 目标应用的对外接口配置在任务落库之后被删除，属于不可重试场景。
+            return NotifyAttemptOutcome.dead(null, "目标应用配置不存在或已被删除");
         }
 
-        try {
-            notifyOneApp(event, target);
-        } catch (Exception e) {
-            // 单个应用通知异常不应影响处理领域变更事件的调用方（app-sync-notify-pull
-            // spec"一个应用通知失败不影响其他应用"场景），此处兜底捕获，notifyOneApp 内部
-            // 已经把网络异常转换为失败记录，这里只是防御性兜底，避免遗漏的运行时异常向外传播。
-            log.warn("向应用[{}]发送变更通知时发生未预期异常", target.getAppId(), e);
-        }
-    }
-
-    /**
-     * 向单个应用发起一次通知请求，并把结果写入 {@code tab_app_notify_record}。
-     *
-     * @param event  领域变更事件
-     * @param target 目标应用对外接口凭证配置
-     */
-    private void notifyOneApp(DomainChangeEvent event, AppConfigEntity target) {
-        String bizCode = bizSnapshotResolver.resolveBizCode(event.getDataType(), event.getBizId());
-        NotifyPayload payload = NotifyPayload.builder()
-                .dataType(event.getDataType())
-                .operationType(SyncOperationType.code(event.getOperationType()))
-                .bizId(event.getBizId())
-                .bizCode(bizCode)
-                .occurredAt(event.getOccurredAt())
-                .extra(parseNotifyParams(target.getNotifyParams()))
-                .build();
-        String requestBody = JacksonUtils.toJson(payload);
-
-        // 发起请求前读取一次回调地址并固定下来，作为本次通知记录的地址快照，避免管理员在通知
-        // 发起后改了配置值导致历史记录被误导（add-app-sync-notify-pull-logs change design.md
-        // Decision 1）。
-        String notifyUrl = target.getNotifyUrl();
-        Integer httpStatus = null;
-        String errorMsg = null;
-        int notifyStatus;
         try {
             String secretKey = Sm4JdkUtils.decrypt(target.getSecretKey(), appSecretProperties.getSm4Key());
             Map<String, String> headers = notifySignatureAppender.buildSignatureHeaders(
                     Boolean.TRUE.equals(target.getNeedSign()), target.getSignAlgorithm(), target.getAccessKey(),
-                    secretKey, requestBody);
+                    secretKey, task.getRequestBody());
 
-            HttpClientUtils.HttpResult result = HttpClientUtils.postBinary(notifyUrl, headers,
-                    requestBody.getBytes(StandardCharsets.UTF_8), "application/json;charset=UTF-8",
+            HttpClientUtils.HttpResult result = HttpClientUtils.postBinary(task.getNotifyUrl(), headers,
+                    task.getRequestBody().getBytes(StandardCharsets.UTF_8), "application/json;charset=UTF-8",
                     NOTIFY_RESPONSE_TIMEOUT_MILLIS);
 
-            httpStatus = result.getStatusCode();
-            notifyStatus = httpStatus >= 200 && httpStatus < 300 ? NotifyStatus.SUCCESS : NotifyStatus.FAILURE;
-            if (notifyStatus == NotifyStatus.FAILURE) {
-                errorMsg = truncate("通知回调返回非成功状态码：" + httpStatus, ERROR_MSG_MAX_LENGTH);
+            int httpStatus = result.getStatusCode();
+            if (httpStatus >= 200 && httpStatus < 300) {
+                return NotifyAttemptOutcome.success(httpStatus);
             }
+            String errorMsg = truncate("通知回调返回非成功状态码：" + httpStatus, ERROR_MSG_MAX_LENGTH);
+            return isRetryableHttpStatus(httpStatus) ? NotifyAttemptOutcome.retry(httpStatus, errorMsg)
+                    : NotifyAttemptOutcome.dead(httpStatus, errorMsg);
         } catch (Exception e) {
-            notifyStatus = NotifyStatus.FAILURE;
-            errorMsg = truncate(e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName(),
+            // 网络异常（连接失败、超时等）一律归类为可重试（design.md Decision 6）。
+            String errorMsg = truncate(e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName(),
                     ERROR_MSG_MAX_LENGTH);
+            return NotifyAttemptOutcome.retry(null, errorMsg);
         }
-
-        saveNotifyRecord(event, target.getAppRefId(), notifyStatus, httpStatus, errorMsg, notifyUrl);
     }
 
     /**
-     * 把通知发送结果写入 {@code tab_app_notify_record}。落库发生在实际回调之后，
-     * 本方法内的任何异常都只会被调用方 {@code notifyIfConfigured} 的兜底 catch 吞掉，
-     * 不影响本次通知请求已经发起、已经拿到结果这一事实（add-app-sync-notify-pull-logs
-     * change spec"日志写入失败不影响通知主流程"场景）。
+     * 判断一个非 2xx 的 HTTP 状态码是否属于可重试类型：408/429/5xx 可重试，其他 4xx 不可重试。
      *
-     * @param event        触发本次通知的领域变更事件，用于回填 {@code dataType}/{@code bizId}
-     * @param appRefId     应用 id
-     * @param notifyStatus 通知状态
-     * @param httpStatus   外部接口返回的 HTTP 状态码，失败且未收到响应时为 {@code null}
-     * @param errorMsg     失败原因摘要，成功时为 {@code null}
-     * @param notifyUrl    本次回调实际使用的地址快照
+     * @param httpStatus 外部接口返回的 HTTP 状态码
+     * @return 是否可重试
      */
-    private void saveNotifyRecord(DomainChangeEvent event, Long appRefId, int notifyStatus, Integer httpStatus,
-            String errorMsg, String notifyUrl) {
-        LocalDateTime now = LocalDateTime.now();
-        AppNotifyRecordEntity record = AppNotifyRecordEntity.builder()
-                .appRefId(appRefId)
-                .dataType(event.getDataType())
-                .bizId(event.getBizId())
-                .notifyStatus(notifyStatus)
-                .httpStatus(httpStatus)
-                .errorMsg(errorMsg)
-                .notifyUrl(truncate(notifyUrl, NOTIFY_URL_MAX_LENGTH))
-                .createBy(SYSTEM_OPERATOR)
-                .createTime(now)
-                .updateBy(SYSTEM_OPERATOR)
-                .updateTime(now)
-                .build();
-        appNotifyRecordMapper.insert(record);
-    }
-
-    /**
-     * 把应用配置的通知自定义参数原始 JSON 文本解析为 {@code Map<String,String>}。
-     *
-     * @param notifyParams 原始 JSON 文本，可能为空
-     * @return 解析后的自定义参数，解析失败或为空时返回空 Map
-     */
-    private Map<String, String> parseNotifyParams(String notifyParams) {
-        if (!StringUtils.hasText(notifyParams)) {
-            return Map.of();
-        }
-        try {
-            return JacksonUtils.toObj(notifyParams, JacksonUtils.MAP_STRING_TYPE_REFERENCE);
-        } catch (Exception e) {
-            return Map.of();
-        }
+    private boolean isRetryableHttpStatus(int httpStatus) {
+        return httpStatus == HTTP_REQUEST_TIMEOUT || httpStatus == HTTP_TOO_MANY_REQUESTS || httpStatus >= 500;
     }
 
     /**

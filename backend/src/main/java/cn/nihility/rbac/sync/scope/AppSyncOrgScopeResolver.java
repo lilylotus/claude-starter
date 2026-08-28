@@ -3,15 +3,22 @@ package cn.nihility.rbac.sync.scope;
 import cn.nihility.rbac.app.sync.constant.SyncDomain;
 import cn.nihility.rbac.app.sync.entity.AppSyncOrgScopeEntity;
 import cn.nihility.rbac.app.sync.mapper.AppSyncOrgScopeMapper;
+import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.org.entity.OrgEntity;
+import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.org.support.OrgDescendantExpander;
 import cn.nihility.rbac.user.constant.PositionStatus;
 import cn.nihility.rbac.user.entity.UserPositionEntity;
 import cn.nihility.rbac.user.mapper.UserPositionMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -38,6 +45,17 @@ public class AppSyncOrgScopeResolver {
 
     /** 用户任职记录数据访问接口，供 {@link #isUserWithinScope} 判断用户的组织归属。 */
     private final UserPositionMapper userPositionMapper;
+
+    /** 组织数据访问接口，供 {@link #resolveScopePrefixes} 查询组织当前的 {@code orgPath}。 */
+    private final OrgMapper orgMapper;
+
+    /**
+     * {@code orgPath} 合法字符白名单：仅允许数字与 {@code /} 分隔符，拒绝 {@code %}/{@code _}
+     * 等 SQL {@code LIKE} 通配符，防止相邻编码前缀越权命中（app-sync-changelog-pull change
+     * design.md Decision 4）。空字符串（顶级组织不应出现，但防御性放行，等值匹配零风险）也
+     * 视为合法。
+     */
+    private static final Pattern ORG_PATH_PATTERN = Pattern.compile("^[0-9/]*$");
 
     /**
      * 解析指定应用某个数据域配置的允许组织 id 集合。
@@ -109,5 +127,92 @@ public class AppSyncOrgScopeResolver {
                         .eq(UserPositionEntity::getUserId, userId)
                         .ne(UserPositionEntity::getStatus, PositionStatus.DELETED));
         return positions.stream().anyMatch(position -> allowed.contains(position.getOrgId()));
+    }
+
+    /**
+     * 批量校验一批候选用户 id 是否落在指定应用 {@code USER} 数据域配置的允许组织范围内，
+     * 一次 {@code IN} 查询完成，避免逐用户单独查询任职记录产生 N+1（app-sync-changelog-pull
+     * change design.md Decision 4/Risks——"USER 范围过滤需要额外查询任职"，用批量查询规避
+     * 单请求耗时失控）。语义与 {@link #isUserWithinScope} 单用户版本一致："任一未删除任职
+     * 落在允许范围内即视为命中"。
+     *
+     * @param appRefId          应用 id（{@code tab_app.id}）
+     * @param candidateUserIds  候选用户 id 集合，可为空集合（此时直接返回空集合，不触发查询）
+     * @return 候选集合中落在允许组织范围内的用户 id 子集；{@code USER} 数据域不受限制时原样
+     *         返回候选集合本身
+     */
+    public Set<Long> filterUsersWithinScope(Long appRefId, Set<Long> candidateUserIds) {
+        if (candidateUserIds == null || candidateUserIds.isEmpty()) {
+            return Set.of();
+        }
+        Optional<Set<Long>> allowedOrgIds = resolveAllowedOrgIds(appRefId, SyncDomain.USER);
+        if (allowedOrgIds.isEmpty()) {
+            return candidateUserIds;
+        }
+
+        Set<Long> allowed = allowedOrgIds.get();
+        List<UserPositionEntity> positions = userPositionMapper.selectList(
+                new LambdaQueryWrapper<UserPositionEntity>()
+                        .in(UserPositionEntity::getUserId, candidateUserIds)
+                        .ne(UserPositionEntity::getStatus, PositionStatus.DELETED));
+        return positions.stream().filter(position -> allowed.contains(position.getOrgId()))
+                .map(UserPositionEntity::getUserId).collect(Collectors.toSet());
+    }
+
+    /**
+     * 解析指定应用某个数据域配置的"原始范围前缀"列表：直接查询 {@code tab_app_sync_org_scope}
+     * 原始行，逐行解析每个 {@code orgId} 当前的 {@code orgPath}（app-sync-changelog-pull
+     * change design.md Decision 4）。与 {@link #resolveAllowedOrgIds} 不同，本方法不展开
+     * {@code include_children} 子孙，保留原始路径前缀与是否包含子孙的语义，供调用方在 SQL
+     * 层拼装边界安全的路径前缀过滤条件。
+     *
+     * @param appRefId   应用 id（{@code tab_app.id}）
+     * @param syncDomain 数据域，应为 {@code SyncDomain.ORG_SCOPE_DOMAINS} 三者之一（仅 ORG/
+     *                   POSITION 两个数据域实际会调用本方法，USER 数据域不适用范围前缀过滤，
+     *                   见 design.md Decision 4）
+     * @return 空列表表示不受限制（该应用该数据域未配置任何组织范围行）；非空列表为原始范围
+     *         前缀，组织已被物理删除、查不到 {@code orgPath} 的配置行会被静默跳过（防御性
+     *         写法，正常情况下组织只做逻辑删除，物理删除极为罕见）
+     * @throws BusinessException 当查到的 {@code orgPath} 含有 {@code %}/{@code _} 等
+     *                            SQL {@code LIKE} 通配字符时抛出，防止相邻编码前缀越权命中
+     *                            （防御性校验，正常路径下 {@code orgPath} 由服务端统一生成，
+     *                            恒为数字与 {@code /} 组合，不应触发）
+     */
+    public List<ScopePrefix> resolveScopePrefixes(Long appRefId, String syncDomain) {
+        List<AppSyncOrgScopeEntity> scopes = appSyncOrgScopeMapper.selectList(
+                new LambdaQueryWrapper<AppSyncOrgScopeEntity>()
+                        .eq(AppSyncOrgScopeEntity::getAppRefId, appRefId)
+                        .eq(AppSyncOrgScopeEntity::getSyncDomain, syncDomain));
+        if (scopes == null || scopes.isEmpty()) {
+            return List.of();
+        }
+
+        Set<Long> orgIds = scopes.stream().map(AppSyncOrgScopeEntity::getOrgId).collect(Collectors.toSet());
+        Map<Long, String> orgPathById = orgMapper.selectByIds(orgIds).stream()
+                .collect(Collectors.toMap(OrgEntity::getId, OrgEntity::getOrgPath, (a, b) -> a));
+
+        List<ScopePrefix> prefixes = new ArrayList<>();
+        for (AppSyncOrgScopeEntity scope : scopes) {
+            String orgPath = orgPathById.get(scope.getOrgId());
+            if (orgPath == null) {
+                continue;
+            }
+            assertSafeOrgPath(orgPath);
+            prefixes.add(new ScopePrefix(orgPath, Boolean.TRUE.equals(scope.getIncludeChildren())));
+        }
+        return prefixes;
+    }
+
+    /**
+     * 防御性校验 {@code orgPath} 不包含 SQL {@code LIKE} 通配字符（{@code %}/{@code _}），
+     * 只允许数字与 {@code /} 分隔符（app-sync-changelog-pull change design.md Decision 4）。
+     *
+     * @param orgPath 待校验的组织路径
+     * @throws BusinessException 校验不通过时抛出
+     */
+    private void assertSafeOrgPath(String orgPath) {
+        if (!ORG_PATH_PATTERN.matcher(orgPath).matches()) {
+            throw new BusinessException("组织路径包含非法字符，拒绝用于范围查询：" + orgPath);
+        }
     }
 }

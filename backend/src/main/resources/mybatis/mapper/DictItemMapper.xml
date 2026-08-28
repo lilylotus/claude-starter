@@ -32,4 +32,16 @@
         LIMIT #{offset}, #{limit}
     </select>
 
+    <!-- 对账摘要接口游标式批量查询：按 id 升序、id > lastId 翻页（app-sync-changelog-pull
+         change design.md Decision 10），不做 updateTime/ids/codes 过滤，不做组织范围过滤
+         （字典无组织范围概念）。 -->
+    <select id="selectDigestBatch" resultType="cn.nihility.rbac.dict.entity.DictItemEntity">
+        SELECT * FROM tab_dict_item
+        <where>
+            <if test="lastId != null">AND id &gt; #{lastId}</if>
+        </where>
+        ORDER BY id ASC
+        LIMIT #{batchSize}
+    </select>
+
 </mapper>

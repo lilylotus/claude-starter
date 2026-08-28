@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 应用同步服务端投递水位的原子插入/更新（app-sync-changelog-pull change design.md
+     Decision 9）：ON DUPLICATE KEY UPDATE 配合 GREATEST 保证并发/乱序请求不会把
+     last_delivered_seq 回退，不先查后写。 -->
+<mapper namespace="cn.nihility.rbac.sync.cursor.mapper.AppSyncCursorMapper">
+
+    <insert id="upsertLastDeliveredSeq">
+        INSERT INTO tab_app_sync_cursor (app_ref_id, entity_type, last_delivered_seq, update_time)
+        VALUES (#{appRefId}, #{entityType}, #{nextSeq}, #{updateTime})
+        ON DUPLICATE KEY UPDATE
+            last_delivered_seq = GREATEST(last_delivered_seq, VALUES(last_delivered_seq)),
+            update_time = VALUES(update_time)
+    </insert>
+
+</mapper>

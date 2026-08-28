@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- /changes 增量拉取接口的底层流水查询（app-sync-changelog-pull change design.md
+     Decision 4）：prefixes 非空时对 org_scope_path_before/org_scope_path_after 两列分别
+     应用边界安全的 path = prefix OR path LIKE CONCAT(prefix, '/%') 条件（includeChildren=
+     false 时只用等值匹配），避免 /1/12 误命中 /1/123；调用方（AppSyncOrgScopeResolver.
+     resolveScopePrefixes）已校验 orgPath 不含 %/_ 等 LIKE 通配字符。 -->
+<mapper namespace="cn.nihility.rbac.sync.changelog.mapper.AppDataChangeLogMapper">
+
+    <select id="selectChanges" resultType="cn.nihility.rbac.sync.changelog.entity.AppDataChangeLogEntity">
+        SELECT * FROM tab_app_data_change_log
+        WHERE entity_type = #{entityType}
+        AND change_seq &gt; #{sinceSeq}
+        <if test="prefixes != null and !prefixes.isEmpty()">
+            AND (
+            <foreach collection="prefixes" item="p" separator=" OR ">
+                (
+                <choose>
+                    <when test="p.includeChildren">
+                        (org_scope_path_before = #{p.orgPath} OR org_scope_path_before LIKE CONCAT(#{p.orgPath}, '/%'))
+                        OR (org_scope_path_after = #{p.orgPath} OR org_scope_path_after LIKE CONCAT(#{p.orgPath}, '/%'))
+                    </when>
+                    <otherwise>
+                        org_scope_path_before = #{p.orgPath} OR org_scope_path_after = #{p.orgPath}
+                    </otherwise>
+                </choose>
+                )
+            </foreach>
+            )
+        </if>
+        ORDER BY change_seq ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectMaxChangeSeq" resultType="java.lang.Long">
+        SELECT MAX(change_seq) FROM tab_app_data_change_log
+    </select>
+
+    <!-- 保留窗口清理任务批量查询过期 change_seq（app-sync-changelog-pull change design.md
+         Decision 8）：按 change_time 索引小批量取值，调用方据此删除并推进 metadata floor，
+         不使用窗口函数/CTE，兼容 MySQL 5.7。 -->
+    <select id="selectExpiredChangeSeqBatch" resultType="java.lang.Long">
+        SELECT change_seq FROM tab_app_data_change_log
+        WHERE change_time &lt; #{cutoff}
+        ORDER BY change_seq ASC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

@@ -1,7 +1,7 @@
 package cn.nihility.rbac.app.mapper;
 
 import cn.nihility.rbac.app.entity.AppEntity;
-import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import cn.nihility.rbac.common.mapper.VersionedBaseMapper;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
@@ -13,7 +13,7 @@ import org.apache.ibatis.annotations.Param;
  * {@code resources/mybatis/mapper/AppMapper.xml} 里。
  */
 @Mapper
-public interface AppMapper extends BaseMapper<AppEntity> {
+public interface AppMapper extends VersionedBaseMapper<AppEntity> {
 
     /**
      * 统计未被逻辑删除的应用中，指定列等于给定值的记录数，供"表单字段定义"驱动的
@@ -44,4 +44,14 @@ public interface AppMapper extends BaseMapper<AppEntity> {
     List<AppEntity> selectSyncPullPage(@Param("offset") int offset, @Param("limit") int limit,
             @Param("updateTimeFrom") LocalDateTime updateTimeFrom, @Param("updateTimeTo") LocalDateTime updateTimeTo,
             @Param("ids") List<Long> ids, @Param("codes") List<String> codes);
+
+    /**
+     * 按 {@code id} 升序游标式批量查询应用当前数据，供对账摘要接口流式扫描全部可见记录使用
+     * （app-sync-changelog-pull change design.md Decision 10）。
+     *
+     * @param lastId    上一批最后一条记录的 id，{@code null} 表示从头开始
+     * @param batchSize 本批最多查询的记录数
+     * @return 本批查询结果，按 id 升序排列
+     */
+    List<AppEntity> selectDigestBatch(@Param("lastId") Long lastId, @Param("batchSize") int batchSize);
 }

@@ -18,11 +18,13 @@ import cn.nihility.rbac.formfield.support.FormFieldSnapshotSupport;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.constant.OrgStatus;
 import cn.nihility.rbac.org.dto.OrgCreateRequest;
+import cn.nihility.rbac.org.dto.OrgPathVersionRow;
 import cn.nihility.rbac.org.dto.OrgTreeNodeVO;
 import cn.nihility.rbac.org.dto.OrgUpdateRequest;
 import cn.nihility.rbac.org.dto.OrgVO;
 import cn.nihility.rbac.org.entity.OrgEntity;
 import cn.nihility.rbac.org.mapper.OrgMapper;
+import cn.nihility.rbac.sync.event.DomainChangeEvent;
 import cn.nihility.rbac.sync.event.DomainEventPublisher;
 import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -34,6 +36,7 @@ import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -270,6 +273,8 @@ class OrgServiceImplTest {
     @Test
     void delete_shouldSucceed_whenNoChildrenExist() {
         OrgEntity entity = buildEntity(1L, "总公司", "ROOT", 0L, OrgStatus.ENABLED, 0);
+        entity.setOrgPath("1");
+        entity.setVersion(2L);
         when(orgMapper.selectById(1L)).thenReturn(entity);
         when(orgMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
 
@@ -281,15 +286,102 @@ class OrgServiceImplTest {
                         org.mockito.ArgumentMatchers.eq("总公司"), any(Map.class));
 
         // 紧邻 operationLogRecorder.recordDelete 之后应发布一次组织删除的同步事件
-        // （app-sync-notify-pull-api change design.md Decision 5）。
-        org.mockito.ArgumentCaptor<cn.nihility.rbac.sync.event.DomainChangeEvent> eventCaptor =
-                org.mockito.ArgumentCaptor.forClass(cn.nihility.rbac.sync.event.DomainChangeEvent.class);
+        // （app-sync-notify-pull-api change design.md Decision 5）；组织删除不做级联删除
+        // 子孙（存在未删除子组织时会被前置校验拒绝），因此 tombstone 只需为自身发布一条：
+        // orgScopePathBefore=删除前路径、orgScopePathAfter=null、entityVersion=递增后的
+        // 最终版本（app-sync-changelog-pull change design.md Decision 3，tasks.md 2.5）。
+        ArgumentCaptor<DomainChangeEvent> eventCaptor = ArgumentCaptor.forClass(DomainChangeEvent.class);
         verify(domainEventPublisher).publish(eventCaptor.capture());
-        cn.nihility.rbac.sync.event.DomainChangeEvent publishedEvent = eventCaptor.getValue();
+        DomainChangeEvent publishedEvent = eventCaptor.getValue();
         assertThat(publishedEvent.getDataType()).isEqualTo(cn.nihility.rbac.app.sync.constant.SyncDomain.ORG);
         assertThat(publishedEvent.getBizId()).isEqualTo(1L);
         assertThat(publishedEvent.getOperationType())
                 .isEqualTo(cn.nihility.rbac.operationlog.constant.OperationType.DELETE);
+        assertThat(publishedEvent.getOrgScopePathBefore()).isEqualTo("1");
+        assertThat(publishedEvent.getOrgScopePathAfter()).isNull();
+        assertThat(publishedEvent.getEntityVersion()).isEqualTo(3L);
+    }
+
+    /**
+     * 更新组织并变更上级组织时，应为自身与全部子孙组织各发布一条携带正确前后路径与递增后
+     * 版本的 UPDATE 事件，子孙组织即便"没人直接操作它"也不能漏发（app-sync-changelog-pull
+     * change design.md Decision 2，tasks.md 2.3）。
+     */
+    @Test
+    void update_shouldPublishEventPerDescendant_whenParentChanged() {
+        OrgEntity entity = buildEntity(2L, "研发部", "DEV", 1L, OrgStatus.ENABLED, 0);
+        entity.setOrgPath("1/2");
+        entity.setOrgNamePath("总公司/研发部");
+        entity.setOrgParentPath("1");
+        entity.setVersion(3L);
+        when(orgMapper.selectById(2L)).thenReturn(entity);
+        lenient().when(orgMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+
+        OrgEntity newParent = buildEntity(9L, "新总部", "NEWROOT", 0L, OrgStatus.ENABLED, 0);
+        newParent.setOrgPath("9");
+        newParent.setOrgNamePath("新总部");
+        when(orgMapper.selectById(9L)).thenReturn(newParent);
+        // toLogSnapshot 在更新前后各回查一次原上级组织（id=1，未单独打桩），用于日志快照里的
+        // "上级组织"展示名；此处不关心该值，只需避免 Mockito 严格打桩报参数不匹配。
+        lenient().when(orgMapper.selectById(1L)).thenReturn(null);
+
+        when(orgMapper.selectPathAndVersionByPrefix("1/2")).thenReturn(List.of(
+                OrgPathVersionRow.builder().id(2L).orgPath("1/2").version(3L).build(),
+                OrgPathVersionRow.builder().id(3L).orgPath("1/2/3").version(5L).build()));
+        when(orgMapper.selectPathAndVersionByPrefix("9/2")).thenReturn(List.of(
+                OrgPathVersionRow.builder().id(2L).orgPath("9/2").version(4L).build(),
+                OrgPathVersionRow.builder().id(3L).orgPath("9/2/3").version(6L).build()));
+
+        OrgUpdateRequest request = new OrgUpdateRequest();
+        request.setName("研发部");
+        request.setCode("DEV");
+        request.setParentId(9L);
+        request.setShowOrder(0);
+
+        orgService.update(2L, request);
+
+        ArgumentCaptor<DomainChangeEvent> captor = ArgumentCaptor.forClass(DomainChangeEvent.class);
+        verify(domainEventPublisher, times(2)).publish(captor.capture());
+        List<DomainChangeEvent> events = captor.getAllValues();
+
+        DomainChangeEvent selfEvent = events.stream()
+                .filter(event -> event.getBizId().equals(2L)).findFirst().orElseThrow();
+        assertThat(selfEvent.getOrgScopePathBefore()).isEqualTo("1/2");
+        assertThat(selfEvent.getOrgScopePathAfter()).isEqualTo("9/2");
+        assertThat(selfEvent.getEntityVersion()).isEqualTo(4L);
+
+        DomainChangeEvent childEvent = events.stream()
+                .filter(event -> event.getBizId().equals(3L)).findFirst().orElseThrow();
+        assertThat(childEvent.getOrgScopePathBefore()).isEqualTo("1/2/3");
+        assertThat(childEvent.getOrgScopePathAfter()).isEqualTo("9/2/3");
+        assertThat(childEvent.getEntityVersion()).isEqualTo(6L);
+    }
+
+    /**
+     * 更新组织但未变更上级组织时，事件应携带前后相同的当前路径与递增后的版本
+     * （design.md Decision 3："普通 UPDATE/ENABLE/DISABLE 为前后均填写"）。
+     */
+    @Test
+    void update_shouldPublishEventWithSamePathBeforeAndAfter_whenParentUnchanged() {
+        OrgEntity entity = buildEntity(1L, "研发部", "DEV", 99L, OrgStatus.ENABLED, 0);
+        entity.setOrgPath("99/1");
+        entity.setVersion(2L);
+        when(orgMapper.selectById(1L)).thenReturn(entity);
+
+        OrgUpdateRequest request = new OrgUpdateRequest();
+        request.setName("研发一部");
+        request.setCode("DEV");
+        request.setParentId(99L);
+        request.setShowOrder(0);
+
+        orgService.update(1L, request);
+
+        ArgumentCaptor<DomainChangeEvent> captor = ArgumentCaptor.forClass(DomainChangeEvent.class);
+        verify(domainEventPublisher).publish(captor.capture());
+        DomainChangeEvent event = captor.getValue();
+        assertThat(event.getOrgScopePathBefore()).isEqualTo("99/1");
+        assertThat(event.getOrgScopePathAfter()).isEqualTo("99/1");
+        assertThat(event.getEntityVersion()).isEqualTo(3L);
     }
 
     /**

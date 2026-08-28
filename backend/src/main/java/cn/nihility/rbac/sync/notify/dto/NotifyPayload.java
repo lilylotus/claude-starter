@@ -14,6 +14,15 @@ import lombok.Getter;
 @Builder
 public class NotifyPayload {
 
+    /** 雪花事件标识，按十进制字符串输出。 */
+    private final String eventId;
+
+    /** 数据库变更游标，按十进制字符串输出。 */
+    private final String changeSeq;
+
+    /** 实体结果版本，按十进制字符串输出。 */
+    private final String entityVersion;
+
     /** 数据类型：ORG/USER/POSITION/APP/ROLE。 */
     private final String dataType;
 
@@ -21,7 +30,7 @@ public class NotifyPayload {
     private final String operationType;
 
     /** 被变更对象 id。 */
-    private final Long bizId;
+    private final String bizId;
 
     /** 被变更对象的业务编码，POSITION 数据类型没有业务编码字段时为空。 */
     private final String bizCode;

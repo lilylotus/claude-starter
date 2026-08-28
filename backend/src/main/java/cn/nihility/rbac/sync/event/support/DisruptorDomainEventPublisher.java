@@ -48,6 +48,12 @@ public class DisruptorDomainEventPublisher implements DomainEventPublisher, Smar
     /** Disruptor 相关配置。 */
     private final SyncProperties syncProperties;
 
+    /** 为尚未分配标识的领域事件分配一次雪花 eventId。 */
+    private final SnowflakeIdGenerator snowflakeIdGenerator;
+
+    /** 在事务提交后补齐事件实体版本。 */
+    private final DomainEntityVersionResolver entityVersionResolver;
+
     /** Disruptor 实例，{@link #start()} 时按配置构建并启动。 */
     private volatile Disruptor<DomainChangeEventHolder> disruptor;
 
@@ -59,16 +65,19 @@ public class DisruptorDomainEventPublisher implements DomainEventPublisher, Smar
      */
     @Override
     public void publish(DomainChangeEvent event) {
+        DomainChangeEvent publishedEvent = event.toBuilder()
+                .eventId(event.getEventId() == null ? snowflakeIdGenerator.nextId() : event.getEventId())
+                .build();
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    publishToRingBuffer(event);
+                    publishToRingBuffer(publishedEvent);
                 }
             });
             return;
         }
-        publishToRingBuffer(event);
+        publishToRingBuffer(publishedEvent);
     }
 
     /**
@@ -77,6 +86,9 @@ public class DisruptorDomainEventPublisher implements DomainEventPublisher, Smar
      * @param event 领域变更事件
      */
     private void publishToRingBuffer(DomainChangeEvent event) {
+        DomainChangeEvent resolvedEvent = event.getEntityVersion() == null
+                ? event.toBuilder().entityVersion(entityVersionResolver.resolve(event)).build()
+                : event;
         Disruptor<DomainChangeEventHolder> current = disruptor;
         if (current == null) {
             // 未启动（如尚未经过 SmartLifecycle#start，理论上不会发生在正常运行的 Spring
@@ -84,7 +96,7 @@ public class DisruptorDomainEventPublisher implements DomainEventPublisher, Smar
             throw new IllegalStateException("领域事件发布器尚未启动");
         }
         current.getRingBuffer().publishEvent((holder, sequence, publishedEvent) -> holder.setEvent(publishedEvent),
-                event);
+                resolvedEvent);
     }
 
     /**

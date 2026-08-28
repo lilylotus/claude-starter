@@ -2,7 +2,7 @@ package cn.nihility.rbac.user.mapper;
 
 import cn.nihility.rbac.user.dto.UserVO;
 import cn.nihility.rbac.user.entity.UserEntity;
-import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import cn.nihility.rbac.common.mapper.VersionedBaseMapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -17,7 +17,7 @@ import org.apache.ibatis.annotations.Param;
  * {@code resources/mybatis/mapper/UserMapper.xml} 里。
  */
 @Mapper
-public interface UserMapper extends BaseMapper<UserEntity> {
+public interface UserMapper extends VersionedBaseMapper<UserEntity> {
 
     /**
      * 统计未被逻辑删除的用户中，指定列等于给定值的记录数，供"表单字段定义"驱动的
@@ -104,4 +104,16 @@ public interface UserMapper extends BaseMapper<UserEntity> {
      */
     List<Long> selectIdsByAttrCondition(@Param("column") String column, @Param("operator") String operator,
             @Param("singleValue") String singleValue, @Param("values") List<String> values);
+
+    /**
+     * 按 {@code id} 升序游标式批量查询用户当前数据，供对账摘要接口流式扫描全部可见记录使用
+     * （app-sync-changelog-pull change design.md Decision 10）。
+     *
+     * @param lastId        上一批最后一条记录的 id，{@code null} 表示从头开始
+     * @param batchSize     本批最多查询的记录数
+     * @param allowedOrgIds 组织范围过滤下推的允许组织 id 全集，{@code null} 表示不限制
+     * @return 本批查询结果，按 id 升序排列
+     */
+    List<UserEntity> selectDigestBatch(@Param("lastId") Long lastId, @Param("batchSize") int batchSize,
+            @Param("allowedOrgIds") Set<Long> allowedOrgIds);
 }

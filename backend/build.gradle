@@ -76,6 +76,20 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 }
 
+clean {
+    // 额外删除 IDE 生成的 out 目录
+    println("====clean====")
+    println(rootDir)
+    println(projectDir)
+    delete "${rootDir}/out"
+    delete "${rootDir}/build"
+    delete "${rootDir}/src/main/generated"
+}
+
+//tasks.withType(JavaCompile).configureEach {
+//    dependsOn clean
+//}
+
 tasks.named('test') {
 	useJUnitPlatform()
 }

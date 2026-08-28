@@ -1,6 +1,8 @@
 package cn.nihility.rbac.user.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import java.time.LocalDateTime;
@@ -53,6 +55,10 @@ public class UserPositionEntity {
 
     /** 状态：2000=启用，3000=停用，-1000=已删除（逻辑删除）。 */
     private Integer status;
+
+    /** 面向外部同步消费者的实体版本。 */
+    @TableField(updateStrategy = FieldStrategy.NEVER)
+    private Long version;
 
     /** 预留扩展字段 1。 */
     private String ext1;

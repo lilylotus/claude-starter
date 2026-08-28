@@ -191,6 +191,7 @@ public class UserServiceImpl implements UserService {
         UserEntity entity = UserConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(UserStatus.ENABLED);
+        entity.setVersion(1L);
         entity.setCreateBy(operator);
         entity.setCreateTime(now);
         entity.setUpdateBy(operator);
@@ -230,6 +231,8 @@ public class UserServiceImpl implements UserService {
         entity.setUpdateBy(operator);
         entity.setUpdateTime(LocalDateTime.now());
         userMapper.updateById(entity);
+        userMapper.incrementVersion(id);
+        entity.setVersion(entity.getVersion() == null ? 2L : entity.getVersion() + 1L);
 
         syncPositions(id, request.getPositions(), operator);
 
@@ -274,6 +277,8 @@ public class UserServiceImpl implements UserService {
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         userMapper.updateById(entity);
+        userMapper.incrementVersion(id);
+        entity.setVersion(entity.getVersion() == null ? 2L : entity.getVersion() + 1L);
 
         operationLogRecorder.recordDelete(OperationLogResourceType.USER, id, entity.getName(), beforeSnapshot);
         domainEventPublisher.publish(DomainChangeEvent.builder()
@@ -332,6 +337,8 @@ public class UserServiceImpl implements UserService {
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         userMapper.updateById(entity);
+        userMapper.incrementVersion(id);
+        entity.setVersion(entity.getVersion() == null ? 2L : entity.getVersion() + 1L);
 
         operationLogRecorder.recordStatusChange(OperationLogResourceType.USER, id, entity.getName(),
                 status == UserStatus.ENABLED, beforeSnapshot, toLogSnapshot(entity));
@@ -540,19 +547,36 @@ public class UserServiceImpl implements UserService {
                 UserPositionEntity entity = existingById.get(request.getId());
                 Map<String, Object> beforeSnapshot = positionLogSnapshotSupport.snapshot(entity);
 
+                boolean orgChanged = !Objects.equals(request.getOrgId(), entity.getOrgId());
+                String previousOrgPath = orgChanged ? resolveOrgPath(entity.getOrgId()) : null;
+
                 UserConvert.INSTANCE.updatePositionEntity(request, entity);
                 entity.setUpdateBy(operator);
                 entity.setUpdateTime(now);
                 userPositionMapper.updateById(entity);
+                userPositionMapper.incrementVersion(entity.getId());
+                entity.setVersion(entity.getVersion() == null ? 2L : entity.getVersion() + 1L);
                 keptIds.add(entity.getId());
 
+                String currentOrgPath = resolveOrgPath(entity.getOrgId());
                 operationLogRecorder.recordUpdate(OperationLogResourceType.POSITION, entity.getId(),
                         positionLogSnapshotSupport.targetName(entity), beforeSnapshot,
                         positionLogSnapshotSupport.snapshot(entity));
+                domainEventPublisher.publish(DomainChangeEvent.builder()
+                        .dataType(SyncDomain.POSITION)
+                        .bizId(entity.getId())
+                        .operationType(OperationType.UPDATE)
+                        .operator(operator)
+                        .entityVersion(entity.getVersion())
+                        .orgScopePathBefore(orgChanged ? previousOrgPath : currentOrgPath)
+                        .orgScopePathAfter(currentOrgPath)
+                        .occurredAt(now)
+                        .build());
             } else {
                 UserPositionEntity entity = UserConvert.INSTANCE.toPositionEntity(request);
                 entity.setUserId(userId);
                 entity.setStatus(PositionStatus.ENABLED);
+                entity.setVersion(1L);
                 entity.setCreateBy(operator);
                 entity.setCreateTime(now);
                 entity.setUpdateBy(operator);
@@ -561,6 +585,16 @@ public class UserServiceImpl implements UserService {
 
                 operationLogRecorder.recordCreate(OperationLogResourceType.POSITION, entity.getId(),
                         positionLogSnapshotSupport.targetName(entity), positionLogSnapshotSupport.snapshot(entity));
+                domainEventPublisher.publish(DomainChangeEvent.builder()
+                        .dataType(SyncDomain.POSITION)
+                        .bizId(entity.getId())
+                        .operationType(OperationType.CREATE)
+                        .operator(operator)
+                        .entityVersion(entity.getVersion())
+                        .orgScopePathBefore(null)
+                        .orgScopePathAfter(resolveOrgPath(entity.getOrgId()))
+                        .occurredAt(now)
+                        .build());
             }
         }
 
@@ -571,11 +605,44 @@ public class UserServiceImpl implements UserService {
         if (!idsToDelete.isEmpty()) {
             for (Long deleteId : idsToDelete) {
                 UserPositionEntity entity = existingById.get(deleteId);
+                // 物理删除前必须先采集所属组织当前的 orgPath 与"旧版本 + 1"的最终 tombstone
+                // 版本：行一旦被物理删除，事后既查不到 orgPath，也无法再依赖
+                // DomainEntityVersionResolver 兜底查询版本（app-sync-changelog-pull change
+                // design.md Decision 3/5）。
+                String deletedOrgPath = resolveOrgPath(entity.getOrgId());
+                Long tombstoneVersion = (entity.getVersion() == null ? 1L : entity.getVersion()) + 1L;
                 operationLogRecorder.recordDelete(OperationLogResourceType.POSITION, deleteId,
                         positionLogSnapshotSupport.targetName(entity), positionLogSnapshotSupport.snapshot(entity));
+                domainEventPublisher.publish(DomainChangeEvent.builder()
+                        .dataType(SyncDomain.POSITION)
+                        .bizId(deleteId)
+                        .operationType(OperationType.DELETE)
+                        .operator(operator)
+                        .entityVersion(tombstoneVersion)
+                        .orgScopePathBefore(deletedOrgPath)
+                        .orgScopePathAfter(null)
+                        .occurredAt(now)
+                        .build());
             }
             userPositionMapper.deleteByIds(idsToDelete);
         }
+    }
+
+    /**
+     * 按组织 id 查询其当前的 {@code orgPath}，供任职记录同步事件的
+     * {@code orgScopePathBefore}/{@code orgScopePathAfter} 使用（design.md Decision 3），
+     * 与独立任职管理入口（{@code PositionServiceImpl}）共用同一语义，各自维护一份轻量实现，
+     * 不引入额外的跨模块共享组件。
+     *
+     * @param orgId 组织 id，可为 {@code null}
+     * @return 组织当前的 {@code orgPath}，{@code orgId} 为空或组织不存在时返回 {@code null}
+     */
+    private String resolveOrgPath(Long orgId) {
+        if (orgId == null) {
+            return null;
+        }
+        OrgEntity org = orgMapper.selectById(orgId);
+        return org != null ? org.getOrgPath() : null;
     }
 
     /**

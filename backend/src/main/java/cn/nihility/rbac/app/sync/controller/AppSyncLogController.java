@@ -15,14 +15,17 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 应用同步日志查询接口，提供通知日志、拉取日志两个只读分页查询接口
- * （add-app-sync-notify-pull-logs change design.md Decision 3）。复用
- * {@code AppManagement:app:config} 页面级权限，接口层不新增权限校验注解（前端路由/按钮层面
- * 控制，与 {@code AppSyncConfigController} 现状一致）。
+ * （add-app-sync-notify-pull-logs change design.md Decision 3），以及一个手动重推的写接口
+ * （{@link #retryNotifyRecord}，app-sync-changelog-pull change tasks.md 6.3，本 change 明确
+ * 只提供后端接口，不新增前端按钮）。复用 {@code AppManagement:app:config} 页面级权限，
+ * 接口层不新增权限校验注解（前端路由/按钮层面控制，与 {@code AppSyncConfigController}
+ * 现状一致）。
  */
 @RestController
 @RequiredArgsConstructor
@@ -97,5 +100,19 @@ public class AppSyncLogController {
         request.setPage(page);
         request.setPageSize(pageSize);
         return appPullRecordService.page(request);
+    }
+
+    /**
+     * 管理端手动重推一条 {@code DEAD} 状态的通知记录：原子清理租约/下次重试时间/已失败次数
+     * 并重置为 {@code PENDING}，随后触发一次即时发送优化，由该优化或调度器的到期扫描捞走
+     * 实际发送（app-sync-changelog-pull change design.md Decision 6，tasks.md 6.3）。
+     *
+     * @param id       应用 id（{@code tab_app.id}），用于校验记录归属
+     * @param recordId 通知记录主键 id
+     */
+    @Operation(summary = "手动重推死信通知", description = "把一条属于该应用、当前处于 DEAD 状态的通知记录重置为 PENDING 并触发一次即时发送")
+    @PostMapping("/api/apps/{id}/config/sync/notify-records/{recordId}/retry")
+    public void retryNotifyRecord(@PathVariable Long id, @PathVariable Long recordId) {
+        appNotifyRecordService.retryDeadTask(id, recordId);
     }
 }

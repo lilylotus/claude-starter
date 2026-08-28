@@ -102,6 +102,47 @@ public class SyncBizPageQueryResolver {
     }
 
     /**
+     * 按数据域游标式批量查询业务表当前数据，供对账摘要接口流式扫描全部可见记录使用
+     * （app-sync-changelog-pull change design.md Decision 10——"流式计算，避免大数据量内存
+     * 问题"）：按 {@code id} 升序、{@code id > lastId} 游标翻页（而非 {@code OFFSET}），
+     * 保证扫描顺序稳定、不因翻页期间的写入产生重复/漏读；不支持 {@code updateTimeFrom}/
+     * {@code updateTimeTo}/{@code ids}/{@code codes}/{@code mobile} 过滤，语义就是"该应用
+     * 该数据域当前可见的全部记录"。
+     *
+     * @param dataType      数据域，取值范围为 {@link SyncDomain#SYNC_PULL_DOMAINS}
+     * @param lastId        上一批最后一条记录的 id，{@code null} 表示从头开始
+     * @param batchSize     本批最多查询的记录数
+     * @param allowedOrgIds 组织范围过滤下推的允许组织 id 全集，仅 ORG/USER/POSITION 使用，
+     *                      {@code null} 表示不限制
+     * @return 本批查询结果，按 id 升序排列，空列表表示已扫描到末尾
+     */
+    public List<SyncBizPageRow> queryDigestBatch(String dataType, Long lastId, int batchSize,
+            Set<Long> allowedOrgIds) {
+        return switch (dataType) {
+            case SyncDomain.ORG -> orgMapper.selectDigestBatch(lastId, batchSize, allowedOrgIds).stream()
+                    .map(this::toRow).toList();
+            case SyncDomain.USER -> userMapper.selectDigestBatch(lastId, batchSize, allowedOrgIds).stream()
+                    .map(this::toRow).toList();
+            case SyncDomain.POSITION -> {
+                List<UserPositionEntity> entities =
+                        userPositionMapper.selectDigestBatch(lastId, batchSize, allowedOrgIds);
+                Map<Long, String> userCodeById = resolveUserCodes(entities);
+                Map<Long, String> orgCodeById = resolveOrgCodes(entities);
+                yield entities.stream().map(entity -> toRow(entity, userCodeById, orgCodeById)).toList();
+            }
+            case SyncDomain.APP -> appMapper.selectDigestBatch(lastId, batchSize).stream().map(this::toRow).toList();
+            case SyncDomain.ROLE ->
+                    roleMapper.selectDigestBatch(lastId, batchSize).stream().map(this::toRow).toList();
+            case SyncDomain.DICT -> {
+                List<DictItemEntity> entities = dictItemMapper.selectDigestBatch(lastId, batchSize);
+                Map<Long, String> dictTypeCodeById = resolveDictTypeCodes(entities);
+                yield entities.stream().map(entity -> toRow(entity, dictTypeCodeById)).toList();
+            }
+            default -> List.of();
+        };
+    }
+
+    /**
      * 批量查询本页任职记录关联用户的业务编码，一次 {@code selectByIds} 完成，避免逐行
      * 单独查询导致的 N+1（app-sync-drop-changelog change design.md Decision 8，三次实现后
      * 修正）。
@@ -168,7 +209,8 @@ public class SyncBizPageQueryResolver {
      */
     private SyncBizPageRow toRow(OrgEntity entity) {
         return SyncBizPageRow.builder().id(entity.getId()).code(entity.getCode()).updateTime(entity.getUpdateTime())
-                .status(entity.getStatus()).data(DomainSnapshotSupport.snapshot(entity)).build();
+                .status(entity.getStatus()).version(entity.getVersion())
+                .data(DomainSnapshotSupport.snapshot(entity)).build();
     }
 
     /**
@@ -179,7 +221,8 @@ public class SyncBizPageQueryResolver {
      */
     private SyncBizPageRow toRow(UserEntity entity) {
         return SyncBizPageRow.builder().id(entity.getId()).code(entity.getCode()).updateTime(entity.getUpdateTime())
-                .status(entity.getStatus()).data(DomainSnapshotSupport.snapshot(entity)).build();
+                .status(entity.getStatus()).version(entity.getVersion())
+                .data(DomainSnapshotSupport.snapshot(entity)).build();
     }
 
     /**
@@ -195,7 +238,7 @@ public class SyncBizPageQueryResolver {
     private SyncBizPageRow toRow(UserPositionEntity entity, Map<Long, String> userCodeById,
             Map<Long, String> orgCodeById) {
         return SyncBizPageRow.builder().id(entity.getId()).code(null).updateTime(entity.getUpdateTime())
-                .status(entity.getStatus()).userCode(userCodeById.get(entity.getUserId()))
+                .status(entity.getStatus()).version(entity.getVersion()).userCode(userCodeById.get(entity.getUserId()))
                 .orgCode(orgCodeById.get(entity.getOrgId())).data(DomainSnapshotSupport.snapshot(entity)).build();
     }
 
@@ -207,7 +250,8 @@ public class SyncBizPageQueryResolver {
      */
     private SyncBizPageRow toRow(AppEntity entity) {
         return SyncBizPageRow.builder().id(entity.getId()).code(entity.getCode()).updateTime(entity.getUpdateTime())
-                .status(entity.getStatus()).data(DomainSnapshotSupport.snapshot(entity)).build();
+                .status(entity.getStatus()).version(entity.getVersion())
+                .data(DomainSnapshotSupport.snapshot(entity)).build();
     }
 
     /**
@@ -218,7 +262,8 @@ public class SyncBizPageQueryResolver {
      */
     private SyncBizPageRow toRow(RoleEntity entity) {
         return SyncBizPageRow.builder().id(entity.getId()).code(entity.getCode()).updateTime(entity.getUpdateTime())
-                .status(entity.getStatus()).data(DomainSnapshotSupport.snapshot(entity)).build();
+                .status(entity.getStatus()).version(entity.getVersion())
+                .data(DomainSnapshotSupport.snapshot(entity)).build();
     }
 
     /**

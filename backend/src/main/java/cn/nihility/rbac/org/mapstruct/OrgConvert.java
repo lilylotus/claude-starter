@@ -62,6 +62,7 @@ public interface OrgConvert {
      */
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "status", ignore = true)
+    @Mapping(target = "version", ignore = true)
     @Mapping(target = "parentCode", ignore = true)
     @Mapping(target = "orgPath", ignore = true)
     @Mapping(target = "orgNamePath", ignore = true)
@@ -84,6 +85,7 @@ public interface OrgConvert {
      */
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "status", ignore = true)
+    @Mapping(target = "version", ignore = true)
     @Mapping(target = "parentCode", ignore = true)
     @Mapping(target = "orgPath", ignore = true)
     @Mapping(target = "orgNamePath", ignore = true)

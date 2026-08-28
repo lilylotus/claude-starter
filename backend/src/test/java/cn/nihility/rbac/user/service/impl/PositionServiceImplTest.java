@@ -18,7 +18,9 @@ import cn.nihility.rbac.dict.service.DictItemService;
 import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
 import cn.nihility.rbac.formfield.support.FormFieldSnapshotSupport;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.org.entity.OrgEntity;
 import cn.nihility.rbac.org.mapper.OrgMapper;
+import cn.nihility.rbac.sync.event.DomainChangeEvent;
 import cn.nihility.rbac.sync.event.DomainEventPublisher;
 import cn.nihility.rbac.user.constant.PositionStatus;
 import cn.nihility.rbac.user.dto.PositionCreateRequest;
@@ -115,7 +117,7 @@ class PositionServiceImplTest {
                 new PositionDynamicFieldSupport(formFieldDefinitionService, userPositionMapper);
         PositionLogSnapshotSupport positionLogSnapshotSupport = new PositionLogSnapshotSupport(userMapper, orgMapper,
                 formFieldDefinitionService, formFieldSnapshotSupport, dictItemService);
-        positionService = new PositionServiceImpl(userPositionMapper, operationLogRecorder,
+        positionService = new PositionServiceImpl(userPositionMapper, orgMapper, operationLogRecorder,
                 positionDynamicFieldSupport, positionLogSnapshotSupport, orgScopeService, currentOperatorService,
                 userDisplayService, domainEventPublisher);
         lenient().when(formFieldDefinitionService.listActiveByBizType(any())).thenReturn(List.of());
@@ -281,6 +283,59 @@ class PositionServiceImplTest {
         assertThat(entity.getOrgId()).isEqualTo(200L);
         assertThat(entity.getPositionAddress()).isEqualTo("新地址");
         verify(userPositionMapper).updateById(entity);
+    }
+
+    /**
+     * 更新任职记录且所属组织变更时，事件应携带旧组织的 {@code orgPath} 作为
+     * {@code orgScopePathBefore}、新组织的 {@code orgPath} 作为 {@code orgScopePathAfter}，
+     * 且 {@code entityVersion} 显式等于原子递增后的新版本（app-sync-changelog-pull change
+     * design.md Decision 3，tasks.md 2.4）。
+     */
+    @Test
+    void update_shouldPublishEventWithOrgPathSnapshot_whenOrgChanged() {
+        UserPositionEntity entity = buildEntity(10L, 1L, 100L, PositionStatus.ENABLED);
+        entity.setVersion(3L);
+        when(userPositionMapper.selectById(10L)).thenReturn(entity);
+        when(userPositionMapper.selectPositionDetail(eq(10L), eq(PositionStatus.DELETED)))
+                .thenReturn(buildVO(10L, 1L, "张三", 200L, "财务部", PositionStatus.ENABLED));
+        when(orgMapper.selectById(100L)).thenReturn(OrgEntity.builder().id(100L).orgPath("1/100").build());
+        when(orgMapper.selectById(200L)).thenReturn(OrgEntity.builder().id(200L).orgPath("1/200").build());
+
+        PositionUpdateRequest request = new PositionUpdateRequest();
+        request.setOrgId(200L);
+        request.setPositionType("part_time");
+        request.setShowOrder(0);
+
+        positionService.update(10L, request);
+
+        ArgumentCaptor<DomainChangeEvent> captor = ArgumentCaptor.forClass(DomainChangeEvent.class);
+        verify(domainEventPublisher).publish(captor.capture());
+        DomainChangeEvent event = captor.getValue();
+        assertThat(event.getOrgScopePathBefore()).isEqualTo("1/100");
+        assertThat(event.getOrgScopePathAfter()).isEqualTo("1/200");
+        assertThat(event.getEntityVersion()).isEqualTo(4L);
+    }
+
+    /**
+     * 逻辑删除任职记录时，事件应携带删除前的组织路径作为 {@code orgScopePathBefore}、
+     * {@code orgScopePathAfter} 为 {@code null}，并显式携带递增后的最终版本
+     * （design.md Decision 3，tasks.md 2.5）。
+     */
+    @Test
+    void delete_shouldPublishTombstoneEvent_withPathBeforeAndNullAfter() {
+        UserPositionEntity entity = buildEntity(10L, 1L, 100L, PositionStatus.ENABLED);
+        entity.setVersion(5L);
+        when(userPositionMapper.selectById(10L)).thenReturn(entity);
+        when(orgMapper.selectById(100L)).thenReturn(OrgEntity.builder().id(100L).orgPath("1/100").build());
+
+        positionService.delete(10L);
+
+        ArgumentCaptor<DomainChangeEvent> captor = ArgumentCaptor.forClass(DomainChangeEvent.class);
+        verify(domainEventPublisher).publish(captor.capture());
+        DomainChangeEvent event = captor.getValue();
+        assertThat(event.getOrgScopePathBefore()).isEqualTo("1/100");
+        assertThat(event.getOrgScopePathAfter()).isNull();
+        assertThat(event.getEntityVersion()).isEqualTo(6L);
     }
 
     /**

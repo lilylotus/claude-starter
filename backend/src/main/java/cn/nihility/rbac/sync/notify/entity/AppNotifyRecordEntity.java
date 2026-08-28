@@ -32,6 +32,15 @@ public class AppNotifyRecordEntity {
     /** 关联 {@code tab_app.id}。 */
     private Long appRefId;
 
+    /** 雪花事件标识，同一应用内用于任务幂等。 */
+    private Long eventId;
+
+    /** 对应全局变更流水序号。 */
+    private Long changeSeq;
+
+    /** 实体结果版本。 */
+    private Long entityVersion;
+
     /** 数据类型：ORG/USER/POSITION/APP/ROLE，取自触发本次通知的变更记录，历史数据为空。 */
     private String dataType;
 
@@ -52,6 +61,21 @@ public class AppNotifyRecordEntity {
      * 历史数据为空（add-app-sync-notify-pull-logs change design.md Decision 1）。
      */
     private String notifyUrl;
+
+    /** 稳定的通知请求体 JSON 快照。 */
+    private String requestBody;
+
+    /** 任务状态：PENDING/PROCESSING/RETRY/SUCCESS/DEAD。 */
+    private String taskStatus;
+
+    /** 已失败尝试次数。 */
+    private Integer retryCount;
+
+    /** 下次允许重试时间。 */
+    private LocalDateTime nextRetryTime;
+
+    /** PROCESSING 状态的租约截止时间。 */
+    private LocalDateTime leaseUntil;
 
     /** 创建人。 */
     private String createBy;

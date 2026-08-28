@@ -119,4 +119,22 @@
         LIMIT #{offset}, #{limit}
     </select>
 
+    <!-- 对账摘要接口游标式批量查询：按 id 升序、id > lastId 翻页（app-sync-changelog-pull
+         change design.md Decision 10），不做 updateTime/ids 过滤。 -->
+    <select id="selectDigestBatch" resultType="cn.nihility.rbac.user.entity.UserPositionEntity">
+        SELECT * FROM tab_user_position
+        <where>
+            <if test="lastId != null">AND id &gt; #{lastId}</if>
+            <if test="allowedOrgIds != null">
+                <if test="allowedOrgIds.isEmpty()">AND org_id = -1</if>
+                <if test="!allowedOrgIds.isEmpty()">
+                    AND org_id IN
+                    <foreach collection="allowedOrgIds" item="orgId" open="(" separator="," close=")">#{orgId}</foreach>
+                </if>
+            </if>
+        </where>
+        ORDER BY id ASC
+        LIMIT #{batchSize}
+    </select>
+
 </mapper>

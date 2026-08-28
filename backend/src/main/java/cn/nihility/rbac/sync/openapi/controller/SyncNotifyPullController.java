@@ -1,8 +1,13 @@
 package cn.nihility.rbac.sync.openapi.controller;
 
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.sync.openapi.dto.SyncChangesPageVO;
+import cn.nihility.rbac.sync.openapi.dto.SyncChangesRequest;
+import cn.nihility.rbac.sync.openapi.dto.SyncDigestVO;
 import cn.nihility.rbac.sync.openapi.dto.SyncPullPageVO;
 import cn.nihility.rbac.sync.openapi.dto.SyncPullRequest;
+import cn.nihility.rbac.sync.openapi.service.SyncChangesService;
+import cn.nihility.rbac.sync.openapi.service.SyncDigestService;
 import cn.nihility.rbac.sync.openapi.service.SyncPullService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -32,6 +37,12 @@ public class SyncNotifyPullController {
 
     /** 对外拉取业务逻辑接口。 */
     private final SyncPullService syncPullService;
+
+    /** 增量游标拉取变更指针业务逻辑接口。 */
+    private final SyncChangesService syncChangesService;
+
+    /** 对账摘要业务逻辑接口。 */
+    private final SyncDigestService syncDigestService;
 
     /**
      * 分页拉取归属调用方应用当前可见的数据域当前数据。
@@ -90,6 +101,54 @@ public class SyncNotifyPullController {
                 .mobile(mobile)
                 .build();
         return syncPullService.pull(request);
+    }
+
+    /**
+     * 增量游标拉取调用方当前可见范围内的变更指针，只返回定位信息（不返回业务数据），详情
+     * 需要另行调用 {@link #pull} 携带 {@code ids} 复核。
+     *
+     * @param entityType 数据类型：ORG/USER/POSITION/APP/ROLE（不含 DICT）
+     * @param sinceSeq   起始游标（不含），十进制字符串，未传时视为 "0"（从头开始）
+     * @param pageSize   每页最多返回的可见记录数，未传或非正数时取默认值
+     * @return 变更指针响应，携带 {@code nextSeq}/{@code hasMore}/{@code configEpoch}
+     */
+    @Operation(summary = "增量游标拉取变更指针",
+            description = "按数据类型增量拉取变更流水指针（eventId/entityType/entityId/operationType/entityVersion/"
+                    + "changeSeq/changeTime），不返回业务数据；changeSeq/eventId/entityId/entityVersion 均按十进制"
+                    + "字符串序列化。USER 数据域没有组织路径前缀可用，服务端会批量查询候选用户的当前任职后过滤，循环扫描"
+                    + "底层流水直到攒够 pageSize 条可见结果或底层流水耗尽；nextSeq 表示\"本轮已扫描到的最后一条底层"
+                    + "流水\"，即使 records 为空也可能前进，不代表消费确认；hasMore 表示底层是否还有未扫描的记录。"
+                    + "sinceSeq 早于变更流水保留窗口下界时返回业务错误，需改走 pull 全量重建并从 digest 返回的"
+                    + "currentMaxSeq 重新开始增量。")
+    @GetMapping("/open/api/sync/changes")
+    public SyncChangesPageVO changes(
+            @Parameter(description = "数据类型：ORG/USER/POSITION/APP/ROLE（不含 DICT）") @RequestParam String entityType,
+            @Parameter(description = "起始游标（不含），十进制字符串，未传时视为 \"0\"")
+            @RequestParam(required = false) String sinceSeq,
+            @Parameter(description = "每页最多返回的可见记录数，未传或非正数时取默认值")
+            @RequestParam(required = false) Integer pageSize) {
+        SyncChangesRequest request =
+                SyncChangesRequest.builder().entityType(entityType).sinceSeq(sinceSeq).pageSize(pageSize).build();
+        return syncChangesService.changes(request);
+    }
+
+    /**
+     * 对账摘要接口：返回调用方当前可见范围内该数据类型的记录数与内容摘要，并携带当前变更
+     * 流水表最大 {@code changeSeq}（水位号），供"全量 pull + digest 拿到的水位号切入增量
+     * changes"这套衔接协议使用。
+     *
+     * @param entityType 数据类型：ORG/USER/POSITION/APP/ROLE/DICT
+     * @return 摘要响应
+     */
+    @Operation(summary = "对账摘要",
+            description = "按 bizId 升序流式扫描调用方当前可见范围内该数据类型的全部记录，对每条记录做与 pull 一致的"
+                    + "字段映射后完整输出记录，使用 SHA-256 + 版本化 canonical JSON（键按字典序、null 显式保留）逐条"
+                    + "长度前缀分隔累加计算摘要，不整表加载进内存；响应返回算法名、摘要规则版本号、记录数、摘要值、"
+                    + "当前 changeSeq 水位号（十进制字符串，表为空时为 \"0\"）与 configEpoch。")
+    @GetMapping("/open/api/sync/digest")
+    public SyncDigestVO digest(
+            @Parameter(description = "数据类型：ORG/USER/POSITION/APP/ROLE/DICT") @RequestParam String entityType) {
+        return syncDigestService.digest(entityType);
     }
 
     /**

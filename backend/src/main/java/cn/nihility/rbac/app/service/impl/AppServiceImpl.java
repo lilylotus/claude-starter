@@ -166,6 +166,7 @@ public class AppServiceImpl implements AppService {
         AppEntity entity = AppConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(AppStatus.ENABLED);
+        entity.setVersion(1L);
         entity.setCreateBy(operator);
         entity.setCreateTime(now);
         entity.setUpdateBy(operator);
@@ -201,6 +202,8 @@ public class AppServiceImpl implements AppService {
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         appMapper.updateById(entity);
+        appMapper.incrementVersion(id);
+        entity.setVersion(entity.getVersion() == null ? 2L : entity.getVersion() + 1L);
 
         operationLogRecorder.recordUpdate(OperationLogResourceType.APP, id, entity.getName(),
                 beforeSnapshot, toLogSnapshot(entity));
@@ -243,6 +246,8 @@ public class AppServiceImpl implements AppService {
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         appMapper.updateById(entity);
+        appMapper.incrementVersion(id);
+        entity.setVersion(entity.getVersion() == null ? 2L : entity.getVersion() + 1L);
 
         operationLogRecorder.recordDelete(OperationLogResourceType.APP, id, entity.getName(), beforeSnapshot);
         domainEventPublisher.publish(DomainChangeEvent.builder()
@@ -295,6 +300,8 @@ public class AppServiceImpl implements AppService {
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         appMapper.updateById(entity);
+        appMapper.incrementVersion(id);
+        entity.setVersion(entity.getVersion() == null ? 2L : entity.getVersion() + 1L);
 
         operationLogRecorder.recordStatusChange(OperationLogResourceType.APP, id, entity.getName(),
                 status == AppStatus.ENABLED, beforeSnapshot, toLogSnapshot(entity));

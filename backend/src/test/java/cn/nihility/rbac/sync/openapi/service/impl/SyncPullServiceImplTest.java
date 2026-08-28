@@ -25,6 +25,7 @@ import cn.nihility.rbac.sync.transform.FieldMappingTransformer;
 import cn.nihility.rbac.sync.transform.SyncBizPageQuery;
 import cn.nihility.rbac.sync.transform.SyncBizPageQueryResolver;
 import cn.nihility.rbac.sync.transform.SyncBizPageRow;
+import cn.nihility.rbac.sync.transform.SyncRecordAssembler;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -70,8 +71,13 @@ class SyncPullServiceImplTest {
 
     @BeforeEach
     void setUp() {
+        // SyncRecordAssembler 是真实实例（内部包装被 Mockito 打桩的 fieldMappingTransformer），
+        // 不是被测组件的直接 Mock 依赖，保证 SyncPullServiceImplTest 现有对 records 字段合并
+        // 结果的断言在提取 SyncRecordAssembler 后保持不变（app-sync-changelog-pull change
+        // design.md Decision 10）。
+        SyncRecordAssembler syncRecordAssembler = new SyncRecordAssembler(fieldMappingTransformer);
         service = new SyncPullServiceImpl(appSyncDomainConfigMapper, appConfigMapper, appSyncOrgScopeResolver,
-                syncBizPageQueryResolver, fieldMappingTransformer, appPullRecordService);
+                syncBizPageQueryResolver, syncRecordAssembler, appPullRecordService);
         OpenApiCallerContext.set(AppConfigEntity.builder().appRefId(1L).build());
         // 同步总开关默认桩为开启，不影响既有场景；关闭场景在下方单独用例中覆盖。
         lenient().when(appConfigMapper.selectOne(any())).thenReturn(
@@ -498,6 +504,29 @@ class SyncPullServiceImplTest {
         assertThat(record).doesNotContainKey("userCode");
         assertThat(record).doesNotContainKey("orgCode");
         assertThat(record).doesNotContainKey("dictTypeCode");
+    }
+
+    /**
+     * 记录应额外携带 {@code version} 固定键，值为十进制字符串而不是原始 {@code Long}
+     * （app-sync-changelog-pull change design.md Decision 5/11，tasks.md 4.6/4.7）。
+     */
+    @Test
+    void pull_shouldIncludeVersionAsDecimalString() {
+        when(appSyncDomainConfigMapper.selectOne(any())).thenReturn(
+                AppSyncDomainConfigEntity.builder().syncDomain(SyncDomain.ORG).syncEnabled(true).pageSize(20)
+                        .build());
+        when(appSyncOrgScopeResolver.resolveAllowedOrgIds(1L, SyncDomain.ORG)).thenReturn(Optional.empty());
+        SyncBizPageRow row = SyncBizPageRow.builder().id(88L).code("ORG001").updateTime(LocalDateTime.now())
+                .status(2000).version(4L).data(Map.of("code", "ORG001")).build();
+        when(syncBizPageQueryResolver.query(eq(SyncDomain.ORG), any())).thenReturn(List.of(row));
+        when(fieldMappingTransformer.transform(eq(1L), eq(SyncDomain.ORG), any()))
+                .thenReturn(Map.of("code", "ORG001"));
+
+        SyncPullRequest request = SyncPullRequest.builder().dataType(SyncDomain.ORG).build();
+        SyncPullPageVO result = service.pull(request);
+
+        Map<String, Object> record = result.getRecords().get(0);
+        assertThat(record).containsEntry("version", "4");
     }
 
     /**

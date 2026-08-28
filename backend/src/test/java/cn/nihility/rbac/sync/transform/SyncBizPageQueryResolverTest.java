@@ -79,7 +79,8 @@ class SyncBizPageQueryResolverTest {
     void query_shouldDispatchToOrgMapperWhenOrg() {
         LocalDateTime updateTime = LocalDateTime.now();
         when(orgMapper.selectSyncPullPage(eq(20), eq(10), any(), any(), any(), any(), any())).thenReturn(
-                List.of(OrgEntity.builder().id(1L).code("ORG001").updateTime(updateTime).status(2000).build()));
+                List.of(OrgEntity.builder().id(1L).code("ORG001").updateTime(updateTime).status(2000).version(4L)
+                        .build()));
 
         List<SyncBizPageRow> rows = resolver.query(SyncDomain.ORG, SyncBizPageQuery.builder().page(3).pageSize(10)
                 .build());
@@ -89,6 +90,7 @@ class SyncBizPageQueryResolverTest {
         assertThat(rows.get(0).getCode()).isEqualTo("ORG001");
         assertThat(rows.get(0).getUpdateTime()).isEqualTo(updateTime);
         assertThat(rows.get(0).getStatus()).isEqualTo(2000);
+        assertThat(rows.get(0).getVersion()).isEqualTo(4L);
         assertThat(rows.get(0).getData()).containsEntry("code", "ORG001");
     }
 
@@ -209,6 +211,9 @@ class SyncBizPageQueryResolverTest {
         assertThat(rows).hasSize(1);
         assertThat(rows.get(0).getCode()).isEqualTo("MALE");
         assertThat(rows.get(0).getDictTypeCode()).isEqualTo("GENDER");
+        // DICT 不是五类版本化同步实体之一（app-sync-changelog-pull change design.md
+        // Decision 5），version 恒为 null。
+        assertThat(rows.get(0).getVersion()).isNull();
     }
 
     /**

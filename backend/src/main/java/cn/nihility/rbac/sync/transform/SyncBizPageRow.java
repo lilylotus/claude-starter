@@ -27,6 +27,14 @@ public class SyncBizPageRow {
     private final Integer status;
 
     /**
+     * 面向外部同步消费者的实体结果版本，仅 ORG/USER/POSITION/APP/ROLE 五个数据域有值，
+     * DICT 数据域恒为 {@code null}（app-sync-changelog-pull change design.md Decision 5，
+     * 字典不是五类版本化同步实体之一）；供 {@code version} 固定键取值，输出前转换为十进制
+     * 字符串（design.md Decision 11）。
+     */
+    private final Long version;
+
+    /**
      * 该行关联用户的业务编码，仅 POSITION 数据域使用，其余数据域恒为 {@code null}，
      * 供 {@code userCode} 领域特定固定键取值（app-sync-drop-changelog change design.md
      * Decision 8，三次实现后修正）。
