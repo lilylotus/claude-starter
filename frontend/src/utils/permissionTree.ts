@@ -68,6 +68,8 @@ export const PERMISSION_MODULE_LABELS: Record<string, string> = {
   FormFieldManagement: '表单管理',
   OperationLogManagement: '操作日志管理',
   LoginLogManagement: '登录日志管理',
+  PluginManagement: '插件管理',
+  ApprovalManagement: '审批管理',
 }
 
 // 未在 PERMISSION_MODULE_LABELS 中登记的模块名（如后续新增模块但还没来得及补充映射）

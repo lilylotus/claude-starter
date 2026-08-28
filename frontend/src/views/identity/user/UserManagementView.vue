@@ -30,6 +30,7 @@ import {
   type FormFieldRenderItem,
 } from '@/types/formField'
 import { usePermission } from '@/composables/usePermission'
+import { notifyWriteResult } from '@/utils/approvalResult'
 
 const userStore = useUserStore()
 const router = useRouter()
@@ -236,15 +237,19 @@ async function submitForm() {
         orgId: position.orgId as number,
       })),
     } as unknown as UserFormRequest
+    // 用户审批开关开启时（默认），下面两个接口返回的是待审批的申请信息而非真正生效的用户
+    // 数据；notifyWriteResult 按响应的 approvalEnabled 分流提示文案，并返回是否需要刷新
+    // 本地列表——只有直接生效（开关关闭）时才需要，见 design.md Decision 9
+    let shouldRefresh: boolean
     if (dialogMode.value === 'create') {
-      await userApi.createUser(payload)
-      ElMessage.success('新增成功')
+      shouldRefresh = notifyWriteResult(await userApi.createUser(payload), '新增成功')
     } else {
-      await userApi.updateUser(editingId.value as number, payload)
-      ElMessage.success('保存成功')
+      shouldRefresh = notifyWriteResult(await userApi.updateUser(editingId.value as number, payload), '保存成功')
     }
     dialogVisible.value = false
-    await userStore.refreshAfterMutation()
+    if (shouldRefresh) {
+      await userStore.refreshAfterMutation()
+    }
   } finally {
     submitting.value = false
   }
@@ -259,14 +264,15 @@ function goToDetail(row: UserRow) {
 // ---- 行操作：启用/停用、删除 ----
 
 async function toggleStatus(row: UserRow) {
+  let shouldRefresh: boolean
   if (row.status === USER_STATUS_ENABLED) {
-    await userApi.disableUser(row.id)
-    ElMessage.success('已停用')
+    shouldRefresh = notifyWriteResult(await userApi.disableUser(row.id), '已停用')
   } else {
-    await userApi.enableUser(row.id)
-    ElMessage.success('已启用')
+    shouldRefresh = notifyWriteResult(await userApi.enableUser(row.id), '已启用')
   }
-  await userStore.refreshAfterMutation()
+  if (shouldRefresh) {
+    await userStore.refreshAfterMutation()
+  }
 }
 
 async function handleDelete(row: UserRow) {
@@ -275,9 +281,10 @@ async function handleDelete(row: UserRow) {
     confirmButtonText: '删除',
     cancelButtonText: '取消',
   })
-  await userApi.deleteUser(row.id)
-  ElMessage.success('删除成功')
-  await userStore.refreshAfterMutation()
+  const shouldRefresh = notifyWriteResult(await userApi.deleteUser(row.id), '删除成功')
+  if (shouldRefresh) {
+    await userStore.refreshAfterMutation()
+  }
 }
 
 // 重置密码：不影响 status，二次确认后无需刷新列表

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules, TreeInstance } from 'element-plus'
 import type Node from 'element-plus/es/components/tree/src/model/node'
 import { useOrgStore } from '@/stores/org'
@@ -21,6 +21,7 @@ import {
   FORM_FIELD_CONTROL_TYPE_TEXT,
 } from '@/types/formField'
 import { usePermission } from '@/composables/usePermission'
+import { notifyWriteResult } from '@/utils/approvalResult'
 
 const orgStore = useOrgStore()
 const router = useRouter()
@@ -244,16 +245,20 @@ async function submitForm() {
       ...orgFields.buildSubmitModel(activeFields, form),
       parentId: form.parentId as number,
     } as unknown as OrgFormRequest
+    // 组织审批开关开启时（默认），下面两个接口返回的是待审批的申请信息而非真正生效的组织
+    // 数据；notifyWriteResult 按响应的 approvalEnabled 分流提示文案，并返回是否需要刷新
+    // 本地列表——只有直接生效（开关关闭）时才需要，见 design.md Decision 9
+    let shouldRefresh: boolean
     if (dialogMode.value === 'create') {
-      await orgApi.createOrg(payload)
-      ElMessage.success('新增成功')
+      shouldRefresh = notifyWriteResult(await orgApi.createOrg(payload), '新增成功')
     } else {
-      await orgApi.updateOrg(editingId.value as number, payload)
-      ElMessage.success('保存成功')
+      shouldRefresh = notifyWriteResult(await orgApi.updateOrg(editingId.value as number, payload), '保存成功')
     }
     dialogVisible.value = false
-    await orgStore.refreshAfterMutation()
-    await refreshNavTreeAfterMutation()
+    if (shouldRefresh) {
+      await orgStore.refreshAfterMutation()
+      await refreshNavTreeAfterMutation()
+    }
   } finally {
     submitting.value = false
   }
@@ -262,15 +267,16 @@ async function submitForm() {
 // ---- 行操作：启用/停用、删除 ----
 
 async function toggleStatus(row: OrgRow) {
+  let shouldRefresh: boolean
   if (row.status === ORG_STATUS_ENABLED) {
-    await orgApi.disableOrg(row.id)
-    ElMessage.success('已停用')
+    shouldRefresh = notifyWriteResult(await orgApi.disableOrg(row.id), '已停用')
   } else {
-    await orgApi.enableOrg(row.id)
-    ElMessage.success('已启用')
+    shouldRefresh = notifyWriteResult(await orgApi.enableOrg(row.id), '已启用')
   }
-  await orgStore.refreshAfterMutation()
-  await refreshNavTreeAfterMutation()
+  if (shouldRefresh) {
+    await orgStore.refreshAfterMutation()
+    await refreshNavTreeAfterMutation()
+  }
 }
 
 async function handleDelete(row: OrgRow) {
@@ -279,10 +285,11 @@ async function handleDelete(row: OrgRow) {
     confirmButtonText: '删除',
     cancelButtonText: '取消',
   })
-  await orgApi.deleteOrg(row.id)
-  ElMessage.success('删除成功')
-  await orgStore.refreshAfterMutation()
-  await refreshNavTreeAfterMutation()
+  const shouldRefresh = notifyWriteResult(await orgApi.deleteOrg(row.id), '删除成功')
+  if (shouldRefresh) {
+    await orgStore.refreshAfterMutation()
+    await refreshNavTreeAfterMutation()
+  }
 }
 </script>
 

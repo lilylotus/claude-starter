@@ -1,7 +1,12 @@
 package cn.nihility.rbac.user.controller;
 
 import cn.nihility.rbac.common.result.PageResult;
+import cn.nihility.rbac.approval.constant.ApprovalOperationType;
+import cn.nihility.rbac.approval.dto.WriteOperationResultVO;
+import cn.nihility.rbac.approval.service.ApprovalRequestService;
+import cn.nihility.rbac.approval.service.ApprovalSwitchService;
 import cn.nihility.rbac.common.result.Result;
+import cn.nihility.rbac.formfield.constant.FormFieldBizType;
 import cn.nihility.rbac.user.dto.UserCreateRequest;
 import cn.nihility.rbac.user.dto.UserUpdateRequest;
 import cn.nihility.rbac.user.dto.UserVO;
@@ -31,6 +36,12 @@ public class UserController {
 
     /** 用户业务逻辑接口。 */
     private final UserService userService;
+
+    /** 审批申请业务接口。 */
+    private final ApprovalRequestService approvalRequestService;
+
+    /** 审批开关业务接口。 */
+    private final ApprovalSwitchService approvalSwitchService;
 
     /**
      * 分页查询用户，支持按姓名/手机号/身份证号模糊搜索，组合时为"与"关系。
@@ -78,8 +89,15 @@ public class UserController {
      */
     @Operation(summary = "创建用户", description = "编号/身份证号在未删除用户范围内需唯一，可同时提交任职记录一并创建")
     @PostMapping("/api/users")
-    public UserVO create(@Valid @RequestBody UserCreateRequest request) {
-        return userService.create(request);
+    public WriteOperationResultVO<?> create(@Valid @RequestBody UserCreateRequest request) {
+        if (!approvalSwitchService.isEnabled(FormFieldBizType.USER)) {
+            return WriteOperationResultVO.applied(userService.create(request));
+        }
+        return approvalRequestService.submit(
+                FormFieldBizType.USER,
+                ApprovalOperationType.CREATE,
+                null,
+                request);
     }
 
     /**
@@ -91,8 +109,15 @@ public class UserController {
      */
     @Operation(summary = "更新用户", description = "更新用户基础信息，并按 positions 列表对任职记录做增量 diff，状态请使用启用/停用接口")
     @PutMapping("/api/users/{id}")
-    public UserVO update(@PathVariable Long id, @Valid @RequestBody UserUpdateRequest request) {
-        return userService.update(id, request);
+    public WriteOperationResultVO<?> update(@PathVariable Long id, @Valid @RequestBody UserUpdateRequest request) {
+        if (!approvalSwitchService.isEnabled(FormFieldBizType.USER)) {
+            return WriteOperationResultVO.applied(userService.update(id, request));
+        }
+        return approvalRequestService.submit(
+                FormFieldBizType.USER,
+                ApprovalOperationType.UPDATE,
+                id,
+                request);
     }
 
     /**
@@ -103,8 +128,15 @@ public class UserController {
      */
     @Operation(summary = "启用用户")
     @PutMapping("/api/users/{id}/enable")
-    public UserVO enable(@PathVariable Long id) {
-        return userService.enable(id);
+    public WriteOperationResultVO<?> enable(@PathVariable Long id) {
+        if (!approvalSwitchService.isEnabled(FormFieldBizType.USER)) {
+            return WriteOperationResultVO.applied(userService.enable(id));
+        }
+        return approvalRequestService.submit(
+                FormFieldBizType.USER,
+                ApprovalOperationType.ENABLE,
+                id,
+                null);
     }
 
     /**
@@ -115,8 +147,15 @@ public class UserController {
      */
     @Operation(summary = "停用用户")
     @PutMapping("/api/users/{id}/disable")
-    public UserVO disable(@PathVariable Long id) {
-        return userService.disable(id);
+    public WriteOperationResultVO<?> disable(@PathVariable Long id) {
+        if (!approvalSwitchService.isEnabled(FormFieldBizType.USER)) {
+            return WriteOperationResultVO.applied(userService.disable(id));
+        }
+        return approvalRequestService.submit(
+                FormFieldBizType.USER,
+                ApprovalOperationType.DISABLE,
+                id,
+                null);
     }
 
     /**
@@ -127,9 +166,16 @@ public class UserController {
      */
     @Operation(summary = "删除用户", description = "逻辑删除，不级联处理其名下的任职记录")
     @DeleteMapping("/api/users/{id}")
-    public Result<Void> delete(@PathVariable Long id) {
-        userService.delete(id);
-        return Result.success();
+    public WriteOperationResultVO<?> delete(@PathVariable Long id) {
+        if (!approvalSwitchService.isEnabled(FormFieldBizType.USER)) {
+            userService.delete(id);
+            return WriteOperationResultVO.applied(null);
+        }
+        return approvalRequestService.submit(
+                FormFieldBizType.USER,
+                ApprovalOperationType.DELETE,
+                id,
+                null);
     }
 
     /**

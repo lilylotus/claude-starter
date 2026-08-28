@@ -1,7 +1,11 @@
 package cn.nihility.rbac.org.controller;
 
 import cn.nihility.rbac.common.result.PageResult;
-import cn.nihility.rbac.common.result.Result;
+import cn.nihility.rbac.approval.constant.ApprovalOperationType;
+import cn.nihility.rbac.approval.dto.WriteOperationResultVO;
+import cn.nihility.rbac.approval.service.ApprovalRequestService;
+import cn.nihility.rbac.approval.service.ApprovalSwitchService;
+import cn.nihility.rbac.formfield.constant.FormFieldBizType;
 import cn.nihility.rbac.org.dto.OrgCreateRequest;
 import cn.nihility.rbac.org.dto.OrgTreeNodeVO;
 import cn.nihility.rbac.org.dto.OrgUpdateRequest;
@@ -32,6 +36,12 @@ public class OrgController {
 
     /** 组织业务逻辑接口。 */
     private final OrgService orgService;
+
+    /** 审批申请业务接口。 */
+    private final ApprovalRequestService approvalRequestService;
+
+    /** 审批开关业务接口。 */
+    private final ApprovalSwitchService approvalSwitchService;
 
     /**
      * 查询完整的组织树，排除已逻辑删除的组织。
@@ -102,8 +112,15 @@ public class OrgController {
      */
     @Operation(summary = "创建组织")
     @PostMapping("/api/orgs")
-    public OrgVO create(@Valid @RequestBody OrgCreateRequest request) {
-        return orgService.create(request);
+    public WriteOperationResultVO<?> create(@Valid @RequestBody OrgCreateRequest request) {
+        if (!approvalSwitchService.isEnabled(FormFieldBizType.ORG)) {
+            return WriteOperationResultVO.applied(orgService.create(request));
+        }
+        return approvalRequestService.submit(
+                FormFieldBizType.ORG,
+                ApprovalOperationType.CREATE,
+                null,
+                request);
     }
 
     /**
@@ -115,8 +132,15 @@ public class OrgController {
      */
     @Operation(summary = "更新组织", description = "更新组织基础信息，状态请使用启用/停用接口")
     @PutMapping("/api/orgs/{id}")
-    public OrgVO update(@PathVariable Long id, @Valid @RequestBody OrgUpdateRequest request) {
-        return orgService.update(id, request);
+    public WriteOperationResultVO<?> update(@PathVariable Long id, @Valid @RequestBody OrgUpdateRequest request) {
+        if (!approvalSwitchService.isEnabled(FormFieldBizType.ORG)) {
+            return WriteOperationResultVO.applied(orgService.update(id, request));
+        }
+        return approvalRequestService.submit(
+                FormFieldBizType.ORG,
+                ApprovalOperationType.UPDATE,
+                id,
+                request);
     }
 
     /**
@@ -127,8 +151,15 @@ public class OrgController {
      */
     @Operation(summary = "启用组织")
     @PutMapping("/api/orgs/{id}/enable")
-    public OrgVO enable(@PathVariable Long id) {
-        return orgService.enable(id);
+    public WriteOperationResultVO<?> enable(@PathVariable Long id) {
+        if (!approvalSwitchService.isEnabled(FormFieldBizType.ORG)) {
+            return WriteOperationResultVO.applied(orgService.enable(id));
+        }
+        return approvalRequestService.submit(
+                FormFieldBizType.ORG,
+                ApprovalOperationType.ENABLE,
+                id,
+                null);
     }
 
     /**
@@ -139,8 +170,15 @@ public class OrgController {
      */
     @Operation(summary = "停用组织")
     @PutMapping("/api/orgs/{id}/disable")
-    public OrgVO disable(@PathVariable Long id) {
-        return orgService.disable(id);
+    public WriteOperationResultVO<?> disable(@PathVariable Long id) {
+        if (!approvalSwitchService.isEnabled(FormFieldBizType.ORG)) {
+            return WriteOperationResultVO.applied(orgService.disable(id));
+        }
+        return approvalRequestService.submit(
+                FormFieldBizType.ORG,
+                ApprovalOperationType.DISABLE,
+                id,
+                null);
     }
 
     /**
@@ -151,8 +189,15 @@ public class OrgController {
      */
     @Operation(summary = "删除组织", description = "逻辑删除，若存在未删除的下级组织则拒绝删除")
     @DeleteMapping("/api/orgs/{id}")
-    public Result<Void> delete(@PathVariable Long id) {
-        orgService.delete(id);
-        return Result.success();
+    public WriteOperationResultVO<?> delete(@PathVariable Long id) {
+        if (!approvalSwitchService.isEnabled(FormFieldBizType.ORG)) {
+            orgService.delete(id);
+            return WriteOperationResultVO.applied(null);
+        }
+        return approvalRequestService.submit(
+                FormFieldBizType.ORG,
+                ApprovalOperationType.DELETE,
+                id,
+                null);
     }
 }

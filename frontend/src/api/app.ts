@@ -23,6 +23,7 @@ import type {
   SyncConfigUpdateRequest,
   SyncDomain,
 } from '@/types/app'
+import type { WriteOperationResult } from '@/types/approval'
 
 // 应用管理接口封装，组件/store 不直接调用 axios。
 
@@ -36,28 +37,31 @@ export function getAppById(id: number): Promise<AppRow> {
   return request.get(`/apps/${id}`)
 }
 
-// 新增应用
-export function createApp(data: AppFormRequest): Promise<AppRow> {
+// 新增应用；应用的审批开关（bizType=APP）开启时，响应 approvalEnabled=true、
+// approvalRequest 非空、data 为空，不创建真实应用记录，需等待审批通过后才生效
+// （add-master-data-approval-workflow change design.md Decision 9）；开关关闭时行为
+// 与本 change 之前一致，approvalEnabled=false、data 为创建后的应用数据
+export function createApp(data: AppFormRequest): Promise<WriteOperationResult<AppRow>> {
   return request.post('/apps', data)
 }
 
-// 编辑应用
-export function updateApp(id: number, data: AppFormRequest): Promise<AppRow> {
+// 编辑应用，响应结构同上
+export function updateApp(id: number, data: AppFormRequest): Promise<WriteOperationResult<AppRow>> {
   return request.put(`/apps/${id}`, data)
 }
 
-// 启用应用
-export function enableApp(id: number): Promise<void> {
+// 启用应用，响应结构同上
+export function enableApp(id: number): Promise<WriteOperationResult<AppRow>> {
   return request.put(`/apps/${id}/enable`)
 }
 
-// 停用应用
-export function disableApp(id: number): Promise<void> {
+// 停用应用，响应结构同上
+export function disableApp(id: number): Promise<WriteOperationResult<AppRow>> {
   return request.put(`/apps/${id}/disable`)
 }
 
-// 删除应用（逻辑删除）
-export function deleteApp(id: number): Promise<void> {
+// 删除应用（逻辑删除），响应结构同上
+export function deleteApp(id: number): Promise<WriteOperationResult<AppRow>> {
   return request.delete(`/apps/${id}`)
 }
 

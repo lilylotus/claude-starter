@@ -234,4 +234,69 @@ class IdentityAuthFilterTest {
         verify(filterChain, never()).doFilter(any(), any());
         assertThat(response.getContentAsString()).contains("\"code\":" + AuthErrorCode.FORBIDDEN);
     }
+
+    /**
+     * 无审批开关编辑权限时，应在进入审批开关 Controller 前被拦截。
+     */
+    @Test
+    void doFilter_shouldReturnForbidden_whenUserCannotEditApprovalSwitch() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "PUT",
+                "/api/approval-switches/ORG");
+        request.addHeader("identity-token", "valid-access-key");
+        request.addHeader("menu", "ApprovalManagement:switch:edit");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain filterChain = org.mockito.Mockito.mock(FilterChain.class);
+        when(tokenService.verifyAccessKey("valid-access-key")).thenReturn(Optional.of(1L));
+        when(passwordService.isFirstLogin(1L)).thenReturn(false);
+        when(authorizationService.hasPermission(1L, "ApprovalManagement:switch:edit")).thenReturn(false);
+
+        filter.doFilter(request, response, filterChain);
+
+        verify(filterChain, never()).doFilter(any(), any());
+        assertThat(response.getContentAsString()).contains("\"code\":" + AuthErrorCode.FORBIDDEN);
+    }
+
+    /**
+     * 无审批处理权限时，应在进入待审批查询 Controller 前被拦截。
+     */
+    @Test
+    void doFilter_shouldReturnForbidden_whenUserCannotViewPendingApprovals() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "GET",
+                "/api/approval-requests/pending");
+        request.addHeader("identity-token", "valid-access-key");
+        request.addHeader("menu", "ApprovalManagement:request:approve");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain filterChain = org.mockito.Mockito.mock(FilterChain.class);
+        when(tokenService.verifyAccessKey("valid-access-key")).thenReturn(Optional.of(1L));
+        when(passwordService.isFirstLogin(1L)).thenReturn(false);
+        when(authorizationService.hasPermission(1L, "ApprovalManagement:request:approve")).thenReturn(false);
+
+        filter.doFilter(request, response, filterChain);
+
+        verify(filterChain, never()).doFilter(any(), any());
+        assertThat(response.getContentAsString()).contains("\"code\":" + AuthErrorCode.FORBIDDEN);
+    }
+
+    /**
+     * “我的申请”属于登录用户自助查询，应绕过角色权限点判断。
+     */
+    @Test
+    void doFilter_shouldPassMineApprovalQuery_asSelfService() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "GET",
+                "/api/approval-requests/mine");
+        request.addHeader("identity-token", "valid-access-key");
+        request.addHeader("menu", "ApprovalManagement:request:view");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain filterChain = org.mockito.Mockito.mock(FilterChain.class);
+        when(tokenService.verifyAccessKey("valid-access-key")).thenReturn(Optional.of(1L));
+
+        filter.doFilter(request, response, filterChain);
+
+        verify(filterChain).doFilter(request, response);
+        verify(passwordService, never()).isFirstLogin(any());
+        verify(authorizationService, never()).hasPermission(any(), any());
+    }
 }

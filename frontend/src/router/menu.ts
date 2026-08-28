@@ -1,4 +1,4 @@
-import { UserFilled, Grid, Lock, Setting, Document } from '@element-plus/icons-vue'
+import { UserFilled, Grid, Lock, Setting, Document, Checked } from '@element-plus/icons-vue'
 import type { MenuGroup } from '@/types/menu'
 
 // 侧边栏的四个一级菜单及其子菜单，供 Sidebar 渲染，也是 router 子路由的数据来源。
@@ -54,10 +54,29 @@ export const MENU_GROUPS: MenuGroup[] = [
       { title: '登录日志', path: '/log/login-logs', permissionKey: 'LoginLogManagement:loginLog:view' },
     ],
   },
+  {
+    key: 'approval',
+    title: '审批管理',
+    icon: Checked,
+    children: [
+      // 自助操作：任何登录用户都能查看/撤回自己提交的申请，不受审批相关权限点约束
+      // （selfService=true，见 types/menu.ts 注释；permissionKey 仍填写真实登记的
+      // ApprovalManagement:request:view，供请求头 menu 使用）
+      {
+        title: '我的申请',
+        path: '/approval/mine',
+        permissionKey: 'ApprovalManagement:request:view',
+        selfService: true,
+      },
+      { title: '待我审批', path: '/approval/pending', permissionKey: 'ApprovalManagement:request:approve' },
+      { title: '审批设置', path: '/approval/settings', permissionKey: 'ApprovalManagement:switch:view' },
+    ],
+  },
 ]
 
-// 按当前用户权限编码集合过滤菜单：无权限的二级菜单项被过滤掉；一级分组下所有
-// 二级菜单都被过滤掉时，该分组自然从结果数组里消失，不需要额外的"是否整组隐藏"分支。
+// 按当前用户权限编码集合过滤菜单：无权限的二级菜单项被过滤掉（自助类页面例外，恒展示，
+// 见 types/menu.ts selfService 注释）；一级分组下所有二级菜单都被过滤掉时，该分组自然从
+// 结果数组里消失，不需要额外的"是否整组隐藏"分支。
 export function filterMenuGroups(
   groups: MenuGroup[],
   hasPermission: (code?: string) => boolean,
@@ -65,7 +84,7 @@ export function filterMenuGroups(
   return groups
     .map((group) => ({
       ...group,
-      children: group.children.filter((child) => hasPermission(child.permissionKey)),
+      children: group.children.filter((child) => child.selfService || hasPermission(child.permissionKey)),
     }))
     .filter((group) => group.children.length > 0)
 }

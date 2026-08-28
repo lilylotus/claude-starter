@@ -1,5 +1,6 @@
 import request from './request'
 import type { OrgFormRequest, OrgRow, OrgTreeNode, PageResult } from '@/types/org'
+import type { WriteOperationResult } from '@/types/approval'
 
 // 组织管理接口封装，组件/store 不直接调用 axios。
 
@@ -30,27 +31,30 @@ export function getOrgById(id: number): Promise<OrgRow> {
   return request.get(`/orgs/${id}`)
 }
 
-// 新增组织
-export function createOrg(data: OrgFormRequest): Promise<OrgRow> {
+// 新增组织；组织的审批开关（bizType=ORG）开启时，响应 approvalEnabled=true、
+// approvalRequest 非空、data 为空，不创建真实组织记录，需等待审批通过后才生效
+// （add-master-data-approval-workflow change design.md Decision 9）；开关关闭时行为
+// 与本 change 之前一致，approvalEnabled=false、data 为创建后的组织数据
+export function createOrg(data: OrgFormRequest): Promise<WriteOperationResult<OrgRow>> {
   return request.post('/orgs', data)
 }
 
-// 编辑组织
-export function updateOrg(id: number, data: OrgFormRequest): Promise<OrgRow> {
+// 编辑组织，响应结构同上
+export function updateOrg(id: number, data: OrgFormRequest): Promise<WriteOperationResult<OrgRow>> {
   return request.put(`/orgs/${id}`, data)
 }
 
-// 启用组织
-export function enableOrg(id: number): Promise<void> {
+// 启用组织，响应结构同上
+export function enableOrg(id: number): Promise<WriteOperationResult<OrgRow>> {
   return request.put(`/orgs/${id}/enable`)
 }
 
-// 停用组织
-export function disableOrg(id: number): Promise<void> {
+// 停用组织，响应结构同上
+export function disableOrg(id: number): Promise<WriteOperationResult<OrgRow>> {
   return request.put(`/orgs/${id}/disable`)
 }
 
-// 删除组织（逻辑删除，若存在未删除的子组织后端会拒绝并返回错误信息）
-export function deleteOrg(id: number): Promise<void> {
+// 删除组织（逻辑删除，若存在未删除的子组织，审批通过时后端会拒绝并返回错误信息），响应结构同上
+export function deleteOrg(id: number): Promise<WriteOperationResult<OrgRow>> {
   return request.delete(`/orgs/${id}`)
 }

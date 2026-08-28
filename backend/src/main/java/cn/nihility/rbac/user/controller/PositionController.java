@@ -1,7 +1,11 @@
 package cn.nihility.rbac.user.controller;
 
 import cn.nihility.rbac.common.result.PageResult;
-import cn.nihility.rbac.common.result.Result;
+import cn.nihility.rbac.approval.constant.ApprovalOperationType;
+import cn.nihility.rbac.approval.dto.WriteOperationResultVO;
+import cn.nihility.rbac.approval.service.ApprovalRequestService;
+import cn.nihility.rbac.approval.service.ApprovalSwitchService;
+import cn.nihility.rbac.formfield.constant.FormFieldBizType;
 import cn.nihility.rbac.user.dto.PositionCreateRequest;
 import cn.nihility.rbac.user.dto.PositionUpdateRequest;
 import cn.nihility.rbac.user.dto.PositionVO;
@@ -31,6 +35,12 @@ public class PositionController {
 
     /** 任职管理业务逻辑接口。 */
     private final PositionService positionService;
+
+    /** 审批申请业务接口。 */
+    private final ApprovalRequestService approvalRequestService;
+
+    /** 审批开关业务接口。 */
+    private final ApprovalSwitchService approvalSwitchService;
 
     /**
      * 按所属组织 id 分页查询任职记录，{@code orgId} 必填。
@@ -72,8 +82,15 @@ public class PositionController {
      */
     @Operation(summary = "创建任职记录", description = "须指定一个已存在的用户，新建记录默认状态为启用")
     @PostMapping("/api/positions")
-    public PositionVO create(@Valid @RequestBody PositionCreateRequest request) {
-        return positionService.create(request);
+    public WriteOperationResultVO<?> create(@Valid @RequestBody PositionCreateRequest request) {
+        if (!approvalSwitchService.isEnabled(FormFieldBizType.POSITION)) {
+            return WriteOperationResultVO.applied(positionService.create(request));
+        }
+        return approvalRequestService.submit(
+                FormFieldBizType.POSITION,
+                ApprovalOperationType.CREATE,
+                null,
+                request);
     }
 
     /**
@@ -85,8 +102,17 @@ public class PositionController {
      */
     @Operation(summary = "更新任职记录", description = "更新所属组织/任职类型/任职地址/任职电话/显示序号/备注，所属用户及状态请勿通过本接口修改")
     @PutMapping("/api/positions/{id}")
-    public PositionVO update(@PathVariable Long id, @Valid @RequestBody PositionUpdateRequest request) {
-        return positionService.update(id, request);
+    public WriteOperationResultVO<?> update(
+            @PathVariable Long id,
+            @Valid @RequestBody PositionUpdateRequest request) {
+        if (!approvalSwitchService.isEnabled(FormFieldBizType.POSITION)) {
+            return WriteOperationResultVO.applied(positionService.update(id, request));
+        }
+        return approvalRequestService.submit(
+                FormFieldBizType.POSITION,
+                ApprovalOperationType.UPDATE,
+                id,
+                request);
     }
 
     /**
@@ -97,8 +123,15 @@ public class PositionController {
      */
     @Operation(summary = "启用任职记录")
     @PutMapping("/api/positions/{id}/enable")
-    public PositionVO enable(@PathVariable Long id) {
-        return positionService.enable(id);
+    public WriteOperationResultVO<?> enable(@PathVariable Long id) {
+        if (!approvalSwitchService.isEnabled(FormFieldBizType.POSITION)) {
+            return WriteOperationResultVO.applied(positionService.enable(id));
+        }
+        return approvalRequestService.submit(
+                FormFieldBizType.POSITION,
+                ApprovalOperationType.ENABLE,
+                id,
+                null);
     }
 
     /**
@@ -109,8 +142,15 @@ public class PositionController {
      */
     @Operation(summary = "停用任职记录")
     @PutMapping("/api/positions/{id}/disable")
-    public PositionVO disable(@PathVariable Long id) {
-        return positionService.disable(id);
+    public WriteOperationResultVO<?> disable(@PathVariable Long id) {
+        if (!approvalSwitchService.isEnabled(FormFieldBizType.POSITION)) {
+            return WriteOperationResultVO.applied(positionService.disable(id));
+        }
+        return approvalRequestService.submit(
+                FormFieldBizType.POSITION,
+                ApprovalOperationType.DISABLE,
+                id,
+                null);
     }
 
     /**
@@ -121,8 +161,15 @@ public class PositionController {
      */
     @Operation(summary = "删除任职记录", description = "逻辑删除，不做物理删除")
     @DeleteMapping("/api/positions/{id}")
-    public Result<Void> delete(@PathVariable Long id) {
-        positionService.delete(id);
-        return Result.success();
+    public WriteOperationResultVO<?> delete(@PathVariable Long id) {
+        if (!approvalSwitchService.isEnabled(FormFieldBizType.POSITION)) {
+            positionService.delete(id);
+            return WriteOperationResultVO.applied(null);
+        }
+        return approvalRequestService.submit(
+                FormFieldBizType.POSITION,
+                ApprovalOperationType.DELETE,
+                id,
+                null);
     }
 }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useAppStore } from '@/stores/app'
 import { PAGE_SIZE_OPTIONS } from '@/constants/pagination'
@@ -22,6 +22,7 @@ import {
   FORM_FIELD_CONTROL_TYPE_TEXT,
 } from '@/types/formField'
 import { usePermission } from '@/composables/usePermission'
+import { notifyWriteResult } from '@/utils/approvalResult'
 
 const appStore = useAppStore()
 const router = useRouter()
@@ -184,15 +185,19 @@ async function submitForm() {
       ownerId: form.ownerId as number,
       orgId: form.orgId as number,
     } as unknown as AppFormRequest
+    // 应用审批开关开启时（默认），下面两个接口返回的是待审批的申请信息而非真正生效的应用
+    // 数据；notifyWriteResult 按响应的 approvalEnabled 分流提示文案，并返回是否需要刷新
+    // 本地列表——只有直接生效（开关关闭）时才需要，见 design.md Decision 9
+    let shouldRefresh: boolean
     if (dialogMode.value === 'create') {
-      await appApi.createApp(payload)
-      ElMessage.success('新增成功')
+      shouldRefresh = notifyWriteResult(await appApi.createApp(payload), '新增成功')
     } else {
-      await appApi.updateApp(editingId.value as number, payload)
-      ElMessage.success('保存成功')
+      shouldRefresh = notifyWriteResult(await appApi.updateApp(editingId.value as number, payload), '保存成功')
     }
     dialogVisible.value = false
-    await appStore.refreshAfterMutation()
+    if (shouldRefresh) {
+      await appStore.refreshAfterMutation()
+    }
   } finally {
     submitting.value = false
   }
@@ -213,14 +218,15 @@ function goToConfig(row: AppRow) {
 // ---- 行操作：启用/停用、删除 ----
 
 async function toggleStatus(row: AppRow) {
+  let shouldRefresh: boolean
   if (row.status === APP_STATUS_ENABLED) {
-    await appApi.disableApp(row.id)
-    ElMessage.success('已停用')
+    shouldRefresh = notifyWriteResult(await appApi.disableApp(row.id), '已停用')
   } else {
-    await appApi.enableApp(row.id)
-    ElMessage.success('已启用')
+    shouldRefresh = notifyWriteResult(await appApi.enableApp(row.id), '已启用')
   }
-  await appStore.refreshAfterMutation()
+  if (shouldRefresh) {
+    await appStore.refreshAfterMutation()
+  }
 }
 
 async function handleDelete(row: AppRow) {
@@ -229,9 +235,10 @@ async function handleDelete(row: AppRow) {
     confirmButtonText: '删除',
     cancelButtonText: '取消',
   })
-  await appApi.deleteApp(row.id)
-  ElMessage.success('删除成功')
-  await appStore.refreshAfterMutation()
+  const shouldRefresh = notifyWriteResult(await appApi.deleteApp(row.id), '删除成功')
+  if (shouldRefresh) {
+    await appStore.refreshAfterMutation()
+  }
 }
 </script>
 

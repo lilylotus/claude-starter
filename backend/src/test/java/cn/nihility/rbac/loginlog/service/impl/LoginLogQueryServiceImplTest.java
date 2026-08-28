@@ -30,8 +30,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
  * （全部参数为空/按 loginAccount/按 loginResult 精确匹配）、按登录发起时间降序排列、
  * {@code loginResultLabel} 中文文案填充等分支逻辑。脱离 Spring 容器的纯单元测试里调用
  * {@code getSqlSegment()} 做条件断言（正常启动时该方法用于生成实际 SQL 片段，这里仅
- * 借助其副作用验证 wrapper 内部条件是否符合预期，脱离 Spring 容器手动初始化的
- * {@code TableInfo} 不经过全局驼峰转下划线配置，片段中字段名为 Java 属性名，非数据库列名）。
+ * 借助其副作用验证 wrapper 内部条件是否符合预期。手动初始化的 {@code TableInfo}
+ * 必须使用与生产环境一致的驼峰转下划线配置，避免污染同一测试 JVM 的全局缓存。
  */
 @ExtendWith(MockitoExtension.class)
 class LoginLogQueryServiceImplTest {
@@ -51,6 +51,7 @@ class LoginLogQueryServiceImplTest {
     @BeforeAll
     static void primeLambdaColumnCache() {
         Configuration configuration = new Configuration();
+        configuration.setMapUnderscoreToCamelCase(true);
         MapperBuilderAssistant assistant = new MapperBuilderAssistant(configuration, "loginLogQueryServiceImplTest");
         assistant.setCurrentNamespace(LoginLogEntity.class.getName());
         TableInfoHelper.initTableInfo(assistant, LoginLogEntity.class);
@@ -90,8 +91,8 @@ class LoginLogQueryServiceImplTest {
         ArgumentCaptor<LambdaQueryWrapper<LoginLogEntity>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
         verify(loginLogMapper).selectPage(any(Page.class), captor.capture());
         String sqlSegment = captor.getValue().getSqlSegment();
-        assertThat(sqlSegment).doesNotContain("loginAccount =").doesNotContain("loginResult =");
-        assertThat(sqlSegment).contains("ORDER BY createTime DESC");
+        assertThat(sqlSegment).doesNotContain("login_account =").doesNotContain("login_result =");
+        assertThat(sqlSegment).contains("ORDER BY create_time DESC");
     }
 
     /**
@@ -113,8 +114,8 @@ class LoginLogQueryServiceImplTest {
         ArgumentCaptor<LambdaQueryWrapper<LoginLogEntity>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
         verify(loginLogMapper).selectPage(any(Page.class), captor.capture());
         String sqlSegment = captor.getValue().getSqlSegment();
-        assertThat(sqlSegment).contains("loginAccount =");
-        assertThat(sqlSegment).doesNotContain("loginResult =");
+        assertThat(sqlSegment).contains("login_account =");
+        assertThat(sqlSegment).doesNotContain("login_result =");
     }
 
     /**
@@ -136,8 +137,8 @@ class LoginLogQueryServiceImplTest {
         ArgumentCaptor<LambdaQueryWrapper<LoginLogEntity>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
         verify(loginLogMapper).selectPage(any(Page.class), captor.capture());
         String sqlSegment = captor.getValue().getSqlSegment();
-        assertThat(sqlSegment).contains("loginResult =");
-        assertThat(sqlSegment).doesNotContain("loginAccount =");
+        assertThat(sqlSegment).contains("login_result =");
+        assertThat(sqlSegment).doesNotContain("login_account =");
     }
 
     /**

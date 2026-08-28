@@ -5,7 +5,11 @@ import cn.nihility.rbac.app.dto.AppUpdateRequest;
 import cn.nihility.rbac.app.dto.AppVO;
 import cn.nihility.rbac.app.service.AppService;
 import cn.nihility.rbac.common.result.PageResult;
-import cn.nihility.rbac.common.result.Result;
+import cn.nihility.rbac.approval.constant.ApprovalOperationType;
+import cn.nihility.rbac.approval.dto.WriteOperationResultVO;
+import cn.nihility.rbac.approval.service.ApprovalRequestService;
+import cn.nihility.rbac.approval.service.ApprovalSwitchService;
+import cn.nihility.rbac.formfield.constant.FormFieldBizType;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -30,6 +34,12 @@ public class AppController {
 
     /** 应用业务逻辑接口。 */
     private final AppService appService;
+
+    /** 审批申请业务接口。 */
+    private final ApprovalRequestService approvalRequestService;
+
+    /** 审批开关业务接口。 */
+    private final ApprovalSwitchService approvalSwitchService;
 
     /**
      * 分页查询应用，不支持筛选，按显示序号降序排列。
@@ -68,8 +78,15 @@ public class AppController {
      */
     @Operation(summary = "创建应用")
     @PostMapping("/api/apps")
-    public AppVO create(@Valid @RequestBody AppCreateRequest request) {
-        return appService.create(request);
+    public WriteOperationResultVO<?> create(@Valid @RequestBody AppCreateRequest request) {
+        if (!approvalSwitchService.isEnabled(FormFieldBizType.APP)) {
+            return WriteOperationResultVO.applied(appService.create(request));
+        }
+        return approvalRequestService.submit(
+                FormFieldBizType.APP,
+                ApprovalOperationType.CREATE,
+                null,
+                request);
     }
 
     /**
@@ -81,8 +98,15 @@ public class AppController {
      */
     @Operation(summary = "更新应用", description = "更新应用基础信息，状态请使用启用/停用接口")
     @PutMapping("/api/apps/{id}")
-    public AppVO update(@PathVariable Long id, @Valid @RequestBody AppUpdateRequest request) {
-        return appService.update(id, request);
+    public WriteOperationResultVO<?> update(@PathVariable Long id, @Valid @RequestBody AppUpdateRequest request) {
+        if (!approvalSwitchService.isEnabled(FormFieldBizType.APP)) {
+            return WriteOperationResultVO.applied(appService.update(id, request));
+        }
+        return approvalRequestService.submit(
+                FormFieldBizType.APP,
+                ApprovalOperationType.UPDATE,
+                id,
+                request);
     }
 
     /**
@@ -93,8 +117,15 @@ public class AppController {
      */
     @Operation(summary = "启用应用")
     @PutMapping("/api/apps/{id}/enable")
-    public AppVO enable(@PathVariable Long id) {
-        return appService.enable(id);
+    public WriteOperationResultVO<?> enable(@PathVariable Long id) {
+        if (!approvalSwitchService.isEnabled(FormFieldBizType.APP)) {
+            return WriteOperationResultVO.applied(appService.enable(id));
+        }
+        return approvalRequestService.submit(
+                FormFieldBizType.APP,
+                ApprovalOperationType.ENABLE,
+                id,
+                null);
     }
 
     /**
@@ -105,8 +136,15 @@ public class AppController {
      */
     @Operation(summary = "停用应用")
     @PutMapping("/api/apps/{id}/disable")
-    public AppVO disable(@PathVariable Long id) {
-        return appService.disable(id);
+    public WriteOperationResultVO<?> disable(@PathVariable Long id) {
+        if (!approvalSwitchService.isEnabled(FormFieldBizType.APP)) {
+            return WriteOperationResultVO.applied(appService.disable(id));
+        }
+        return approvalRequestService.submit(
+                FormFieldBizType.APP,
+                ApprovalOperationType.DISABLE,
+                id,
+                null);
     }
 
     /**
@@ -117,8 +155,15 @@ public class AppController {
      */
     @Operation(summary = "删除应用", description = "逻辑删除")
     @DeleteMapping("/api/apps/{id}")
-    public Result<Void> delete(@PathVariable Long id) {
-        appService.delete(id);
-        return Result.success();
+    public WriteOperationResultVO<?> delete(@PathVariable Long id) {
+        if (!approvalSwitchService.isEnabled(FormFieldBizType.APP)) {
+            appService.delete(id);
+            return WriteOperationResultVO.applied(null);
+        }
+        return approvalRequestService.submit(
+                FormFieldBizType.APP,
+                ApprovalOperationType.DELETE,
+                id,
+                null);
     }
 }

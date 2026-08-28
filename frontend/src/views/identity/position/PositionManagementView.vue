@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import type Node from 'element-plus/es/components/tree/src/model/node'
 import { usePositionStore } from '@/stores/position'
@@ -23,6 +23,7 @@ import {
   FORM_FIELD_CONTROL_TYPE_TEXT,
 } from '@/types/formField'
 import { usePermission } from '@/composables/usePermission'
+import { notifyWriteResult } from '@/utils/approvalResult'
 
 const positionStore = usePositionStore()
 const router = useRouter()
@@ -213,17 +214,27 @@ async function submitForm() {
       ...positionFields.buildSubmitModel(activeFields, dynamicValues),
       orgId: orgId as number,
     } as unknown as PositionFormRequest
+    // 任职审批开关开启时（默认），下面两个接口返回的是待审批的申请信息而非真正生效的任职
+    // 数据；notifyWriteResult 按响应的 approvalEnabled 分流提示文案，并返回是否需要刷新
+    // 本地列表——只有直接生效（开关关闭）时才需要，见 design.md Decision 9
+    let shouldRefresh: boolean
     if (dialogMode.value === 'create') {
       // 表单校验已经确保 userId 必填，此处已知非空；编辑接口不接受 userId 字段，
       // 换人须删除重建，因此只在新增分支拼接该字段
-      await positionApi.createPosition({ ...payload, userId: userId as number })
-      ElMessage.success('新增成功')
+      shouldRefresh = notifyWriteResult(
+        await positionApi.createPosition({ ...payload, userId: userId as number }),
+        '新增成功',
+      )
     } else {
-      await positionApi.updatePosition(editingId.value as number, payload)
-      ElMessage.success('保存成功')
+      shouldRefresh = notifyWriteResult(
+        await positionApi.updatePosition(editingId.value as number, payload),
+        '保存成功',
+      )
     }
     dialogVisible.value = false
-    await positionStore.refreshAfterMutation()
+    if (shouldRefresh) {
+      await positionStore.refreshAfterMutation()
+    }
   } finally {
     submitting.value = false
   }
@@ -239,14 +250,15 @@ function goToDetail(row: PositionRow) {
 // 任职记录的增删改不影响左侧组织树本身，无需像组织管理那样联动刷新左侧树
 
 async function toggleStatus(row: PositionRow) {
+  let shouldRefresh: boolean
   if (row.status === POSITION_STATUS_ENABLED) {
-    await positionApi.disablePosition(row.id)
-    ElMessage.success('已停用')
+    shouldRefresh = notifyWriteResult(await positionApi.disablePosition(row.id), '已停用')
   } else {
-    await positionApi.enablePosition(row.id)
-    ElMessage.success('已启用')
+    shouldRefresh = notifyWriteResult(await positionApi.enablePosition(row.id), '已启用')
   }
-  await positionStore.refreshAfterMutation()
+  if (shouldRefresh) {
+    await positionStore.refreshAfterMutation()
+  }
 }
 
 async function handleDelete(row: PositionRow) {
@@ -255,9 +267,10 @@ async function handleDelete(row: PositionRow) {
     confirmButtonText: '删除',
     cancelButtonText: '取消',
   })
-  await positionApi.deletePosition(row.id)
-  ElMessage.success('删除成功')
-  await positionStore.refreshAfterMutation()
+  const shouldRefresh = notifyWriteResult(await positionApi.deletePosition(row.id), '删除成功')
+  if (shouldRefresh) {
+    await positionStore.refreshAfterMutation()
+  }
 }
 </script>
 

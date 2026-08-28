@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  主数据变更审批流程定义（add-master-data-approval-workflow change design.md
+  Decision 3）：开始事件 -> 用户任务"审批" -> 排他网关按 approved 流程变量分流 ->
+  "已通过"/"已拒绝"两个结束事件。仅用于驱动审批申请的状态机与审计轨迹：
+  - 用户任务不设置 flowable:candidateGroups/flowable:candidateUsers，谁能处理该任务
+    完全由项目自有的 ApprovalManagement:request:approve 权限点判断，不引入 Flowable
+    IDM 身份/候选组机制（design.md Decision 3）。
+  - 流程变量 requestId 携带对应 tab_approval_request.id，供追溯；approved 变量在
+    完成用户任务时由 ApprovalProcessService 设置，驱动排他网关分流。
+  - 单一用户任务节点，为后续从单级审批演进到多级审批预留空间（新增/调整本文件
+    即可，不需要重写审批申请的数据模型或四个业务模块的接入方式）。
+-->
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:flowable="http://flowable.org/bpmn"
+             targetNamespace="cn.nihility.rbac.approval">
+
+    <process id="masterDataApprovalProcess" name="主数据变更审批流程" isExecutable="true">
+
+        <startEvent id="startEvent" name="提交审批申请" />
+
+        <userTask id="approveTask" name="审批" />
+
+        <exclusiveGateway id="approveGateway" name="审批结果判断" />
+
+        <endEvent id="approvedEndEvent" name="已通过" />
+
+        <endEvent id="rejectedEndEvent" name="已拒绝" />
+
+        <sequenceFlow id="flowStartToApprove" sourceRef="startEvent" targetRef="approveTask" />
+
+        <sequenceFlow id="flowApproveToGateway" sourceRef="approveTask" targetRef="approveGateway" />
+
+        <sequenceFlow id="flowApprovedEnd" sourceRef="approveGateway" targetRef="approvedEndEvent">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${approved == true}]]></conditionExpression>
+        </sequenceFlow>
+
+        <sequenceFlow id="flowRejectedEnd" sourceRef="approveGateway" targetRef="rejectedEndEvent">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${approved == false}]]></conditionExpression>
+        </sequenceFlow>
+
+    </process>
+</definitions>

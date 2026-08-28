@@ -219,6 +219,23 @@ LoginLogManagement（登录日志管理，/log/login-logs）
 （只读页面，仅支持分页查询，没有 add/edit/enable/disable/delete）
 
 
+审批管理
+--------
+
+ApprovalManagement（审批管理，见 openspec/changes/add-master-data-approval-workflow）
+- ApprovalManagement:request:view      查看"我的申请"（当前登录用户查看/撤回自己提交的
+  审批申请，/approval/mine）；侧边栏菜单项对任何登录用户恒展示，不受该权限点约束（自助
+  操作，参照"修改密码"页面的既有处理方式），该权限点仅作为该页面请求头 menu 的编码占位
+- ApprovalManagement:request:approve   待我审批页面访问、审批通过、拒绝（/approval/pending，
+  展示全部"待审批"状态的申请，不区分提交人）
+- ApprovalManagement:switch:view       审批设置页面访问（查看组织/用户/任职/应用四个业务
+  对象类型的审批开关状态，/approval/settings）
+- ApprovalManagement:switch:edit       修改审批开关（切换指定业务对象类型是否启用审批流程）
+（组织/用户/任职/应用四个管理页面的新增/编辑/启用/停用/删除按钮权限点不变——审批流程接入
+后仍复用原有的 add/edit/enable/disable/delete 权限点，只是调用接口后是否立即生效改由
+对应 bizType 的审批开关状态决定，不需要新增/拆分按钮级权限点）
+
+
 尚未实现（不计入以上编码，实现后再补充）
 --------
 

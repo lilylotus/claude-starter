@@ -86,13 +86,15 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
     /**
      * 仍需 {@code identity-token}/{@code menu} 校验，但豁免"首登强制改密"拦截与
      * "权限编码校验"的路径：修改密码、查询当前用户权限编码、首页概览统计、当前用户最近
-     * 操作，均为不区分权限点的自助操作。
+     * 操作，以及仅查询/撤回本人审批申请的接口，均为不区分权限点的自助操作。
      */
     private static final List<String> FIRST_LOGIN_WHITELIST = List.of(
             "/api/auth/password",
             "/api/auth/permissions",
             "/api/dashboard/stats",
-            "/api/dashboard/recent-operations");
+            "/api/dashboard/recent-operations",
+            "/api/approval-requests/mine",
+            "/api/approval-requests/*/cancel");
 
     /** Ant 风格路径匹配器，用于维护白名单。 */
     private static final AntPathMatcher PATH_MATCHER = new AntPathMatcher();

@@ -50,6 +50,12 @@ public final class OperationLogResourceType {
     /** Excel 导入字段配置。 */
     public static final String IMPORT_FIELD_CONFIG = "importFieldConfig";
 
+    /** 审批开关。 */
+    public static final String APPROVAL_SWITCH = "approvalSwitch";
+
+    /** 审批申请。 */
+    public static final String APPROVAL_REQUEST = "approvalRequest";
+
     /** 资源类型编码 -> 所属模块中文名。 */
     private static final Map<String, String> MODULE_NAMES = Map.ofEntries(
             Map.entry(ORG, "组织管理"),
@@ -64,7 +70,9 @@ public final class OperationLogResourceType {
             Map.entry(DICT_ITEM, "字典管理"),
             Map.entry(METADATA_FIELD, "元数据配置"),
             Map.entry(FORM_FIELD_DEFINITION, "表单管理"),
-            Map.entry(IMPORT_FIELD_CONFIG, "表单管理"));
+            Map.entry(IMPORT_FIELD_CONFIG, "表单管理"),
+            Map.entry(APPROVAL_SWITCH, "审批管理"),
+            Map.entry(APPROVAL_REQUEST, "审批管理"));
 
     /** 资源类型编码 -> 资源中文名。 */
     private static final Map<String, String> RESOURCE_NAMES = Map.ofEntries(
@@ -80,7 +88,9 @@ public final class OperationLogResourceType {
             Map.entry(DICT_ITEM, "字典项"),
             Map.entry(METADATA_FIELD, "元数据字段"),
             Map.entry(FORM_FIELD_DEFINITION, "表单字段定义"),
-            Map.entry(IMPORT_FIELD_CONFIG, "Excel 导入字段配置"));
+            Map.entry(IMPORT_FIELD_CONFIG, "Excel 导入字段配置"),
+            Map.entry(APPROVAL_SWITCH, "审批开关"),
+            Map.entry(APPROVAL_REQUEST, "审批申请"));
 
     /**
      * 工具类不允许实例化。

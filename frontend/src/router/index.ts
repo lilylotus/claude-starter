@@ -11,6 +11,9 @@ declare module 'vue-router' {
     description?: string
     permissionKey?: string
     requiresAuth?: boolean
+    // 自助类页面：路由守卫不因当前用户缺少 permissionKey 对应的权限点而拦截导航，
+    // 与 change-password 路由的既有豁免处理方式一致，见下方 beforeEach 第 4 步注释
+    selfService?: boolean
   }
 }
 
@@ -37,6 +40,9 @@ const implementedComponents: Record<string, () => Promise<unknown>> = {
   '/system/form-fields': () => import('@/views/system/formfields/FormFieldListView.vue'),
   '/log/operation-logs': () => import('@/views/system/log/OperationLogManagementView.vue'),
   '/log/login-logs': () => import('@/views/system/log/LoginLogManagementView.vue'),
+  '/approval/mine': () => import('@/views/approval/mine/MyApprovalRequestView.vue'),
+  '/approval/pending': () => import('@/views/approval/pending/PendingApprovalRequestView.vue'),
+  '/approval/settings': () => import('@/views/approval/settings/ApprovalSettingsView.vue'),
 }
 
 const menuRoutes = MENU_GROUPS.flatMap((group) =>
@@ -48,6 +54,7 @@ const menuRoutes = MENU_GROUPS.flatMap((group) =>
       title: child.title,
       description: stubDescriptions[child.path],
       permissionKey: child.permissionKey,
+      selfService: child.selfService,
     },
   })),
 )
@@ -217,9 +224,16 @@ router.beforeEach(async (to) => {
   //    不允许仅凭"入口不展示"这一层防线被绕过（直接改地址栏 URL 访问）。
   //    change-password 的 permissionKey 只是给请求头用的格式占位（未登记为真实权限点，
   //    权限编码集合里永远不会有它），豁免本项校验，否则首登用户会在 /dashboard 与
-  //    /change-password 之间被无限重定向
+  //    /change-password 之间被无限重定向；meta.selfService 为真的路由（目前仅"我的申请"）
+  //    同理豁免——它是任何登录用户都应当能访问的自助页面，permissionKey 只是给请求头用的
+  //    格式占位，不应作为"是否放行导航"的判断依据（见 types/menu.ts selfService 注释）
   const { hasPermission } = usePermission()
-  if (to.name !== 'change-password' && to.meta.permissionKey && !hasPermission(to.meta.permissionKey)) {
+  if (
+    to.name !== 'change-password' &&
+    !to.meta.selfService &&
+    to.meta.permissionKey &&
+    !hasPermission(to.meta.permissionKey)
+  ) {
     ElMessage.warning('没有权限访问该页面')
     return { path: '/dashboard' }
   }
