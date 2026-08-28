@@ -4,13 +4,9 @@ import cn.nihility.rbac.org.constant.OrgStatus;
 import cn.nihility.rbac.org.entity.OrgEntity;
 import cn.nihility.rbac.org.mapper.OrgMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Deque;
-import java.util.HashMap;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -24,9 +20,7 @@ import org.springframework.stereotype.Component;
  * 树/列表，如果 {@code OrgScopeService} 也依赖 {@code OrgService}，会构成 Spring 纯构造器
  * 注入无法解析的循环 bean 依赖（org-scope-data-permission change 实现过程中发现并规避的
  * 问题，见该 change design.md Decision 3 的补充说明）。
- * 展开算法延续 {@code OrgServiceImpl.getTree()} 已有的"全量加载未删除组织到内存、按
- * {@code parentId} 建邻接表"套路做 BFS 遍历，不使用 SQL 递归 CTE——运行环境是 MySQL 5.7，
- * 不支持 {@code WITH RECURSIVE}。
+ * 使用物化路径前缀查询展开范围，不依赖 MySQL 8 的递归 CTE，也不再全表加载组织数据。
  */
 @Component
 @RequiredArgsConstructor
@@ -47,26 +41,26 @@ public class OrgDescendantExpander {
             return new HashSet<>();
         }
 
-        Map<Long, List<Long>> childIdsByParentId = new HashMap<>();
-        List<OrgEntity> entities = orgMapper.selectList(new LambdaQueryWrapper<OrgEntity>()
+        List<OrgEntity> roots = orgMapper.selectList(new LambdaQueryWrapper<OrgEntity>()
+                .in(OrgEntity::getId, rootOrgIds)
                 .ne(OrgEntity::getStatus, OrgStatus.DELETED));
-        for (OrgEntity entity : entities) {
-            childIdsByParentId.computeIfAbsent(entity.getParentId(), key -> new ArrayList<>()).add(entity.getId());
+        if (roots.isEmpty()) {
+            return new HashSet<>();
         }
 
-        Set<Long> result = new HashSet<>(rootOrgIds);
-        Deque<Long> pending = new ArrayDeque<>(rootOrgIds);
-        while (!pending.isEmpty()) {
-            Long current = pending.poll();
-            List<Long> childIds = childIdsByParentId.get(current);
-            if (childIds == null) {
-                continue;
-            }
-            for (Long childId : childIds) {
-                if (result.add(childId)) {
-                    pending.offer(childId);
-                }
-            }
+        QueryWrapper<OrgEntity> pathQuery = new QueryWrapper<OrgEntity>()
+                .select("id")
+                .ne("status", OrgStatus.DELETED)
+                .and(wrapper -> {
+                    for (OrgEntity root : roots) {
+                        String path = root.getOrgPath();
+                        wrapper.or(item -> item.eq("org_path", path)
+                                .likeRight("org_path", path + "/"));
+                    }
+                });
+        Set<Long> result = new HashSet<>();
+        for (OrgEntity entity : orgMapper.selectList(pathQuery)) {
+            result.add(entity.getId());
         }
         return result;
     }

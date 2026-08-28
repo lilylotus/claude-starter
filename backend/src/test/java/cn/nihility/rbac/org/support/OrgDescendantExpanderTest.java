@@ -50,8 +50,12 @@ class OrgDescendantExpanderTest {
         OrgEntity child = buildEntity(2L, "研发部", "DEV", 1L, OrgStatus.ENABLED, 5);
         OrgEntity grandChild = buildEntity(3L, "研发一组", "DEV1", 2L, OrgStatus.ENABLED, 1);
         OrgEntity other = buildEntity(4L, "财务部", "FIN", 1L, OrgStatus.ENABLED, 4);
-        when(orgMapper.selectList(any(LambdaQueryWrapper.class)))
-                .thenReturn(List.of(root, child, grandChild, other));
+        root.setOrgPath("1");
+        child.setOrgPath("1/2");
+        grandChild.setOrgPath("1/2/3");
+        other.setOrgPath("1/4");
+        when(orgMapper.selectList(any()))
+                .thenReturn(List.of(child), List.of(child, grandChild));
 
         Set<Long> result = orgDescendantExpander.expandWithDescendants(Set.of(2L));
 

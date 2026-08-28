@@ -8,6 +8,34 @@
      与其他状态常量类保持一致，不再单独传参。 -->
 <mapper namespace="cn.nihility.rbac.org.mapper.OrgMapper">
 
+    <update id="cascadeUpdateOrgPath">
+        UPDATE tab_org
+        SET org_path = CONCAT(#{newPrefix}, SUBSTRING(org_path, CHAR_LENGTH(#{oldPrefix}) + 1)),
+            org_parent_path = CASE
+                WHEN LOCATE('/', REVERSE(CONCAT(#{newPrefix}, SUBSTRING(org_path,
+                    CHAR_LENGTH(#{oldPrefix}) + 1)))) = 0 THEN NULL
+                ELSE LEFT(CONCAT(#{newPrefix}, SUBSTRING(org_path, CHAR_LENGTH(#{oldPrefix}) + 1)),
+                    CHAR_LENGTH(CONCAT(#{newPrefix}, SUBSTRING(org_path,
+                    CHAR_LENGTH(#{oldPrefix}) + 1))) - LOCATE('/', REVERSE(CONCAT(#{newPrefix},
+                    SUBSTRING(org_path, CHAR_LENGTH(#{oldPrefix}) + 1)))))
+            END,
+            update_by = #{updateBy},
+            update_time = #{updateTime}
+        WHERE org_path = #{oldPrefix}
+           OR (LEFT(org_path, CHAR_LENGTH(#{oldPrefix})) = #{oldPrefix}
+               AND SUBSTRING(org_path, CHAR_LENGTH(#{oldPrefix}) + 1, 1) = '/')
+    </update>
+
+    <update id="cascadeUpdateOrgNamePath">
+        UPDATE tab_org
+        SET org_name_path = CONCAT(#{newPrefix}, SUBSTRING(org_name_path, CHAR_LENGTH(#{oldPrefix}) + 1)),
+            update_by = #{updateBy},
+            update_time = #{updateTime}
+        WHERE org_name_path = #{oldPrefix}
+           OR (LEFT(org_name_path, CHAR_LENGTH(#{oldPrefix})) = #{oldPrefix}
+               AND SUBSTRING(org_name_path, CHAR_LENGTH(#{oldPrefix}) + 1, 1) = '/')
+    </update>
+
     <select id="countByColumnValue" resultType="int">
         SELECT COUNT(*)
         FROM tab_org

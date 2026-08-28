@@ -37,6 +37,15 @@ public class OrgEntity {
     /** 上级组织编码，恒等于 parentId 对应父组织当前的 code，顶级组织为空。 */
     private String parentCode;
 
+    /** 从根组织到当前组织的 id 路径，以斜杠分隔。 */
+    private String orgPath;
+
+    /** 从根组织到当前组织的名称路径，以斜杠分隔。 */
+    private String orgNamePath;
+
+    /** 当前组织的父级 id 路径，顶级组织为空。 */
+    private String orgParentPath;
+
     /** 状态：2000=启用，3000=停用，-1000=已删除。 */
     private Integer status;
 

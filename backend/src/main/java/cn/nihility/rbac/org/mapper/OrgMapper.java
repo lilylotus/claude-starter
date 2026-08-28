@@ -19,6 +19,18 @@ import org.apache.ibatis.annotations.Param;
 @Mapper
 public interface OrgMapper extends BaseMapper<OrgEntity> {
 
+    /** 按旧路径前缀级联替换当前组织及其全部子孙组织的 id 路径。 */
+    int cascadeUpdateOrgPath(@Param("oldPrefix") String oldPrefix,
+            @Param("newPrefix") String newPrefix,
+            @Param("updateBy") String updateBy,
+            @Param("updateTime") LocalDateTime updateTime);
+
+    /** 按旧名称路径前缀级联替换当前组织及其全部子孙组织的名称路径。 */
+    int cascadeUpdateOrgNamePath(@Param("oldPrefix") String oldPrefix,
+            @Param("newPrefix") String newPrefix,
+            @Param("updateBy") String updateBy,
+            @Param("updateTime") LocalDateTime updateTime);
+
     /**
      * 统计未被逻辑删除的组织中，指定列等于给定值的记录数，供"表单字段定义"驱动的
      * 非锁定字段唯一性校验使用。{@code column} 只接受调用方从

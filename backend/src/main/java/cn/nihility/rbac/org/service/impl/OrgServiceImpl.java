@@ -196,12 +196,17 @@ public class OrgServiceImpl implements OrgService {
         OrgEntity entity = OrgConvert.INSTANCE.toEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(OrgStatus.ENABLED);
-        entity.setParentCode(resolveParentCode(request.getParentId()));
+        OrgEntity parent = resolveParent(request.getParentId());
+        entity.setParentCode(parent == null ? null : parent.getCode());
         entity.setCreateBy(operator);
         entity.setCreateTime(now);
         entity.setUpdateBy(operator);
         entity.setUpdateTime(now);
         orgMapper.insert(entity);
+        entity.setOrgParentPath(parent == null ? null : parent.getOrgPath());
+        entity.setOrgPath(joinPath(entity.getOrgParentPath(), entity.getId().toString()));
+        entity.setOrgNamePath(joinPath(parent == null ? null : parent.getOrgNamePath(), entity.getName()));
+        orgMapper.updateById(entity);
 
         operationLogRecorder.recordCreate(OperationLogResourceType.ORG, entity.getId(), entity.getName(),
                 toLogSnapshot(entity));
@@ -243,15 +248,40 @@ public class OrgServiceImpl implements OrgService {
 
         Long previousParentId = entity.getParentId();
         String previousCode = entity.getCode();
+        String previousName = entity.getName();
+        String previousOrgPath = entity.getOrgPath();
+        String previousOrgNamePath = entity.getOrgNamePath();
         boolean parentChanged = !Objects.equals(request.getParentId(), previousParentId);
+        OrgEntity newParent = parentChanged ? resolveParent(request.getParentId()) : null;
+        if (newParent != null && (newParent.getOrgPath().equals(previousOrgPath)
+                || newParent.getOrgPath().startsWith(previousOrgPath + "/"))) {
+            throw new BusinessException("上级组织不能是当前组织的下级组织");
+        }
 
         OrgConvert.INSTANCE.updateEntity(request, entity);
         if (parentChanged) {
-            entity.setParentCode(resolveParentCode(request.getParentId()));
+            entity.setParentCode(newParent == null ? null : newParent.getCode());
         }
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         orgMapper.updateById(entity);
+
+        LocalDateTime pathUpdateTime = entity.getUpdateTime();
+        String operator = entity.getUpdateBy();
+        if (parentChanged || !Objects.equals(previousName, entity.getName())) {
+            String parentNamePath = newParent == null ? null : newParent.getOrgNamePath();
+            String newNamePath = joinPath(parentChanged ? parentNamePath
+                    : parentNamePath(previousOrgNamePath), entity.getName());
+            orgMapper.cascadeUpdateOrgNamePath(previousOrgNamePath, newNamePath, operator, pathUpdateTime);
+            entity.setOrgNamePath(newNamePath);
+        }
+        if (parentChanged) {
+            String newParentPath = newParent == null ? null : newParent.getOrgPath();
+            String newOrgPath = joinPath(newParentPath, id.toString());
+            orgMapper.cascadeUpdateOrgPath(previousOrgPath, newOrgPath, operator, pathUpdateTime);
+            entity.setOrgParentPath(newParentPath);
+            entity.setOrgPath(newOrgPath);
+        }
 
         if (!Objects.equals(previousCode, entity.getCode())) {
             orgMapper.updateChildrenParentCode(id, entity.getCode());
@@ -283,6 +313,26 @@ public class OrgServiceImpl implements OrgService {
             return null;
         }
         return Optional.ofNullable(orgMapper.selectById(parentId)).map(OrgEntity::getCode).orElse(null);
+    }
+
+    /** 查询路径维护所需的父组织；顶级组织返回 {@code null}。 */
+    private OrgEntity resolveParent(Long parentId) {
+        if (parentId == null || parentId == ROOT_PARENT_ID) {
+            return null;
+        }
+        return Optional.ofNullable(orgMapper.selectById(parentId))
+                .orElseThrow(() -> new BusinessException("上级组织不存在"));
+    }
+
+    /** 拼接物化路径，父路径为空时直接返回当前节点值。 */
+    private String joinPath(String parentPath, String currentValue) {
+        return parentPath == null || parentPath.isBlank() ? currentValue : parentPath + "/" + currentValue;
+    }
+
+    /** 截取名称路径中的父路径。 */
+    private String parentNamePath(String orgNamePath) {
+        int separatorIndex = orgNamePath == null ? -1 : orgNamePath.lastIndexOf('/');
+        return separatorIndex < 0 ? null : orgNamePath.substring(0, separatorIndex);
     }
 
     /**
