@@ -295,6 +295,29 @@ public class UserServiceImpl implements UserService {
     }
 
     /**
+     * {@inheritDoc}
+     * <p>
+     * 不接入 {@link OrgScopeService}，与 {@link #getPage} 现状保持一致
+     * （master-data-excel-export change design.md Decision 2）。{@code toVOList} 会
+     * ignore {@code createBy}/{@code updateBy}（entity 落库内容是登录用户 id 的字符串），
+     * 需要另行批量回填为展示名，复用 {@link #fillAuditDisplayNames}。
+     */
+    @Override
+    public List<UserVO> listAllForExport() {
+        List<UserEntity> entities = userMapper.selectList(new LambdaQueryWrapper<UserEntity>()
+                .ne(UserEntity::getStatus, UserStatus.DELETED)
+                .orderByAsc(UserEntity::getId));
+
+        List<UserVO> records = UserConvert.INSTANCE.toVOList(entities);
+        for (int i = 0; i < entities.size(); i++) {
+            records.get(i).setCreateBy(entities.get(i).getCreateBy());
+            records.get(i).setUpdateBy(entities.get(i).getUpdateBy());
+        }
+        fillAuditDisplayNames(records);
+        return records;
+    }
+
+    /**
      * 变更用户状态（启用/停用）并返回更新后的详情。
      *
      * @param id     用户 id

@@ -199,6 +199,38 @@ class PositionServiceImplTest {
     }
 
     /**
+     * 管辖范围不受限时，导出用查询应不传 {@code allowedOrgIds} 过滤条件（传
+     * {@code null}），返回全部未删除任职记录（master-data-excel-export change
+     * design.md Decision 1）。
+     */
+    @Test
+    void listAllForExport_shouldPassNullAllowedOrgIds_whenScopeUnrestricted() {
+        PositionVO record = buildVO(10L, 1L, "张三", 100L, "研发部", PositionStatus.ENABLED);
+        when(userPositionMapper.selectAllForExport(null, PositionStatus.DELETED)).thenReturn(List.of(record));
+
+        List<PositionVO> result = positionService.listAllForExport();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getUserName()).isEqualTo("张三");
+    }
+
+    /**
+     * 管辖范围受限时，导出用查询应把解析得到的允许组织 id 全集透传给
+     * {@code selectAllForExport}（master-data-excel-export change design.md Decision 1）。
+     */
+    @Test
+    void listAllForExport_shouldPassAllowedOrgIds_whenScopeRestricted() {
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(100L)));
+        when(userPositionMapper.selectAllForExport(eq(Set.of(100L)), eq(PositionStatus.DELETED)))
+                .thenReturn(List.of(buildVO(10L, 1L, "张三", 100L, "研发部", PositionStatus.ENABLED)));
+
+        List<PositionVO> result = positionService.listAllForExport();
+
+        assertThat(result).hasSize(1);
+        verify(userPositionMapper).selectAllForExport(eq(Set.of(100L)), eq(PositionStatus.DELETED));
+    }
+
+    /**
      * 创建任职记录时，应显式将状态置为启用，并写入创建/更新审计信息。
      */
     @Test

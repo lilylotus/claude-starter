@@ -80,6 +80,14 @@ public class FormFieldDefinitionEntity {
     /** 是否在编辑表单中展示。 */
     private Boolean showInEdit;
 
+    /**
+     * 是否导出，决定该字段是否出现在 {@code master-data-excel-export} 能力的导出
+     * Excel 列中，与 {@code showInList} 是两个独立的开关，互不影响，也不受
+     * {@code cn.nihility.rbac.formfield.constant.LockedFormFields} 承重字段锁定
+     * 保护规则约束。
+     */
+    private Boolean showInExport;
+
     /** 表单中展示时是否可编辑，为否则只读展示。 */
     private Boolean editable;
 

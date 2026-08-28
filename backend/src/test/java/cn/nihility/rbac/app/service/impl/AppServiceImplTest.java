@@ -193,6 +193,37 @@ class AppServiceImplTest {
     }
 
     /**
+     * 管辖范围不受限时，导出用查询应返回全部未删除应用，不追加 org_id 过滤条件
+     * （master-data-excel-export change design.md Decision 1）。
+     */
+    @Test
+    void listAllForExport_shouldReturnAll_whenScopeUnrestricted() {
+        AppEntity entity = buildEntity(10L, 1L, 100L, AppStatus.ENABLED);
+        when(appMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(entity));
+
+        List<AppVO> result = appService.listAllForExport();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getId()).isEqualTo(10L);
+    }
+
+    /**
+     * 管辖范围受限时，导出用查询应追加 org_id IN (:allowedOrgIds) 过滤条件
+     * （master-data-excel-export change design.md Decision 1）。
+     */
+    @Test
+    void listAllForExport_shouldAppendOrgIdInCondition_whenScopeRestricted() {
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(100L, 200L)));
+        when(appMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
+
+        appService.listAllForExport();
+
+        ArgumentCaptor<LambdaQueryWrapper<AppEntity>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(appMapper).selectList(captor.capture());
+        assertThat(captor.getValue().getSqlSegment()).contains("orgId IN");
+    }
+
+    /**
      * 创建应用时，应显式将状态置为启用，并写入创建/更新审计信息。
      */
     @Test

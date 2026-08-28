@@ -115,6 +115,7 @@ interface FieldDialogForm {
   showInList: boolean
   showInCreate: boolean
   showInEdit: boolean
+  showInExport: boolean
   editable: boolean
   validateRegex: string
   placeholder: string
@@ -133,6 +134,7 @@ function blankForm(): FieldDialogForm {
     showInList: true,
     showInCreate: true,
     showInEdit: true,
+    showInExport: true,
     editable: true,
     validateRegex: '',
     placeholder: '',
@@ -190,6 +192,7 @@ async function openEditDialog(row: FormFieldDefinition) {
   form.showInList = row.showInList
   form.showInCreate = row.showInCreate
   form.showInEdit = row.showInEdit
+  form.showInExport = row.showInExport
   form.editable = row.editable
   form.validateRegex = row.validateRegex ?? ''
   form.placeholder = row.placeholder ?? ''
@@ -227,6 +230,7 @@ async function submitForm() {
       showInList: form.showInList,
       showInCreate: form.showInCreate,
       showInEdit: form.showInEdit,
+      showInExport: form.showInExport,
       editable: form.editable,
       validateRegex: form.validateRegex,
       placeholder: form.placeholder,
@@ -302,6 +306,7 @@ async function handleDelete(row: FormFieldDefinition) {
           <el-tag v-if="(row as FormFieldDefinition).showInList" size="small" class="form-field-tag">列表</el-tag>
           <el-tag v-if="(row as FormFieldDefinition).showInCreate" size="small" class="form-field-tag">新增</el-tag>
           <el-tag v-if="(row as FormFieldDefinition).showInEdit" size="small" class="form-field-tag">编辑</el-tag>
+          <el-tag v-if="(row as FormFieldDefinition).showInExport" size="small" class="form-field-tag">导出</el-tag>
           <el-tag v-if="!(row as FormFieldDefinition).editable" size="small" type="info" class="form-field-tag">
             只读
           </el-tag>
@@ -398,6 +403,9 @@ async function handleDelete(row: FormFieldDefinition) {
           </el-form-item>
           <el-form-item label="编辑展示">
             <el-switch v-model="form.showInEdit" :disabled="editingLocked" />
+          </el-form-item>
+          <el-form-item label="是否导出">
+            <el-switch v-model="form.showInExport" />
           </el-form-item>
           <el-form-item label="是否可编辑">
             <el-switch v-model="form.editable" />

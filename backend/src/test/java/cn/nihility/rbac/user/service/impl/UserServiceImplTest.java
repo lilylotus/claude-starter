@@ -3,6 +3,7 @@ package cn.nihility.rbac.user.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -477,6 +478,26 @@ class UserServiceImplTest {
         assertThat(pageResult.getRecords()).hasSize(1);
         verify(userMapper).selectUserPage(any(), any(), any(), any(), eq(Set.of(100L, 200L)), eq(UserStatus.DELETED),
                 eq(PositionStatus.DELETED));
+    }
+
+    /**
+     * 管辖范围受限时，用户导出用查询仍应返回全部未删除用户，不接入
+     * {@link OrgScopeService}、不做组织范围收紧，与 {@link #getPage} 现状保持一致
+     * （master-data-excel-export change design.md Decision 2）。
+     */
+    @Test
+    void listAllForExport_shouldReturnAllUsers_evenWhenScopeRestricted() {
+        // lenient：本用例刻意验证即便配置了管辖范围受限的打桩，listAllForExport 也不会
+        // 消费它（不接入 OrgScopeService），该打桩预期不会被调用。
+        lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(100L)));
+        UserEntity entity = buildUserEntity(1L, "张三", "U001", UserStatus.ENABLED);
+        when(userMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(entity));
+
+        List<UserVO> result = userService.listAllForExport();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getName()).isEqualTo("张三");
+        verify(userMapper, never()).selectUserPage(any(), any(), any(), any(), any(), anyInt(), anyInt());
     }
 
     /**

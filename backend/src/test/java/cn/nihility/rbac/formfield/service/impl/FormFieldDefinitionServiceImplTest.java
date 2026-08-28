@@ -292,6 +292,24 @@ class FormFieldDefinitionServiceImplTest {
     }
 
     /**
+     * 动态字段渲染元数据接口的返回结果应携带 {@code showInExport}，供
+     * {@code excelexport} 能力与前端表单管理页面读取（tasks.md 2.4）。
+     */
+    @Test
+    void buildRenderSchema_shouldIncludeShowInExport() {
+        FormFieldDefinitionEntity entity = buildDefinitionEntity(22L, "USER", 1L, "remark", FormFieldStatus.ENABLED);
+        entity.setShowInExport(false);
+        when(formFieldDefinitionMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(entity));
+        when(metadataFieldMapper.selectByIds(any()))
+                .thenReturn(List.of(buildMetadataEntity(1L, "USER", "remark", MetadataFieldStatus.ENABLED)));
+
+        List<FormFieldRenderItemVO> result = formFieldDefinitionService.buildRenderSchema("USER");
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getShowInExport()).isFalse();
+    }
+
+    /**
      * 创建字段定义成功时，{@code bizType} 应取自所绑定元数据字段，而不是请求参数。
      */
     @Test
@@ -377,6 +395,26 @@ class FormFieldDefinitionServiceImplTest {
         formFieldDefinitionService.update(10L, request);
 
         assertThat(entity.getFieldName()).isEqualTo("组织编码（新展示名）");
+    }
+
+    /**
+     * 更新一条绑定承重字段（{@code code}）的定义时，把 {@code showInExport} 从
+     * {@code true} 改为 {@code false} 应正常保存，不受承重字段锁定保护规则约束
+     * （design.md Decision 3；tasks.md 2.3）。
+     */
+    @Test
+    void update_shouldSucceed_whenLockedDefinitionTogglesShowInExport() {
+        FormFieldDefinitionEntity entity = buildDefinitionEntity(10L, "ORG", 1L, "code", FormFieldStatus.ENABLED);
+        when(formFieldDefinitionMapper.selectById(10L)).thenReturn(entity);
+        when(metadataFieldMapper.selectById(1L))
+                .thenReturn(buildMetadataEntity(1L, "ORG", "code", MetadataFieldStatus.ENABLED));
+
+        FormFieldDefinitionUpdateRequest request = buildUpdateRequest();
+        request.setShowInExport(false);
+
+        formFieldDefinitionService.update(10L, request);
+
+        assertThat(entity.getShowInExport()).isFalse();
     }
 
     /**
@@ -625,6 +663,7 @@ class FormFieldDefinitionServiceImplTest {
         request.setShowInList(true);
         request.setShowInCreate(true);
         request.setShowInEdit(true);
+        request.setShowInExport(true);
         request.setEditable(true);
         request.setShowOrder(0);
         return request;
@@ -645,6 +684,7 @@ class FormFieldDefinitionServiceImplTest {
         request.setShowInList(true);
         request.setShowInCreate(true);
         request.setShowInEdit(true);
+        request.setShowInExport(true);
         request.setEditable(true);
         request.setShowOrder(0);
         return request;
@@ -696,6 +736,7 @@ class FormFieldDefinitionServiceImplTest {
                 .showInList(true)
                 .showInCreate(true)
                 .showInEdit(true)
+                .showInExport(true)
                 .editable(true)
                 .showOrder(0)
                 .status(status)

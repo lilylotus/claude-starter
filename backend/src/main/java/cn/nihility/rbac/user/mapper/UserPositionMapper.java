@@ -68,4 +68,18 @@ public interface UserPositionMapper extends BaseMapper<UserPositionEntity> {
     List<UserPositionEntity> selectSyncPullPage(@Param("offset") int offset, @Param("limit") int limit,
             @Param("updateTimeFrom") LocalDateTime updateTimeFrom, @Param("updateTimeTo") LocalDateTime updateTimeTo,
             @Param("ids") List<Long> ids, @Param("allowedOrgIds") Set<Long> allowedOrgIds);
+
+    /**
+     * 按管辖组织范围查询全部未被逻辑删除的任职记录，关联回填所属用户姓名、所属组织
+     * 名称，不分页，供 {@code master-data-excel-export} 能力的任职导出使用
+     * （design.md Decision 1）。{@code allowedOrgIds} 为 {@code null} 表示不限制，
+     * 非 {@code null}（哪怕是空集合）表示受限，按 {@code org_id IN (:allowedOrgIds)}
+     * 过滤。
+     *
+     * @param allowedOrgIds 管辖组织 id 全集，{@code null} 表示不受限制
+     * @param deletedStatus 逻辑删除状态值，用于在 SQL 里排除已删除记录
+     * @return 任职记录列表，按 id 升序排列，已包含 {@code userName}/{@code orgName}
+     */
+    List<PositionVO> selectAllForExport(@Param("allowedOrgIds") Set<Long> allowedOrgIds,
+            @Param("deletedStatus") int deletedStatus);
 }

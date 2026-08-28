@@ -128,6 +128,21 @@ public class PositionServiceImpl implements PositionService {
 
     /**
      * {@inheritDoc}
+     * <p>
+     * 复用 {@link UserPositionMapper#selectAllForExport} 按管辖组织范围过滤，不分页
+     * （master-data-excel-export change design.md Decision 1）。
+     */
+    @Override
+    public List<PositionVO> listAllForExport() {
+        Optional<Set<Long>> allowedOrgIds = orgScopeService.resolveAllowedOrgIds(CurrentUserContext.getUserId());
+        List<PositionVO> records =
+                userPositionMapper.selectAllForExport(allowedOrgIds.orElse(null), PositionStatus.DELETED);
+        fillAuditDisplayNames(records);
+        return records;
+    }
+
+    /**
+     * {@inheritDoc}
      */
     @Override
     public PositionVO create(PositionCreateRequest request) {

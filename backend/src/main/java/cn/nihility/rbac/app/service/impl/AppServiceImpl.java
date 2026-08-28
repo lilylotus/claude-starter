@@ -255,6 +255,32 @@ public class AppServiceImpl implements AppService {
     }
 
     /**
+     * {@inheritDoc}
+     * <p>
+     * 复用 {@link #getPage} 已具备的 {@code allowedOrgIds} 过滤逻辑，去掉分页
+     * （master-data-excel-export change design.md Decision 1）。
+     */
+    @Override
+    public List<AppVO> listAllForExport() {
+        LambdaQueryWrapper<AppEntity> wrapper = new LambdaQueryWrapper<AppEntity>()
+                .ne(AppEntity::getStatus, AppStatus.DELETED)
+                .orderByAsc(AppEntity::getId);
+
+        Optional<Set<Long>> allowedOrgIds = orgScopeService.resolveAllowedOrgIds(CurrentUserContext.getUserId());
+        if (allowedOrgIds.isPresent()) {
+            Set<Long> allowed = allowedOrgIds.get();
+            if (allowed.isEmpty()) {
+                wrapper.eq(AppEntity::getId, -1L);
+            } else {
+                wrapper.in(AppEntity::getOrgId, allowed);
+            }
+        }
+
+        List<AppEntity> entities = appMapper.selectList(wrapper);
+        return toVOListWithNames(entities);
+    }
+
+    /**
      * 变更应用状态（启用/停用）并返回更新后的详情。
      *
      * @param id     应用 id

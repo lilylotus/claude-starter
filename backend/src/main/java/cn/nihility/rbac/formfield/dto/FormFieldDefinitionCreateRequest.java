@@ -62,6 +62,11 @@ public class FormFieldDefinitionCreateRequest {
     @Schema(description = "是否在编辑表单中展示", defaultValue = "true")
     private Boolean showInEdit = Boolean.TRUE;
 
+    /** 是否导出，独立于是否列表展示，决定该字段是否出现在导出 Excel 的列中。 */
+    @NotNull(message = "是否导出不能为空")
+    @Schema(description = "是否导出，独立于是否列表展示配置", defaultValue = "true")
+    private Boolean showInExport = Boolean.TRUE;
+
     /** 表单中展示时是否可编辑，为否则只读展示。 */
     @NotNull(message = "是否可编辑不能为空")
     @Schema(description = "表单中展示时是否可编辑", defaultValue = "true")

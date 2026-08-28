@@ -332,6 +332,26 @@ public class OrgServiceImpl implements OrgService {
     }
 
     /**
+     * {@inheritDoc}
+     * <p>
+     * 按 id 升序查询全部未删除组织，受限时按 {@code allowedOrgIds} 过滤，不做树形组装
+     * （master-data-excel-export change design.md Decision 1）。
+     */
+    @Override
+    public List<OrgVO> listAllForExport() {
+        List<OrgEntity> entities = orgMapper.selectList(new LambdaQueryWrapper<OrgEntity>()
+                .ne(OrgEntity::getStatus, OrgStatus.DELETED)
+                .orderByAsc(OrgEntity::getId));
+
+        Optional<Set<Long>> allowedOrgIds = orgScopeService.resolveAllowedOrgIds(CurrentUserContext.getUserId());
+        if (allowedOrgIds.isPresent()) {
+            Set<Long> allowed = allowedOrgIds.get();
+            entities = entities.stream().filter(entity -> allowed.contains(entity.getId())).toList();
+        }
+        return toVOListWithParentName(entities);
+    }
+
+    /**
      * 变更组织状态（启用/停用）并返回更新后的详情。
      *
      * @param id     组织 id

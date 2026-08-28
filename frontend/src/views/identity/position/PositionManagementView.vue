@@ -10,6 +10,7 @@ import * as positionApi from '@/api/position'
 import * as orgApi from '@/api/org'
 import * as userApi from '@/api/user'
 import * as excelImportApi from '@/api/excelImport'
+import * as excelExportApi from '@/api/excelExport'
 import BatchImportDialog from '@/components/BatchImportDialog.vue'
 import { POSITION_STATUS_ENABLED, type PositionFormRequest, type PositionRow } from '@/types/position'
 import type { OrgTreeNode } from '@/types/org'
@@ -82,6 +83,12 @@ const batchImportVisible = ref(false)
 
 async function handleDownloadTemplate() {
   await excelImportApi.downloadImportTemplate('POSITION')
+}
+
+// ---- Excel 导出：按当前登录用户管辖组织范围导出全量任职数据 ----
+
+async function handleExportExcel() {
+  await excelExportApi.exportExcel('POSITION')
 }
 
 async function handleImported() {
@@ -281,6 +288,7 @@ async function handleDelete(row: PositionRow) {
         <div class="position-panel__actions">
           <el-button v-if="hasPermission('PositionManagement:position:importTemplate')" @click="handleDownloadTemplate">下载导入模板</el-button>
           <el-button v-if="hasPermission('PositionManagement:position:import')" @click="batchImportVisible = true">批量导入</el-button>
+          <el-button v-if="hasPermission('PositionManagement:position:export')" @click="handleExportExcel">导出Excel</el-button>
           <el-button
             v-if="hasPermission('PositionManagement:position:add')"
             type="primary"

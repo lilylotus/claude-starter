@@ -85,4 +85,13 @@ public interface OrgService {
      * @param id 组织 id
      */
     void delete(Long id);
+
+    /**
+     * 按当前登录用户的管辖组织范围查询全部未删除组织，返回按 id 升序排列的扁平列表
+     * （不做树形组装），供 {@code master-data-excel-export} 能力的组织导出使用
+     * （design.md Decision 1）。
+     *
+     * @return 管辖范围内的组织详情列表
+     */
+    List<OrgVO> listAllForExport();
 }

@@ -42,13 +42,15 @@ export interface FormFieldDefinition {
   showInList: boolean
   showInCreate: boolean
   showInEdit: boolean
+  showInExport: boolean
   editable: boolean
   validateRegex: string | null
   placeholder: string | null
   showOrder: number
   status: number
   // 是否为承重字段（锁定字段），计算得出，不落库；锁定的定义不可停用/删除，
-  // 也不可把必填/新增或编辑表单展示改为否
+  // 也不可把必填/新增或编辑表单展示改为否；showInExport 不受此锁定保护，任何字段
+  // （含承重字段）均可自由调整导出可见性
   locked: boolean
   createBy: string
   createTime: string
@@ -74,6 +76,7 @@ export interface FormFieldRenderItem {
   showInList: boolean
   showInCreate: boolean
   showInEdit: boolean
+  showInExport: boolean
   editable: boolean
   locked: boolean
   validateRegex: string | null
@@ -93,6 +96,7 @@ export interface FormFieldDefinitionFormFields {
   showInList: boolean
   showInCreate: boolean
   showInEdit: boolean
+  showInExport: boolean
   editable: boolean
   validateRegex: string
   placeholder: string

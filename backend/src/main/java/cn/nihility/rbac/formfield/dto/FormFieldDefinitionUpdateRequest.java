@@ -70,6 +70,14 @@ public class FormFieldDefinitionUpdateRequest {
     @Schema(description = "是否在编辑表单中展示")
     private Boolean showInEdit;
 
+    /**
+     * 是否导出，独立于是否列表展示，决定该字段是否出现在导出 Excel 的列中；不受承重
+     * 字段锁定保护规则约束，绑定承重字段的定义也可自由调整该值。
+     */
+    @NotNull(message = "是否导出不能为空")
+    @Schema(description = "是否导出，独立于是否列表展示配置，不受承重字段锁定保护规则约束")
+    private Boolean showInExport;
+
     /** 表单中展示时是否可编辑，为否则只读展示。 */
     @NotNull(message = "是否可编辑不能为空")
     @Schema(description = "表单中展示时是否可编辑")

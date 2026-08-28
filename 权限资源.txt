@@ -32,6 +32,7 @@ OrgManagement（组织管理，/identity/orgs）
 - OrgManagement:org:delete     删除组织
 - OrgManagement:org:importTemplate   下载组织导入模板
 - OrgManagement:org:import           批量导入组织
+- OrgManagement:org:export           导出组织
 
 UserManagement（用户管理，/identity/users）
 - UserManagement:user:view     用户管理页面访问
@@ -43,6 +44,7 @@ UserManagement（用户管理，/identity/users）
 - UserManagement:user:delete   删除用户
 - UserManagement:user:importTemplate 下载用户导入模板
 - UserManagement:user:import         批量导入用户
+- UserManagement:user:export         导出用户
 - UserManagement:user:resetPassword  重置用户密码
 
 PositionManagement（任职管理，/identity/positions）
@@ -55,6 +57,7 @@ PositionManagement（任职管理，/identity/positions）
 - PositionManagement:position:delete   删除任职记录
 - PositionManagement:position:importTemplate 下载任职导入模板
 - PositionManagement:position:import         批量导入任职记录
+- PositionManagement:position:export         导出任职记录
 
 UpstreamManagement（上游数据管理，/identity/upstream）
 - UpstreamManagement:source:view       上游数据管理页面访问
@@ -85,6 +88,7 @@ AppManagement（应用管理，/application/list）
 - AppManagement:app:delete     删除应用
 - AppManagement:app:importTemplate   下载应用导入模板
 - AppManagement:app:import           批量导入应用
+- AppManagement:app:export           导出应用
 - AppManagement:app:config                   应用配置页面访问（AppId/AccessKey/SecretKey、
   签名算法、同步配置、认证管理，/application/list/:id/config）
 - AppManagement:app:config:resetSecret       重置 SecretKey

@@ -4,6 +4,7 @@ import cn.nihility.rbac.app.dto.AppCreateRequest;
 import cn.nihility.rbac.app.dto.AppUpdateRequest;
 import cn.nihility.rbac.app.dto.AppVO;
 import cn.nihility.rbac.common.result.PageResult;
+import java.util.List;
 
 /**
  * 应用管理业务逻辑接口，提供应用主数据的分页查询、维护、启停用、逻辑删除能力。
@@ -66,4 +67,12 @@ public interface AppService {
      * @param id 应用 id
      */
     void delete(Long id);
+
+    /**
+     * 按当前登录用户的管辖组织范围查询全部未删除应用，不分页，供
+     * {@code master-data-excel-export} 能力的应用导出使用（design.md Decision 1）。
+     *
+     * @return 管辖范围内的应用详情列表
+     */
+    List<AppVO> listAllForExport();
 }

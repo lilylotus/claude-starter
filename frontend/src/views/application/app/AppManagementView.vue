@@ -9,6 +9,7 @@ import * as appApi from '@/api/app'
 import * as orgApi from '@/api/org'
 import * as userApi from '@/api/user'
 import * as excelImportApi from '@/api/excelImport'
+import * as excelExportApi from '@/api/excelExport'
 import BatchImportDialog from '@/components/BatchImportDialog.vue'
 import { APP_STATUS_ENABLED, type AppFormRequest, type AppRow } from '@/types/app'
 import type { OrgTreeNode } from '@/types/org'
@@ -48,6 +49,12 @@ const batchImportVisible = ref(false)
 
 async function handleDownloadTemplate() {
   await excelImportApi.downloadImportTemplate('APP')
+}
+
+// ---- Excel 导出：按当前登录用户管辖组织范围导出全量应用数据 ----
+
+async function handleExportExcel() {
+  await excelExportApi.exportExcel('APP')
 }
 
 async function handleImported() {
@@ -236,6 +243,7 @@ async function handleDelete(row: AppRow) {
         <div class="app-panel__actions">
           <el-button v-if="hasPermission('AppManagement:app:importTemplate')" @click="handleDownloadTemplate">下载导入模板</el-button>
           <el-button v-if="hasPermission('AppManagement:app:import')" @click="batchImportVisible = true">批量导入</el-button>
+          <el-button v-if="hasPermission('AppManagement:app:export')" @click="handleExportExcel">导出Excel</el-button>
           <el-button v-if="hasPermission('AppManagement:app:add')" type="primary" @click="openCreateDialog">新增</el-button>
         </div>
       </header>

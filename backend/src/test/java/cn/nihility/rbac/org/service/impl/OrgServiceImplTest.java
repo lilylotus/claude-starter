@@ -432,6 +432,39 @@ class OrgServiceImplTest {
     }
 
     /**
+     * 管辖范围不受限时，导出用查询应返回全部未删除组织
+     * （master-data-excel-export change design.md Decision 1）。
+     */
+    @Test
+    void listAllForExport_shouldReturnAll_whenScopeUnrestricted() {
+        OrgEntity orgA = buildEntity(1L, "总公司", "ROOT", 0L, OrgStatus.ENABLED, 10);
+        OrgEntity orgB = buildEntity(2L, "研发部", "DEV", 1L, OrgStatus.ENABLED, 5);
+        when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(orgA, orgB));
+
+        List<OrgVO> result = orgService.listAllForExport();
+
+        assertThat(result).hasSize(2);
+        assertThat(result).extracting(OrgVO::getId).containsExactly(1L, 2L);
+    }
+
+    /**
+     * 管辖范围受限时，导出用查询应只返回允许集合内的组织
+     * （master-data-excel-export change design.md Decision 1）。
+     */
+    @Test
+    void listAllForExport_shouldFilterByScope_whenRestricted() {
+        OrgEntity orgA = buildEntity(1L, "总公司", "ROOT", 0L, OrgStatus.ENABLED, 10);
+        OrgEntity orgB = buildEntity(2L, "研发部", "DEV", 1L, OrgStatus.ENABLED, 5);
+        when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(orgA, orgB));
+        when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.of(Set.of(2L)));
+
+        List<OrgVO> result = orgService.listAllForExport();
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getId()).isEqualTo(2L);
+    }
+
+    /**
      * 查询一个不存在（或已被逻辑删除）的组织时，应抛出业务异常。
      */
     @Test

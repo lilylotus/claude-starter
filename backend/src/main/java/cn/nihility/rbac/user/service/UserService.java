@@ -4,6 +4,7 @@ import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.user.dto.UserCreateRequest;
 import cn.nihility.rbac.user.dto.UserUpdateRequest;
 import cn.nihility.rbac.user.dto.UserVO;
+import java.util.List;
 
 /**
  * 用户业务逻辑接口。
@@ -79,4 +80,13 @@ public interface UserService {
      * @param id 用户 id
      */
     void resetPassword(Long id);
+
+    /**
+     * 查询全部未逻辑删除的用户，不做组织范围收紧、不分页，供
+     * {@code master-data-excel-export} 能力的用户导出使用；与 {@link #getPage} 现状
+     * 保持一致（design.md Decision 2：用户导出维持现状，不按管辖组织范围收窄）。
+     *
+     * @return 全部未删除用户的详情列表
+     */
+    List<UserVO> listAllForExport();
 }

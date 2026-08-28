@@ -9,6 +9,7 @@ import { useCurrentUserPermissionStore } from '@/stores/currentUserPermission'
 import { PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import * as orgApi from '@/api/org'
 import * as excelImportApi from '@/api/excelImport'
+import * as excelExportApi from '@/api/excelExport'
 import BatchImportDialog from '@/components/BatchImportDialog.vue'
 import { ORG_STATUS_ENABLED, type OrgFormRequest, type OrgRow, type OrgTreeNode } from '@/types/org'
 import { useDynamicFormFields } from '@/composables/useDynamicFormFields'
@@ -92,6 +93,12 @@ const batchImportVisible = ref(false)
 
 async function handleDownloadTemplate() {
   await excelImportApi.downloadImportTemplate('ORG')
+}
+
+// ---- Excel 导出：按当前登录用户管辖组织范围导出全量组织数据 ----
+
+async function handleExportExcel() {
+  await excelExportApi.exportExcel('ORG')
 }
 
 // 批量导入一次可能在文件里任意多个不同父组织下新增/更新组织，局部刷新
@@ -313,6 +320,7 @@ async function handleDelete(row: OrgRow) {
         <div class="org-panel__actions">
           <el-button v-if="hasPermission('OrgManagement:org:importTemplate')" @click="handleDownloadTemplate">下载导入模板</el-button>
           <el-button v-if="hasPermission('OrgManagement:org:import')" @click="batchImportVisible = true">批量导入</el-button>
+          <el-button v-if="hasPermission('OrgManagement:org:export')" @click="handleExportExcel">导出Excel</el-button>
           <el-button v-if="hasPermission('OrgManagement:org:add')" type="primary" @click="openCreateDialog">新增</el-button>
         </div>
       </header>

@@ -10,6 +10,7 @@ import * as userApi from '@/api/user'
 import * as orgApi from '@/api/org'
 import * as dictApi from '@/api/dict'
 import * as excelImportApi from '@/api/excelImport'
+import * as excelExportApi from '@/api/excelExport'
 import BatchImportDialog from '@/components/BatchImportDialog.vue'
 import {
   USER_STATUS_ENABLED,
@@ -83,6 +84,12 @@ const batchImportVisible = ref(false)
 
 async function handleDownloadTemplate() {
   await excelImportApi.downloadImportTemplate('USER')
+}
+
+// ---- Excel 导出：导出全部未删除人员数据（不做组织范围收紧，与 GET /api/users 现状一致）----
+
+async function handleExportExcel() {
+  await excelExportApi.exportExcel('USER')
 }
 
 async function handleImported() {
@@ -293,6 +300,7 @@ async function handleResetPassword(row: UserRow) {
         <div class="user-panel__actions">
           <el-button v-if="hasPermission('UserManagement:user:importTemplate')" @click="handleDownloadTemplate">下载导入模板</el-button>
           <el-button v-if="hasPermission('UserManagement:user:import')" @click="batchImportVisible = true">批量导入</el-button>
+          <el-button v-if="hasPermission('UserManagement:user:export')" @click="handleExportExcel">导出Excel</el-button>
           <el-button v-if="hasPermission('UserManagement:user:add')" type="primary" @click="openCreateDialog">新增</el-button>
         </div>
       </header>

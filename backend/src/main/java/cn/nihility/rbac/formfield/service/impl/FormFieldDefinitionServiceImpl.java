@@ -267,6 +267,7 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
                     .showInList(vo.getShowInList())
                     .showInCreate(vo.getShowInCreate())
                     .showInEdit(vo.getShowInEdit())
+                    .showInExport(vo.getShowInExport())
                     .editable(vo.getEditable())
                     .locked(vo.getLocked())
                     .validateRegex(vo.getValidateRegex())
@@ -502,6 +503,7 @@ public class FormFieldDefinitionServiceImpl implements FormFieldDefinitionServic
         snapshot.put("列表展示", entity.getShowInList());
         snapshot.put("新增展示", entity.getShowInCreate());
         snapshot.put("编辑展示", entity.getShowInEdit());
+        snapshot.put("导出展示", entity.getShowInExport());
         snapshot.put("可编辑", entity.getEditable());
         snapshot.put("显示序号", entity.getShowOrder());
         snapshot.put("状态", statusLabel(entity.getStatus()));

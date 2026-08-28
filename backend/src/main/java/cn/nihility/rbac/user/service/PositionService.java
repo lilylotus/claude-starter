@@ -4,6 +4,7 @@ import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.user.dto.PositionCreateRequest;
 import cn.nihility.rbac.user.dto.PositionUpdateRequest;
 import cn.nihility.rbac.user.dto.PositionVO;
+import java.util.List;
 
 /**
  * 任职管理业务逻辑接口，以组织为导航维度对任职记录做独立查询与维护，
@@ -68,4 +69,12 @@ public interface PositionService {
      * @param id 任职记录 id
      */
     void delete(Long id);
+
+    /**
+     * 按当前登录用户的管辖组织范围查询全部未删除任职记录，不分页，供
+     * {@code master-data-excel-export} 能力的任职导出使用（design.md Decision 1）。
+     *
+     * @return 管辖范围内的任职记录详情列表
+     */
+    List<PositionVO> listAllForExport();
 }

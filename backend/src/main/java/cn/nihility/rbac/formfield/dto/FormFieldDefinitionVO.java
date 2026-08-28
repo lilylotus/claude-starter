@@ -77,6 +77,10 @@ public class FormFieldDefinitionVO {
     @Schema(description = "是否在编辑表单中展示")
     private Boolean showInEdit;
 
+    /** 是否导出，独立于是否列表展示，决定该字段是否出现在导出 Excel 的列中。 */
+    @Schema(description = "是否导出，独立于是否列表展示配置")
+    private Boolean showInExport;
+
     /** 表单中展示时是否可编辑。 */
     @Schema(description = "表单中展示时是否可编辑")
     private Boolean editable;
