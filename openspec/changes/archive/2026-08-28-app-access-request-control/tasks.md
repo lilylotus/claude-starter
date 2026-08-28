@@ -59,4 +59,4 @@
 ## 10. OpenSpec 收尾
 
 - [x] 10.1 实现完成后运行 `openspec-doc-sync` 对齐 `proposal.md`/`design.md`/`tasks.md` 与实际改动
-- [ ] 10.2 视用户指示决定是否执行 `openspec-sync-specs`——注意本次 delta 依赖的基线是 `app-access-authorization` change 已实现但尚未同步进 `openspec/specs/` 的内容，执行前需要先确认 `app-access-authorization` 的 delta 是否已同步，避免顺序颠倒导致合并结果与主 spec 脱节（归档仍为用户手动触发，不自动执行）
+- [x] 10.2 视用户指示决定是否执行 `openspec-sync-specs`——2026-08-28 归档前核对，主 spec（`app-access-authorization`/`app-sso-protocol-runtime`）已通过后续功能提交手动同步到位，本变更新增的"策略规则的请求控制条件"等需求均已体现在主 spec，用户确认无需再跑自动合并，直接按已同步状态归档

@@ -108,4 +108,4 @@
 ## 13. OpenSpec 收尾
 
 - [x] 13.1 实现完成后运行 `openspec-doc-sync` 对齐 `proposal.md`/`design.md`/`tasks.md` 与实际改动
-- [ ] 13.2 视用户指示决定是否执行 `openspec-sync-specs` 把本变更的 delta spec 应用到 `openspec/specs/app-sync-notify-pull/spec.md`、`openspec/specs/app-api-credentials/spec.md`（归档仍为用户手动触发，不自动执行）
+- [x] 13.2 视用户指示决定是否执行 `openspec-sync-specs` 把本变更的 delta spec 应用到 `openspec/specs/app-sync-notify-pull/spec.md`、`openspec/specs/app-api-credentials/spec.md`——2026-08-28 归档前核对，主 spec 已通过后续功能提交手动同步到位（REMOVED 的三个变更记录相关需求已从主 spec 移除，ADDED/MODIFIED 的分页拉取需求已体现），用户确认无需再跑自动合并，直接按已同步状态归档

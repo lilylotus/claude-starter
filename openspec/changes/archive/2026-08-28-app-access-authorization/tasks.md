@@ -67,7 +67,7 @@
 ## 10. OpenSpec 收尾
 
 - [x] 10.1 实现完成后运行 `openspec-doc-sync` 对齐 `proposal.md`/`design.md`/`tasks.md` 与实际改动
-- [ ] 10.2 视用户指示决定是否执行 `openspec-sync-specs` 把本变更的 delta spec 应用到 `openspec/specs/app-access-authorization/spec.md`（新建）与 `openspec/specs/app-sso-protocol-runtime/spec.md`（归档仍为用户手动触发，不自动执行）
+- [x] 10.2 视用户指示决定是否执行 `openspec-sync-specs` 把本变更的 delta spec 应用到 `openspec/specs/app-access-authorization/spec.md`（新建）与 `openspec/specs/app-sso-protocol-runtime/spec.md`——2026-08-28 归档前核对，主 spec 内容已通过后续功能提交手动同步到位（两份 delta 涉及的需求标题均已体现在主 spec），用户确认无需再跑自动合并，直接按已同步状态归档
 
 ## 11. 修正：默认管理员菜单/权限点种子数据（实现后补）
 
