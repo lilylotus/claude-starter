@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -62,7 +63,7 @@ public class ApprovalSwitchServiceImpl implements ApprovalSwitchService {
      * {@inheritDoc}
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public ApprovalSwitchVO update(String bizType, boolean enabled) {
         ApprovalSwitchEntity entity = getExisting(bizType);
         Map<String, Object> before = snapshot(entity);

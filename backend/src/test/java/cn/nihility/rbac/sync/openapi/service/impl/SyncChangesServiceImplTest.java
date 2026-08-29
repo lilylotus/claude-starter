@@ -87,14 +87,14 @@ class SyncChangesServiceImplTest {
         assertThatThrownBy(() -> service.changes(request)).isInstanceOf(BusinessException.class);
     }
 
-    /**
-     * {@code DICT} 不在 {@code /changes} 支持范围内，应拒绝（区别于 {@code /pull}/{@code /digest}）。
-     */
+    /** {@code DICT} 是增量变更接口支持的第六类实体。 */
     @Test
-    void changes_shouldRejectDictEntityType() {
+    void changes_shouldAcceptDictEntityType() {
+        when(appConfigMapper.selectOne(any()))
+                .thenReturn(AppConfigEntity.builder().appRefId(1L).syncMasterEnabled(false).configEpoch(1L).build());
         SyncChangesRequest request = SyncChangesRequest.builder().entityType(SyncDomain.DICT).build();
 
-        assertThatThrownBy(() -> service.changes(request)).isInstanceOf(BusinessException.class);
+        assertThat(service.changes(request).getEntityType()).isEqualTo(SyncDomain.DICT);
     }
 
     /**
@@ -195,6 +195,41 @@ class SyncChangesServiceImplTest {
         assertThat(result.isHasMore()).isFalse();
         assertThat(result.getConfigEpoch()).isEqualTo("7");
         verify(appSyncCursorService).advance(1L, SyncDomain.ORG, 105L);
+    }
+
+    /**
+     * 超过 JavaScript 安全整数上限的游标与标识应按十进制字符串精确解析并原样输出。
+     */
+    @Test
+    void changes_shouldRoundTripBigintsBeyondJavaScriptSafeIntegerAsStrings() {
+        long sinceSeq = 9007199254740992L;
+        long changeSeq = 9007199254740993L;
+        long eventId = 9007199254740994L;
+        long entityId = 9007199254740995L;
+        long entityVersion = 9007199254740996L;
+        when(appConfigMapper.selectOne(any()))
+                .thenReturn(AppConfigEntity.builder().appRefId(1L).syncMasterEnabled(true).configEpoch(7L).build());
+        when(appSyncDomainConfigMapper.selectOne(any())).thenReturn(
+                AppSyncDomainConfigEntity.builder().syncDomain(SyncDomain.APP).syncEnabled(true).pageSize(20)
+                        .build());
+        when(appSyncMetadataService.getRetentionFloorSeq()).thenReturn(0L);
+        AppDataChangeLogEntity entity = AppDataChangeLogEntity.builder().changeSeq(changeSeq).eventId(eventId)
+                .entityType(SyncDomain.APP).entityId(entityId).operationType("UPDATE")
+                .entityVersion(entityVersion).changeTime(LocalDateTime.of(2026, 1, 1, 0, 0)).build();
+        when(appDataChangeLogMapper.selectChanges(SyncDomain.APP, sinceSeq, 20, null))
+                .thenReturn(List.of(entity));
+        SyncChangesRequest request = SyncChangesRequest.builder().entityType(SyncDomain.APP)
+                .sinceSeq(Long.toString(sinceSeq)).build();
+
+        SyncChangesPageVO result = service.changes(request);
+
+        assertThat(result.getSinceSeq()).isEqualTo("9007199254740992");
+        assertThat(result.getNextSeq()).isEqualTo("9007199254740993");
+        assertThat(result.getRecords().get(0).getChangeSeq()).isEqualTo("9007199254740993");
+        assertThat(result.getRecords().get(0).getEventId()).isEqualTo("9007199254740994");
+        assertThat(result.getRecords().get(0).getEntityId()).isEqualTo("9007199254740995");
+        assertThat(result.getRecords().get(0).getEntityVersion()).isEqualTo("9007199254740996");
+        verify(appSyncCursorService).advance(1L, SyncDomain.APP, changeSeq);
     }
 
     /**

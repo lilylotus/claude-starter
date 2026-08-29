@@ -11,6 +11,7 @@ import java.util.Collections;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /** 全局应用数据变更流水服务实现。 */
@@ -31,7 +32,7 @@ public class AppDataChangeLogServiceImpl implements AppDataChangeLogService {
      * 独立提交/回滚（app-sync-changelog-pull change design.md Decision 6）。
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public AppDataChangeLogEntity append(DomainChangeEvent event) {
         LocalDateTime now = LocalDateTime.now();
         AppDataChangeLogEntity entity = AppDataChangeLogEntity.builder()
@@ -62,7 +63,7 @@ public class AppDataChangeLogServiceImpl implements AppDataChangeLogService {
      * design.md Decision 8）。
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public int cleanupExpiredBatch(LocalDateTime cutoff, int batchSize) {
         List<Long> expiredChangeSeqBatch = mapper.selectExpiredChangeSeqBatch(cutoff, batchSize);
         if (expiredChangeSeqBatch.isEmpty()) {

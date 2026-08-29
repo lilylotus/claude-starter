@@ -108,7 +108,7 @@ public class ImportRowExecutor {
      * @param rowValues 本行数据，key 为 {@code fieldCode}，value 为单元格文本（已 trim，缺失列缺省不存在于该 map）
      * @param configs   当前 bizType 下启用的导入字段配置列表
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public void processRow(String bizType, Map<String, String> rowValues, List<ImportFieldConfigVO> configs) {
         checkRequiredColumns(rowValues, configs);
         resolveDictColumns(rowValues, configs);

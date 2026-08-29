@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 import cn.nihility.rbac.app.constant.AppStatus;
 import cn.nihility.rbac.app.entity.AppEntity;
 import cn.nihility.rbac.app.mapper.AppMapper;
+import cn.nihility.rbac.app.mapper.AppConfigMapper;
 import cn.nihility.rbac.app.sync.constant.SyncDomain;
 import cn.nihility.rbac.app.sync.constant.TransformType;
 import cn.nihility.rbac.app.sync.dto.AppSyncDomainConfigUpdateRequest;
@@ -36,10 +37,12 @@ import cn.nihility.rbac.metadata.constant.MetadataFieldStatus;
 import cn.nihility.rbac.metadata.entity.MetadataFieldEntity;
 import cn.nihility.rbac.metadata.mapper.MetadataFieldMapper;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.sync.openapi.config.SyncRateLimitProperties;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -72,6 +75,13 @@ class AppSyncConfigServiceImplTest {
     @Mock
     private AppMapper appMapper;
 
+    /** 被测服务的应用总配置数据访问依赖。 */
+    @Mock
+    private AppConfigMapper appConfigMapper;
+
+    /** 对外同步接口请求规模上限配置。 */
+    private SyncRateLimitProperties syncRateLimitProperties;
+
     /** 被测服务的元数据字段数据访问依赖，使用 Mockito 打桩。 */
     @Mock
     private MetadataFieldMapper metadataFieldMapper;
@@ -97,9 +107,11 @@ class AppSyncConfigServiceImplTest {
      */
     @BeforeEach
     void setUp() {
+        syncRateLimitProperties = new SyncRateLimitProperties();
         appSyncConfigService = new AppSyncConfigServiceImpl(appSyncDomainConfigMapper, appSyncFieldMappingMapper,
-                appSyncOrgScopeMapper, appMapper, metadataFieldMapper, orgScopeService, currentOperatorService,
-                operationLogRecorder);
+                appSyncOrgScopeMapper, syncRateLimitProperties, appMapper, appConfigMapper, metadataFieldMapper,
+                orgScopeService,
+                currentOperatorService, operationLogRecorder);
         lenient().when(orgScopeService.resolveAllowedOrgIds(any())).thenReturn(Optional.empty());
         lenient().when(orgScopeService.isOrgIdAllowed(any(), any())).thenAnswer(invocation -> orgScopeService
                 .resolveAllowedOrgIds(invocation.getArgument(0))
@@ -166,6 +178,20 @@ class AppSyncConfigServiceImplTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("非法的数据域");
         verify(appSyncDomainConfigMapper, never()).updateById(any(AppSyncDomainConfigEntity.class));
+    }
+
+    /** 分页大小超过硬上限时应在更新配置和递增 epoch 前拒绝。 */
+    @Test
+    void updateDomainConfig_shouldRejectRequest_whenPageSizeExceedsLimit() {
+        AppSyncDomainConfigUpdateRequest request = new AppSyncDomainConfigUpdateRequest();
+        request.setSyncEnabled(true);
+        request.setPageSize(501);
+
+        assertThatThrownBy(() -> appSyncConfigService.updateDomainConfig(10L, SyncDomain.ORG, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("拉取分页大小不能超过 500");
+        verify(appSyncDomainConfigMapper, never()).updateById(any(AppSyncDomainConfigEntity.class));
+        verify(appConfigMapper, never()).incrementConfigEpoch(anyLong(), any(), any());
     }
 
     /**
@@ -483,6 +509,27 @@ class AppSyncConfigServiceImplTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("不能重复添加");
         verify(appSyncOrgScopeMapper, never()).delete(any());
+    }
+
+    /** 组织范围根超过硬上限时应在修改数据库前拒绝。 */
+    @Test
+    void replaceOrgScope_shouldRejectRequest_whenRootCountExceedsLimit() {
+        AppEntity appEntity = buildAppEntity(10L, 100L, AppStatus.ENABLED);
+        when(appMapper.selectById(10L)).thenReturn(appEntity);
+        List<AppSyncOrgScopeRequest> requests = IntStream.rangeClosed(1, 101)
+                .mapToObj(index -> {
+                    AppSyncOrgScopeRequest request = new AppSyncOrgScopeRequest();
+                    request.setOrgId((long) index);
+                    request.setIncludeChildren(false);
+                    return request;
+                })
+                .toList();
+
+        assertThatThrownBy(() -> appSyncConfigService.replaceOrgScope(10L, SyncDomain.ORG, requests))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("组织范围根数量不能超过 100");
+        verify(appSyncOrgScopeMapper, never()).delete(any());
+        verify(appSyncOrgScopeMapper, never()).insert(any(AppSyncOrgScopeEntity.class));
     }
 
     /**

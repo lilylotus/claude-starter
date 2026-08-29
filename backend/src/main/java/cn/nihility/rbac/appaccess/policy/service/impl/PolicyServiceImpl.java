@@ -50,6 +50,7 @@ import java.util.Objects;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -120,7 +121,7 @@ public class PolicyServiceImpl implements PolicyService {
      * {@inheritDoc}
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public PolicyVO create(PolicyCreateRequest request) {
         assertConditionsNotAllEmpty(request.getOrgScopes(), request.getUserAttrs(), request.getBrowserRules(),
                 request.getIpRules());
@@ -154,7 +155,7 @@ public class PolicyServiceImpl implements PolicyService {
      * {@inheritDoc}
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public PolicyVO update(Long id, PolicyUpdateRequest request) {
         PolicyEntity entity = getExisting(id);
         assertConditionsNotAllEmpty(request.getOrgScopes(), request.getUserAttrs(), request.getBrowserRules(),
@@ -214,7 +215,7 @@ public class PolicyServiceImpl implements PolicyService {
      * {@inheritDoc}
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public void delete(Long id) {
         getExisting(id);
         policyOrgScopeMapper.delete(new LambdaQueryWrapper<PolicyOrgScopeEntity>()

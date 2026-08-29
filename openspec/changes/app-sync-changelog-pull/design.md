@@ -88,7 +88,25 @@ MyBatis-Plus 的 `@Version` 用于写冲突检测，本次 `version` 是外部�
 ### 6. 通知任务先落库，再按显式状态机发送
 `DomainChangeEventProcessor` 使用一个本地数据库事务完成“一条变更流水 + 全部候选应用通知任务”的写入；候选解析或任一任务插入失败时整体回滚，不允许留下部分通知任务。策略重执行与 HTTP 发送在该事务提交后独立执行。通知任务保存稳定 `event_id`、`change_seq`、`entity_version`、回调地址和请求体快照，使用 `(app_ref_id, event_id)` 唯一键；同一变更的不同应用共享 `event_id`，重试不得重新生成。状态使用 `PENDING/PROCESSING/RETRY/SUCCESS/DEAD`，通过原子状态条件和 `lease_until` 抢占；网络异常、HTTP 408/429/5xx 退避重试，其他 4xx 默认进入 DEAD。
 
-**实现阶段性现状**（app-sync-changelog-pull tasks.md 3.2 完成范围）：本 change 目前只落地了"写变更流水"这一半——`AppDataChangeLogServiceImpl.append` 独立声明 `@Transactional`，`DomainChangeEventProcessor.process` 先调用它写入一条流水，失败时记录 ERROR 日志并直接跳过通知分支（不发送没有 `changeSeq` 的通知）；候选应用解析与 `AppNotifyService.notifyIfConfigured` 仍是 app-sync-drop-changelog 遗留的旧实现（直接发 HTTP、事后各自记一条 SUCCESS/FAILURE 记录，未落地本节描述的 PENDING 状态机），因此暂时无法把"通知任务落库"并入同一个事务。"一条变更流水 + 全部候选应用 PENDING 通知任务同事务落库、候选解析或任一任务插入失败整体回滚"这一完整目标，留给本节其余部分（状态机、原子抢占、调度器）落地时一并完成。
+**实现落地说明**（对应 tasks.md 3.2、6.1-6.3 完成范围）：`DomainChangeRecorder.record` 以
+`@Transactional(propagation = REQUIRED, rollbackFor = Exception.class)` 声明事务边界，在同一本地
+事务内依次调用 `AppDataChangeLogService.append` 写入一条流水、`NotifyCandidateResolver
+.resolveCandidateAppRefIds` 判定候选应用、`AppNotifyTaskService.enqueueTask` 为每个候选应用
+创建/复用 `PENDING` 通知任务（按 `(appRefId, eventId)` 唯一键去重；并发插入冲突时捕获
+`DuplicateKeyException` 回退为"复用已存在行"）；候选解析或任一任务插入失败均触发整体回滚，不
+会留下部分通知任务。`AppDataChangeLogService.append`/`AppNotifyTaskService.enqueueTask` 均不再
+单独声明事务，调用时自然并入 `record` 方法的事务。事务提交后，`DomainChangeEventProcessor`
+通过 `NotifySendCoordinator.submitImmediateSend` 对每个新建任务发起一次即时发送优化；
+`NotifyRetryScheduler` 按 `scheduler-poll-interval-seconds` 轮询扫描到期 `PENDING`、到期
+`RETRY`、租约超时的 `PROCESSING` 作为兜底。两条路径最终都通过 `NotifySendCoordinator` 内
+"先原子抢占为 `PROCESSING`（`AppNotifyTaskServiceImpl.claim` 用条件更新实现，抢占超时
+`PROCESSING` 时额外要求 `lease_until < now`）、抢占失败即放弃"的同一套编排逻辑发起实际 HTTP
+请求并驱动状态机流转，避免同一任务被并发重复发送；失败按 `retryable` 与
+`NotifyRetryScheduleCalculator` 计算的退避时间转 `RETRY` 或达到 `max-attempts`/不可重试
+4xx 时转 `DEAD`；手动重推通过 `AppNotifyTaskServiceImpl.resetDeadToPending` 原子把 `DEAD`
+重置为 `PENDING`（清空租约与下次重试时间），由即时发送优化或调度器扫描接力。本节描述的目标
+方案（同事务落库 + 显式状态机 + 原子抢占 + 调度器兜底 + 手动重推）已完整落地，不存在阶段性
+简化或未完成分支。
 
 **PENDING 任务的即时发送与调度器的关系**：事务提交后异步提交一次发送仅作为低延迟优化；调度器必须扫描到期 `PENDING`、到期 `RETRY` 和租约超时 `PROCESSING`，保证进程在“任务提交后、线程池提交前”崩溃时仍可恢复首次发送。
 
@@ -141,9 +159,14 @@ CREATE TABLE tab_app_sync_cursor (
 
 应用同步总开关、数据域开关、组织范围或字段映射发生变化时递增应用级 `config_epoch`。该 epoch 存在 `tab_app_config`，不区分数据域；调用方发现变化后必须对该应用全部已启用数据域重新全量同步并取得新水位。
 
-**实现落地澄清**（tasks.md 4.6/4.7/5.1 完成范围）：`config_epoch` 递增写路径（本节前半段
-描述的四处 `UPDATE`）留给后续阶段，本 change 只在 `/changes`、`/digest` 响应里只读透传
-`tab_app_config.config_epoch` 当前值（十进制字符串），不做递增。`/pull` 响应记录新增的
+**实现落地澄清**（tasks.md 4.5/4.6/4.7/5.1 完成范围）：`config_epoch` 递增写路径已按下方
+"`config_epoch` 落地位置与并发写入"描述的四处全部落地——`AppConfigServiceImpl.updateSyncConfig`
+调用 `AppConfigMapper.updateSyncConfigAndIncrementEpoch` 单语句原子完成业务字段更新与
+`config_epoch = config_epoch + 1`；`AppSyncConfigServiceImpl.updateDomainConfig`/
+`replaceOrgScope`/`replaceFieldMappings` 均已声明 `@Transactional`，在写入各自目标表后于
+同一事务内调用 `AppConfigMapper.incrementConfigEpoch` 原子自增。`/changes`、`/digest` 响应
+透传的即是这四处写路径自增后的 `tab_app_config.config_epoch` 当前值（十进制字符串）。`/pull`
+响应记录新增的
 `version` 固定键与 `/changes`/`/digest` 复用同一个 `cn.nihility.rbac.sync.transform.
 SyncRecordAssembler` 组件组装（从原 `SyncPullServiceImpl.toRecord` 私有方法抽取为独立
 Spring bean），保证"字段映射后的完整输出记录"在三个接口间是同一份实现，不会出现 `/pull` 与
@@ -169,6 +192,18 @@ SyncDigestCanonicalCodec`）：`SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS` 
 4. `AppSyncConfigServiceImpl.replaceFieldMappings`（写 `tab_app_sync_field_mapping`，已有 `@Transactional`）
 
 2/3/4 三处目标表和 `tab_app_config` 不是同一张表，无法用单语句覆盖，改为在同一个事务内追加一次 `AppConfigMapper` 新增的原子自增方法（`UPDATE tab_app_config SET config_epoch = config_epoch + 1 WHERE app_ref_id = ?`，与 `version` 字段同样的"数据库原子自增、不先读后写"手法，天然避免并发丢增量）；`updateDomainConfig` 目前未加 `@Transactional`，需要一并补上，确保"写领域配置"和"epoch 自增"在同一个事务里要么都成功要么都回滚——如果只成功了前者、epoch 没递增，客户端会继续按旧范围拉取，出现"配置已经变了但客户端不知道要重新全量"的静默错误，比"epoch 空转多加了 1"的后果严重得多，所以宁可选择"先写业务表、同事务内立刻自增 epoch"而不是异步补偿。
+
+### 12. 通知候选范围使用事件路径快照，不查询删除后的当前组织
+
+`NotifyCandidateResolver` 对 ORG/POSITION 的候选应用过滤 SHALL 与 `/changes` 的范围语义一致：读取每个候选应用的 `resolveScopePrefixes(appRefId, dataType)`，使用边界安全的“路径等于前缀，或在 `includeChildren=true` 时以 `prefix + '/'` 开头”规则分别匹配 `orgScopePathBefore` 与 `orgScopePathAfter`，任一路径命中即保留候选。范围配置为空表示不限制。
+
+不能在 ORG 删除后调用 `isOrgIdWithinScope(..., event.bizId)`，因为逻辑删除组织已被当前组织集合排除；也不能在 POSITION 物理删除后通过 `selectById` 反查组织。CREATE/普通更新仍由事件的 after/before 路径判定，迁出和 DELETE 则由 before 路径保证原范围内应用收到通知。未知或缺失路径且应用配置了范围时保守判定为不匹配，避免越权通知；应用未配置组织范围时仍正常通知。
+
+### 13. DICT 统一为字典项版本化事件
+
+DICT 与既有 `/pull`、`/digest` 保持同一业务粒度：`entityId/bizId` 始终是 `tab_dict_item.id`，字典类型不作为独立同步实体。为 `tab_dict_item` 增加 `version BIGINT NOT NULL DEFAULT 1`，字典项 CREATE/UPDATE/ENABLE/DISABLE/DELETE 发布 DICT 事件并携带递增后的版本；`DomainEntityVersionResolver`、`BizSnapshotResolver`、`SyncBizPageRow`、变更流水和 `/changes` 同步扩展 DICT。
+
+字典类型编码是字典项对外固定字段 `dictTypeCode` 的来源。类型编码变更时，在同一事务内批量更新所属全部字典项的 `updateTime/version=version+1`，并逐项发布 UPDATE 事件；只修改类型名称、排序、备注或状态不会改变 DICT `/pull` 记录内容，不发布虚构事件。字典类型删除要求不存在未删除字典项，本身没有对应的 DICT 业务记录，因此不产生以类型 id 冒充字典项 id 的通知。
 
 ## Risks / Trade-offs
 

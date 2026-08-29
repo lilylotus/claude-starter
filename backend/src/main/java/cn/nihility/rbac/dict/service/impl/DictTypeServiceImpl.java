@@ -15,6 +15,10 @@ import cn.nihility.rbac.dict.mapstruct.DictConvert;
 import cn.nihility.rbac.dict.service.DictTypeService;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.operationlog.constant.OperationType;
+import cn.nihility.rbac.app.sync.constant.SyncDomain;
+import cn.nihility.rbac.sync.event.DomainChangeEvent;
+import cn.nihility.rbac.sync.event.DomainEventPublisher;
 import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -28,6 +32,8 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 /**
@@ -51,6 +57,9 @@ public class DictTypeServiceImpl implements DictTypeService {
 
     /** 审计字段（{@code createBy}/{@code updateBy}）展示名批量解析服务。 */
     private final UserDisplayService userDisplayService;
+
+    /** 数据变更事件发布器。 */
+    private final DomainEventPublisher domainEventPublisher;
 
     /**
      * {@inheritDoc}
@@ -108,15 +117,35 @@ public class DictTypeServiceImpl implements DictTypeService {
      * {@inheritDoc}
      */
     @Override
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public DictTypeVO update(Long id, DictTypeUpdateRequest request) {
         DictTypeEntity entity = getExistingEntity(id);
         checkCodeUnique(request.getCode(), id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
 
+        boolean codeChanged = !Objects.equals(entity.getCode(), request.getCode());
+        String operator = Objects.toString(currentOperatorService.resolveUserId(), null);
+        LocalDateTime now = LocalDateTime.now();
         DictConvert.INSTANCE.updateTypeEntity(request, entity);
-        entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
-        entity.setUpdateTime(LocalDateTime.now());
+        entity.setUpdateBy(operator);
+        entity.setUpdateTime(now);
         dictTypeMapper.updateById(entity);
+
+        if (codeChanged) {
+            dictItemMapper.incrementVersionsByTypeId(id, operator, now);
+            List<DictItemEntity> items = dictItemMapper.selectList(new LambdaQueryWrapper<DictItemEntity>()
+                    .eq(DictItemEntity::getDictTypeId, id));
+            for (DictItemEntity item : items) {
+                domainEventPublisher.publish(DomainChangeEvent.builder()
+                        .dataType(SyncDomain.DICT)
+                        .bizId(item.getId())
+                        .operationType(OperationType.UPDATE)
+                        .entityVersion(item.getVersion())
+                        .operator(operator)
+                        .occurredAt(now)
+                        .build());
+            }
+        }
 
         operationLogRecorder.recordUpdate(OperationLogResourceType.DICT_TYPE, id, entity.getName(),
                 beforeSnapshot, toLogSnapshot(entity));

@@ -9,6 +9,7 @@ import cn.nihility.rbac.sync.openapi.dto.SyncPullRequest;
 import cn.nihility.rbac.sync.openapi.service.SyncChangesService;
 import cn.nihility.rbac.sync.openapi.service.SyncDigestService;
 import cn.nihility.rbac.sync.openapi.service.SyncPullService;
+import cn.nihility.rbac.sync.openapi.support.SyncRateLimiter;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -43,6 +44,9 @@ public class SyncNotifyPullController {
 
     /** 对账摘要业务逻辑接口。 */
     private final SyncDigestService syncDigestService;
+
+    /** 按应用和接口隔离的请求限流器。 */
+    private final SyncRateLimiter syncRateLimiter;
 
     /**
      * 分页拉取归属调用方应用当前可见的数据域当前数据。
@@ -90,13 +94,15 @@ public class SyncNotifyPullController {
             @RequestParam(required = false) String codes,
             @Parameter(description = "用户手机号，仅 dataType=USER 时生效，其余数据类型传入时被忽略")
             @RequestParam(required = false) String mobile) {
+        List<Long> parsedIds = parseIdList(ids);
+        syncRateLimiter.validateAndAcquire("pull", pageSize, parsedIds == null ? 0 : parsedIds.size());
         SyncPullRequest request = SyncPullRequest.builder()
                 .dataType(dataType)
                 .page(page)
                 .pageSize(pageSize)
                 .updateTimeFrom(updateTimeFrom)
                 .updateTimeTo(updateTimeTo)
-                .ids(parseIdList(ids))
+                .ids(parsedIds)
                 .codes(parseCodeList(codes))
                 .mobile(mobile)
                 .build();
@@ -107,7 +113,7 @@ public class SyncNotifyPullController {
      * 增量游标拉取调用方当前可见范围内的变更指针，只返回定位信息（不返回业务数据），详情
      * 需要另行调用 {@link #pull} 携带 {@code ids} 复核。
      *
-     * @param entityType 数据类型：ORG/USER/POSITION/APP/ROLE（不含 DICT）
+     * @param entityType 数据类型：ORG/USER/POSITION/APP/ROLE/DICT
      * @param sinceSeq   起始游标（不含），十进制字符串，未传时视为 "0"（从头开始）
      * @param pageSize   每页最多返回的可见记录数，未传或非正数时取默认值
      * @return 变更指针响应，携带 {@code nextSeq}/{@code hasMore}/{@code configEpoch}
@@ -122,11 +128,12 @@ public class SyncNotifyPullController {
                     + "currentMaxSeq 重新开始增量。")
     @GetMapping("/open/api/sync/changes")
     public SyncChangesPageVO changes(
-            @Parameter(description = "数据类型：ORG/USER/POSITION/APP/ROLE（不含 DICT）") @RequestParam String entityType,
+            @Parameter(description = "数据类型：ORG/USER/POSITION/APP/ROLE/DICT") @RequestParam String entityType,
             @Parameter(description = "起始游标（不含），十进制字符串，未传时视为 \"0\"")
             @RequestParam(required = false) String sinceSeq,
             @Parameter(description = "每页最多返回的可见记录数，未传或非正数时取默认值")
             @RequestParam(required = false) Integer pageSize) {
+        syncRateLimiter.validateAndAcquire("changes", pageSize, 0);
         SyncChangesRequest request =
                 SyncChangesRequest.builder().entityType(entityType).sinceSeq(sinceSeq).pageSize(pageSize).build();
         return syncChangesService.changes(request);
@@ -148,6 +155,7 @@ public class SyncNotifyPullController {
     @GetMapping("/open/api/sync/digest")
     public SyncDigestVO digest(
             @Parameter(description = "数据类型：ORG/USER/POSITION/APP/ROLE/DICT") @RequestParam String entityType) {
+        syncRateLimiter.validateAndAcquire("digest", null, 0);
         return syncDigestService.digest(entityType);
     }
 

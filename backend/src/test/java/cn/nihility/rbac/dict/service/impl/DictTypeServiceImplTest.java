@@ -13,16 +13,22 @@ import cn.nihility.rbac.dict.constant.DictStatus;
 import cn.nihility.rbac.dict.dto.DictTypeCreateRequest;
 import cn.nihility.rbac.dict.dto.DictTypeUpdateRequest;
 import cn.nihility.rbac.dict.entity.DictTypeEntity;
+import cn.nihility.rbac.dict.entity.DictItemEntity;
 import cn.nihility.rbac.dict.mapper.DictItemMapper;
 import cn.nihility.rbac.dict.mapper.DictTypeMapper;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.app.sync.constant.SyncDomain;
+import cn.nihility.rbac.sync.event.DomainChangeEvent;
+import cn.nihility.rbac.sync.event.DomainEventPublisher;
 import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.util.Map;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
@@ -52,6 +58,9 @@ class DictTypeServiceImplTest {
     @Mock
     private UserDisplayService userDisplayService;
 
+    @Mock
+    private DomainEventPublisher domainEventPublisher;
+
     /** 被测服务实例。 */
     private DictTypeServiceImpl dictTypeService;
 
@@ -62,7 +71,7 @@ class DictTypeServiceImplTest {
     @BeforeEach
     void setUp() {
         dictTypeService = new DictTypeServiceImpl(dictTypeMapper, dictItemMapper, operationLogRecorder,
-                currentOperatorService, userDisplayService);
+                currentOperatorService, userDisplayService, domainEventPublisher);
         lenient().when(currentOperatorService.resolveUserId()).thenReturn(1L);
         lenient().when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
     }
@@ -101,6 +110,30 @@ class DictTypeServiceImplTest {
         assertThatThrownBy(() -> dictTypeService.update(1L, request))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("other_type");
+    }
+
+    /** 字典类型编码变化应递增所属字典项版本并逐项发布 DICT 更新事件。 */
+    @Test
+    void update_shouldPublishItemEvents_whenTypeCodeChanges() {
+        DictTypeEntity entity = buildEntity(1L, "任职类型", "position_type", DictStatus.ENABLED, 0);
+        when(dictTypeMapper.selectById(1L)).thenReturn(entity);
+        when(dictTypeMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+        DictItemEntity item = DictItemEntity.builder().id(10L).dictTypeId(1L).code("primary")
+                .label("主职").status(DictStatus.ENABLED).version(2L).build();
+        when(dictItemMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(item));
+
+        DictTypeUpdateRequest request = new DictTypeUpdateRequest();
+        request.setName("任职类型");
+        request.setCode("position_kind");
+        request.setShowOrder(0);
+        dictTypeService.update(1L, request);
+
+        verify(dictItemMapper).incrementVersionsByTypeId(any(), any(), any());
+        ArgumentCaptor<DomainChangeEvent> eventCaptor = ArgumentCaptor.forClass(DomainChangeEvent.class);
+        verify(domainEventPublisher).publish(eventCaptor.capture());
+        assertThat(eventCaptor.getValue().getDataType()).isEqualTo(SyncDomain.DICT);
+        assertThat(eventCaptor.getValue().getBizId()).isEqualTo(10L);
+        assertThat(eventCaptor.getValue().getEntityVersion()).isEqualTo(2L);
     }
 
     /**

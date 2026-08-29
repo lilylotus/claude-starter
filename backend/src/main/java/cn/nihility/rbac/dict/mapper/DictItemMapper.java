@@ -1,7 +1,9 @@
 package cn.nihility.rbac.dict.mapper;
 
 import cn.nihility.rbac.dict.entity.DictItemEntity;
-import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import cn.nihility.rbac.common.mapper.VersionedBaseMapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
@@ -13,7 +15,17 @@ import org.apache.ibatis.annotations.Param;
  * {@code resources/mybatis/mapper/DictItemMapper.xml} 里。
  */
 @Mapper
-public interface DictItemMapper extends BaseMapper<DictItemEntity> {
+public interface DictItemMapper extends VersionedBaseMapper<DictItemEntity> {
+
+    /** 同一事务内递增指定字典类型全部字典项版本并更新审计字段。 */
+    default int incrementVersionsByTypeId(Long dictTypeId, String updateBy, LocalDateTime updateTime) {
+        LambdaUpdateWrapper<DictItemEntity> wrapper = Wrappers.<DictItemEntity>lambdaUpdate()
+                .eq(DictItemEntity::getDictTypeId, dictTypeId)
+                .set(DictItemEntity::getUpdateBy, updateBy)
+                .set(DictItemEntity::getUpdateTime, updateTime)
+                .setSql("version = version + 1");
+        return update(null, wrapper);
+    }
 
     /**
      * 分页拉取字典项当前数据，不过滤 {@code status}（停用/已删除记录原样返回），按

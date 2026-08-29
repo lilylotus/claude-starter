@@ -3,10 +3,12 @@ package cn.nihility.rbac.common.exception;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import cn.nihility.rbac.common.result.Result;
+import cn.nihility.rbac.sync.openapi.support.SyncRateLimiter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpMethod;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -33,6 +35,20 @@ class GlobalExceptionHandlerTest {
 
         assertThat(result.getCode()).isEqualTo(422);
         assertThat(result.getMessage()).isEqualTo("非法的数据类型：DICT");
+    }
+
+    /** 限流错误保持 HTTP 200，并在响应头携带建议重试秒数。 */
+    @Test
+    void handleRateLimitedException_shouldKeepHttp200AndSetRetryAfter() {
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        Result<Void> result = handler.handleRateLimitedException(
+                new SyncRateLimiter.RateLimitedException(2L), response);
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(response.getHeader("Retry-After")).isEqualTo("2");
+        assertThat(result.getCode()).isEqualTo(SyncRateLimiter.RATE_LIMITED_CODE);
+        assertThat(result.getMessage()).contains("请求过于频繁");
     }
 
     /**

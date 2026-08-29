@@ -12,8 +12,7 @@ import cn.nihility.rbac.operationlog.constant.OperationType;
 import cn.nihility.rbac.sync.event.DomainChangeEvent;
 import cn.nihility.rbac.sync.notify.mapper.NotifyTargetMapper;
 import cn.nihility.rbac.sync.scope.AppSyncOrgScopeResolver;
-import cn.nihility.rbac.user.entity.UserPositionEntity;
-import cn.nihility.rbac.user.mapper.UserPositionMapper;
+import cn.nihility.rbac.sync.scope.ScopePrefix;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,14 +36,11 @@ class NotifyCandidateResolverTest {
     @Mock
     private AppSyncOrgScopeResolver appSyncOrgScopeResolver;
 
-    @Mock
-    private UserPositionMapper userPositionMapper;
-
     private NotifyCandidateResolver resolver;
 
     @BeforeEach
     void setUp() {
-        resolver = new NotifyCandidateResolver(notifyTargetMapper, appSyncOrgScopeResolver, userPositionMapper);
+        resolver = new NotifyCandidateResolver(notifyTargetMapper, appSyncOrgScopeResolver);
     }
 
     /**
@@ -57,19 +53,23 @@ class NotifyCandidateResolverTest {
         List<Long> result = resolver.resolveCandidateAppRefIds(sampleEvent(SyncDomain.ORG, 1L));
 
         assertThat(result).isEmpty();
-        verify(appSyncOrgScopeResolver, never()).isOrgIdWithinScope(any(), any(), any());
+        verify(appSyncOrgScopeResolver, never()).resolveScopePrefixes(any(), any());
     }
 
     /**
      * ORG 数据域应按变更对象自身 id 校验每个候选应用的组织范围，不落在范围内的应用被剔除。
      */
     @Test
-    void resolveCandidateAppRefIds_shouldFilterOrgDomainByOrgScope() {
+    void resolveCandidateAppRefIds_shouldMatchOrgBeforeOrAfterPathWithBoundary() {
         when(notifyTargetMapper.selectCandidateAppRefIds(SyncDomain.ORG)).thenReturn(List.of(1L, 2L));
-        when(appSyncOrgScopeResolver.isOrgIdWithinScope(1L, SyncDomain.ORG, 10L)).thenReturn(true);
-        when(appSyncOrgScopeResolver.isOrgIdWithinScope(2L, SyncDomain.ORG, 10L)).thenReturn(false);
+        when(appSyncOrgScopeResolver.resolveScopePrefixes(1L, SyncDomain.ORG))
+                .thenReturn(List.of(new ScopePrefix("1/12", true)));
+        when(appSyncOrgScopeResolver.resolveScopePrefixes(2L, SyncDomain.ORG))
+                .thenReturn(List.of(new ScopePrefix("1/123", true)));
+        DomainChangeEvent event = sampleEvent(SyncDomain.ORG, 10L).toBuilder()
+                .orgScopePathBefore("1/12/10").orgScopePathAfter("9/10").build();
 
-        List<Long> result = resolver.resolveCandidateAppRefIds(sampleEvent(SyncDomain.ORG, 10L));
+        List<Long> result = resolver.resolveCandidateAppRefIds(event);
 
         assertThat(result).containsExactly(1L);
     }
@@ -78,12 +78,14 @@ class NotifyCandidateResolverTest {
      * POSITION 数据域应按任职记录归属的组织 id（而非任职记录自身 id）校验组织范围。
      */
     @Test
-    void resolveCandidateAppRefIds_shouldFilterPositionDomainByOwningOrg() {
+    void resolveCandidateAppRefIds_shouldUseBeforePathForPhysicallyDeletedPosition() {
         when(notifyTargetMapper.selectCandidateAppRefIds(SyncDomain.POSITION)).thenReturn(List.of(1L));
-        when(userPositionMapper.selectById(50L)).thenReturn(UserPositionEntity.builder().id(50L).orgId(20L).build());
-        when(appSyncOrgScopeResolver.isOrgIdWithinScope(1L, SyncDomain.POSITION, 20L)).thenReturn(true);
+        when(appSyncOrgScopeResolver.resolveScopePrefixes(1L, SyncDomain.POSITION))
+                .thenReturn(List.of(new ScopePrefix("1/20", false)));
+        DomainChangeEvent event = sampleEvent(SyncDomain.POSITION, 50L).toBuilder()
+                .operationType(OperationType.DELETE).orgScopePathBefore("1/20").build();
 
-        List<Long> result = resolver.resolveCandidateAppRefIds(sampleEvent(SyncDomain.POSITION, 50L));
+        List<Long> result = resolver.resolveCandidateAppRefIds(event);
 
         assertThat(result).containsExactly(1L);
     }
@@ -92,13 +94,23 @@ class NotifyCandidateResolverTest {
      * POSITION 数据域对应的任职记录查不到时，应保守返回空列表，不给任何候选应用触发通知。
      */
     @Test
-    void resolveCandidateAppRefIds_shouldReturnEmpty_whenPositionNotFound() {
+    void resolveCandidateAppRefIds_shouldReturnEmpty_whenScopeConfiguredButEventPathsMissing() {
         when(notifyTargetMapper.selectCandidateAppRefIds(SyncDomain.POSITION)).thenReturn(List.of(1L));
-        when(userPositionMapper.selectById(99L)).thenReturn(null);
+        when(appSyncOrgScopeResolver.resolveScopePrefixes(1L, SyncDomain.POSITION))
+                .thenReturn(List.of(new ScopePrefix("1/20", true)));
 
         List<Long> result = resolver.resolveCandidateAppRefIds(sampleEvent(SyncDomain.POSITION, 99L));
 
         assertThat(result).isEmpty();
+    }
+
+    /** 未配置范围时 ORG/POSITION 不受路径缺失影响。 */
+    @Test
+    void resolveCandidateAppRefIds_shouldKeepCandidate_whenScopeIsUnrestricted() {
+        when(notifyTargetMapper.selectCandidateAppRefIds(SyncDomain.ORG)).thenReturn(List.of(1L));
+        when(appSyncOrgScopeResolver.resolveScopePrefixes(1L, SyncDomain.ORG)).thenReturn(List.of());
+
+        assertThat(resolver.resolveCandidateAppRefIds(sampleEvent(SyncDomain.ORG, 10L))).containsExactly(1L);
     }
 
     /**
@@ -125,7 +137,7 @@ class NotifyCandidateResolverTest {
         List<Long> result = resolver.resolveCandidateAppRefIds(sampleEvent(SyncDomain.APP, 200L));
 
         assertThat(result).containsExactlyInAnyOrder(1L, 2L);
-        verify(appSyncOrgScopeResolver, never()).isOrgIdWithinScope(any(), eq(SyncDomain.APP), any());
+        verify(appSyncOrgScopeResolver, never()).resolveScopePrefixes(any(), eq(SyncDomain.APP));
     }
 
     /**

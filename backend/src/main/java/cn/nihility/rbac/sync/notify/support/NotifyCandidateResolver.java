@@ -4,8 +4,7 @@ import cn.nihility.rbac.app.sync.constant.SyncDomain;
 import cn.nihility.rbac.sync.event.DomainChangeEvent;
 import cn.nihility.rbac.sync.notify.mapper.NotifyTargetMapper;
 import cn.nihility.rbac.sync.scope.AppSyncOrgScopeResolver;
-import cn.nihility.rbac.user.entity.UserPositionEntity;
-import cn.nihility.rbac.user.mapper.UserPositionMapper;
+import cn.nihility.rbac.sync.scope.ScopePrefix;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -25,9 +24,6 @@ public class NotifyCandidateResolver {
 
     /** 应用同步组织范围解析业务逻辑组件。 */
     private final AppSyncOrgScopeResolver appSyncOrgScopeResolver;
-
-    /** 用户任职记录数据访问接口，供 POSITION 数据域按 {@code bizId} 反查所属组织 id。 */
-    private final UserPositionMapper userPositionMapper;
 
     /**
      * 解析一条领域变更事件当前应该触发通知的候选应用 id 列表：先查询该数据类型下已启用同步、
@@ -57,23 +53,9 @@ public class NotifyCandidateResolver {
      */
     private List<Long> filterByOrgScope(DomainChangeEvent event, List<Long> candidateAppRefIds) {
         String dataType = event.getDataType();
-        if (SyncDomain.ORG.equals(dataType)) {
+        if (SyncDomain.ORG.equals(dataType) || SyncDomain.POSITION.equals(dataType)) {
             return candidateAppRefIds.stream()
-                    .filter(appRefId -> appSyncOrgScopeResolver.isOrgIdWithinScope(appRefId, SyncDomain.ORG,
-                            event.getBizId()))
-                    .toList();
-        }
-        if (SyncDomain.POSITION.equals(dataType)) {
-            UserPositionEntity position = userPositionMapper.selectById(event.getBizId());
-            if (position == null) {
-                // 任职记录查不到时保守处理为不匹配任何候选应用，与 BizSnapshotResolver
-                // 现有"查不到就跳过"的防御性风格一致。
-                return List.of();
-            }
-            Long orgId = position.getOrgId();
-            return candidateAppRefIds.stream()
-                    .filter(appRefId -> appSyncOrgScopeResolver.isOrgIdWithinScope(appRefId, SyncDomain.POSITION,
-                            orgId))
+                    .filter(appRefId -> matchesEventPaths(appRefId, dataType, event))
                     .toList();
         }
         if (SyncDomain.USER.equals(dataType)) {
@@ -82,5 +64,24 @@ public class NotifyCandidateResolver {
                     .toList();
         }
         return candidateAppRefIds;
+    }
+
+    /** 使用事件变更前后路径按边界安全规则匹配一个应用的组织范围。 */
+    private boolean matchesEventPaths(Long appRefId, String dataType, DomainChangeEvent event) {
+        List<ScopePrefix> prefixes = appSyncOrgScopeResolver.resolveScopePrefixes(appRefId, dataType);
+        if (prefixes.isEmpty()) {
+            return true;
+        }
+        return prefixes.stream().anyMatch(prefix -> matchesPath(event.getOrgScopePathBefore(), prefix)
+                || matchesPath(event.getOrgScopePathAfter(), prefix));
+    }
+
+    /** 路径必须等于范围根，或在包含子孙时以“根路径/”开头。 */
+    private boolean matchesPath(String path, ScopePrefix prefix) {
+        if (path == null || prefix == null || prefix.getOrgPath() == null) {
+            return false;
+        }
+        return path.equals(prefix.getOrgPath())
+                || prefix.isIncludeChildren() && path.startsWith(prefix.getOrgPath() + "/");
     }
 }

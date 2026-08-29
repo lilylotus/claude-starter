@@ -51,6 +51,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -114,7 +115,7 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
      * {@inheritDoc}
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public WriteOperationResultVO<?> submit(
             String bizType,
             String operationType,
@@ -152,7 +153,7 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
      * {@inheritDoc}
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public void approve(Long id, String opinion) {
         ApprovalRequestEntity entity = getExisting(id);
         Long approverId = requireCurrentUserId();
@@ -195,7 +196,7 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
      * {@inheritDoc}
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public void reject(Long id, String opinion) {
         if (!StringUtils.hasText(opinion)) {
             throw new BusinessException("拒绝意见不能为空");
@@ -223,7 +224,7 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
      * {@inheritDoc}
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public void cancel(Long id) {
         ApprovalRequestEntity entity = getExisting(id);
         Long currentUserId = requireCurrentUserId();

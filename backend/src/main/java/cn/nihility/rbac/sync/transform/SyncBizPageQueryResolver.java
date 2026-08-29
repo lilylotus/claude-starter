@@ -276,7 +276,8 @@ public class SyncBizPageQueryResolver {
      */
     private SyncBizPageRow toRow(DictItemEntity entity, Map<Long, String> dictTypeCodeById) {
         return SyncBizPageRow.builder().id(entity.getId()).code(entity.getCode()).updateTime(entity.getUpdateTime())
-                .status(entity.getStatus()).dictTypeCode(dictTypeCodeById.get(entity.getDictTypeId()))
+                .status(entity.getStatus()).version(entity.getVersion())
+                .dictTypeCode(dictTypeCodeById.get(entity.getDictTypeId()))
                 .data(DomainSnapshotSupport.snapshot(entity)).build();
     }
 }

@@ -40,6 +40,14 @@ public interface UserPositionMapper extends VersionedBaseMapper<UserPositionEnti
     PositionVO selectPositionDetail(@Param("id") Long id, @Param("deletedStatus") int deletedStatus);
 
     /**
+     * 按任职 id 批量查询用户名称与组织名称，供通知日志一页内批量回填业务名称。
+     *
+     * @param ids 任职记录 id 集合
+     * @return 任职 id、用户名称、组织名称投影
+     */
+    List<PositionVO> selectPositionNamesByIds(@Param("ids") Set<Long> ids);
+
+    /**
      * 统计未被逻辑删除的任职记录中，指定列等于给定值的记录数，供"表单字段定义"驱动的
      * 非锁定字段唯一性校验使用。{@code column} 只接受调用方从 {@code tab_metadata_field}
      * 目录解析得到、并经白名单校验的合法列名。

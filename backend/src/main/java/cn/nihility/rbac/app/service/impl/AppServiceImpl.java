@@ -43,6 +43,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -156,7 +157,7 @@ public class AppServiceImpl implements AppService {
      * 事务内完成，因此整个方法标注 {@link Transactional}。
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public AppVO create(AppCreateRequest request) {
         assertOrgInScope(request.getOrgId());
         checkCodeUnique(request.getCode(), null);
@@ -180,6 +181,7 @@ public class AppServiceImpl implements AppService {
                 .dataType(SyncDomain.APP)
                 .bizId(entity.getId())
                 .operationType(OperationType.CREATE)
+                .entityVersion(entity.getVersion())
                 .operator(entity.getCreateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());
@@ -211,6 +213,7 @@ public class AppServiceImpl implements AppService {
                 .dataType(SyncDomain.APP)
                 .bizId(id)
                 .operationType(OperationType.UPDATE)
+                .entityVersion(entity.getVersion())
                 .operator(entity.getUpdateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());
@@ -254,6 +257,7 @@ public class AppServiceImpl implements AppService {
                 .dataType(SyncDomain.APP)
                 .bizId(id)
                 .operationType(OperationType.DELETE)
+                .entityVersion(entity.getVersion())
                 .operator(entity.getUpdateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());
@@ -309,6 +313,7 @@ public class AppServiceImpl implements AppService {
                 .dataType(SyncDomain.APP)
                 .bizId(id)
                 .operationType(status == AppStatus.ENABLED ? OperationType.ENABLE : OperationType.DISABLE)
+                .entityVersion(entity.getVersion())
                 .operator(entity.getUpdateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());

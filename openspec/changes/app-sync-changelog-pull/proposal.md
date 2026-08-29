@@ -8,12 +8,13 @@
 
 ## What Changes
 
-- 新增 `tab_app_data_change_log` 变更流水表：数据库自增主键 `change_seq` 只负责严格递增的拉取游标（允许空洞、不回收、不复用），雪花算法生成的 `event_id` 负责事件全局唯一标识与幂等追踪，不参与排序或游标计算。组织/用户/任职/应用/角色任一变更事件只写入一条全局记录。**不含字典（DICT）**——现有变更事件本身不覆盖字典，与现状一致。
+- 新增 `tab_app_data_change_log` 变更流水表：数据库自增主键 `change_seq` 只负责严格递增的拉取游标（允许空洞、不回收、不复用），雪花算法生成的 `event_id` 负责事件全局唯一标识与幂等追踪，不参与排序或游标计算。组织/用户/任职/应用/角色/字典项任一变更事件只写入一条全局记录；DICT 的业务记录与既有 `/pull` 一致，指字典项而非字典类型。
 - **ORG/POSITION 两个数据域额外冗余变更前后组织路径**：CREATE 为 `before=NULL/after=新路径`，普通更新与启停填写前后路径，跨组织移动填写不同路径，DELETE 为 `before=删除前路径/after=NULL`。范围查询使用边界安全的 `path = :prefix OR path LIKE CONCAT(:prefix, '/%')`，前后任一命中即可；详情复核查不到时，调用方清理本地缓存。
-- `tab_org`/`tab_user`/`tab_user_position`/`tab_app`/`tab_role` 五张同步实体表各新增一个 `version` 整型列（每次写操作原子自增 1，从 1 开始），变更流水记录与拉取/通知的响应体都携带该值，供外部应用做"本地版本 ≥ 收到的版本则忽略"的乱序/重复保护，不依赖游标顺序作为唯一防线。
-- 新增增量游标拉取接口 `GET /open/api/sync/changes?sinceSeq=&entityType=&pageSize=`：`entityType` 必填且仅支持 ORG/USER/POSITION/APP/ROLE；返回变更指针（`eventId`/`entityType`/`entityId`/`operationType`/`entityVersion`/`changeSeq`/`changeTime`）与 `nextSeq`/`hasMore`。对外所有 BIGINT 标识和水位均使用十进制字符串；其中 `changeSeq` 用于游标续传，`eventId` 用于幂等追踪。详情继续通过 `GET /open/api/sync/pull?ids=` 复核。
+- `tab_org`/`tab_user`/`tab_user_position`/`tab_app`/`tab_role`/`tab_dict_item` 六张同步实体表各新增一个 `version` 整型列（每次写操作原子自增 1，从 1 开始），变更流水记录与拉取/通知的响应体都携带该值，供外部应用做"本地版本 ≥ 收到的版本则忽略"的乱序/重复保护，不依赖游标顺序作为唯一防线。
+- 新增增量游标拉取接口 `GET /open/api/sync/changes?sinceSeq=&entityType=&pageSize=`：`entityType` 必填且支持 ORG/USER/POSITION/APP/ROLE/DICT；返回变更指针（`eventId`/`entityType`/`entityId`/`operationType`/`entityVersion`/`changeSeq`/`changeTime`）与 `nextSeq`/`hasMore`。对外所有 BIGINT 标识和水位均使用十进制字符串；其中 `changeSeq` 用于游标续传，`eventId` 用于幂等追踪。详情继续通过 `GET /open/api/sync/pull?ids=` 复核。
 - `sinceSeq` 早于变更流水表当前保留窗口（默认 90 天，超期清理）时，接口返回明确的业务错误码，提示调用方改走全量拉取（`GET /open/api/sync/pull`）重建，并可从对账摘要接口拿到的当前水位号重新开始增量。
 - 通知请求体（`NotifyPayload`）新增 `eventId`/`changeSeq`/`entityVersion` 三个字段：同一业务变更面向不同应用时复用同一个雪花 `eventId`，每个应用的通知任务以 `(appRefId, eventId)` 唯一，所有重试复用原 `eventId`。发送前先持久化通知任务，再按 `PENDING/PROCESSING/RETRY/SUCCESS/DEAD` 状态机发送。
+- 通知候选应用的组织范围判定对 ORG/POSITION 使用事件携带的变更前后路径快照，前后任一路径命中即通知；组织逻辑删除和任职物理删除后不得再依赖已删除业务行做当前范围判断，确保应用收到离开范围的 tombstone 通知。
 - 新增对账摘要接口 `GET /open/api/sync/digest?entityType=&...`：返回调用方当前可见范围内该数据类型的记录数与内容摘要（hash），并携带**当前变更流水表的最大 `changeSeq`（水位号）**——供外部应用完成一次全量拉取（走现有 `pull` 接口）后，直接从这个水位号切入增量模式，不需要额外一个"开始全量同步"的接口。
 - 新增服务端投递水位表 `tab_app_sync_cursor`：每次成功响应后将 `nextSeq` 写入 `last_delivered_seq`，仅表示服务端已返回到哪里，不代表客户端消费确认，也不参与查询过滤。
 - 变更流水表容量控制：保留时间窗口（默认 90 天）+ 定时清理任务，复用项目里日志清理任务（`log-cleanup`）已有的 cron 配置模式。
@@ -47,6 +48,6 @@
 ## Impact
 
 - **依赖**：依赖 `org-path-fields` change 已落地的 `tab_org.org_path` 字段。若 `org-path-fields` 尚未合并，本 change 无法开始实现。
-- **数据库**：新增 `tab_app_data_change_log`、`tab_app_sync_cursor`、`tab_app_sync_metadata` 三张表；五类同步实体增加 `version`；`tab_app_config` 增加应用级 `config_epoch`；通知记录扩展事件号、请求体快照、状态、重试与租约字段。
-- **后端**：五类实体 Service 维护版本；组织迁移同时更新子孙路径、版本和更新时间；`DomainChangeEvent` 增加 `eventId/entityVersion/路径快照`；新增流水与同步元数据服务、变更查询与 digest、`SyncBizPageRow/Resolver` 版本映射、通知任务状态机、雪花组件、配置 epoch、清理与发送调度器、限流组件。
+- **数据库**：新增 `tab_app_data_change_log`、`tab_app_sync_cursor`、`tab_app_sync_metadata` 三张表；六类同步实体（含字典项）增加 `version`；`tab_app_config` 增加应用级 `config_epoch`；通知记录扩展事件号、请求体快照、状态、重试与租约字段。
+- **后端**：六类实体 Service 维护版本；组织迁移同时更新子孙路径、版本和更新时间；字典类型编码变化级联更新字典项版本；`DomainChangeEvent` 增加 `eventId/entityVersion/路径快照`；新增流水与同步元数据服务、变更查询与 digest、`SyncBizPageRow/Resolver` 版本映射、通知任务状态机、雪花组件、配置 epoch、清理与发送调度器、限流组件。
 - **前端范围**：核心交付不改管理端页面；本 change 只提供手动重推后端接口。管理端按钮与消费进度展示另行立项，届时同步更新 `权限资源.txt`。

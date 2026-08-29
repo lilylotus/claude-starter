@@ -106,7 +106,7 @@ public class UpstreamRowUpserter {
      *                             （一个或多个，联合、AND 语义），由调用方
      *                             （{@code UpstreamSyncExecutor}）保证非空
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public void upsertRow(String dataType, Map<String, Object> transformedRow, Map<String, Object> rawRow,
             List<String> primaryKeyFieldCodes) {
         switch (dataType) {

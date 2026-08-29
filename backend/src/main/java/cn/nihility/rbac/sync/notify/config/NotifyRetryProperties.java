@@ -34,7 +34,7 @@ public class NotifyRetryProperties {
     private long leaseSeconds = 60;
 
     /** 独立调度器扫描到期 {@code PENDING}/{@code RETRY}/超时 {@code PROCESSING} 的轮询间隔（秒），默认 10 秒。 */
-    private long schedulerPollIntervalSeconds = 10;
+    private long schedulerPollIntervalSeconds = 30;
 
     /** 调度器单轮最多抢占的任务数，默认 100，避免一次占满发送线程池。 */
     private int schedulerBatchSize = 100;

@@ -24,7 +24,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     # nullCatalogMeansCurrent=true 避免 Flowable 在同一 MySQL 实例的其他数据库中发现 ACT_* 表后，
     # 误判当前数据库已完成初始化并错误执行升级脚本。
-    url: jdbc:mysql://127.0.0.1:3306/rbac?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&nullCatalogMeansCurrent=true
+    url: jdbc:mysql://10.10.88.31:3306/rbac?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&nullCatalogMeansCurrent=true
     username: root
     password: mysql
 
@@ -32,7 +32,7 @@ spring:
     redis:
       database: 8
       password: redis
-      host: 10.4.100.124
+      host: 10.10.88.31
       port: 6379
       connect-timeout: 3000ms
 
@@ -127,6 +127,16 @@ rbac:
   # 数据同步事件总线配置（app-sync-notify-pull-api change design.md Decision 4）。
   sync:
     ring-buffer-size: 1024
+    worker-id: 0
+
+    rate-limit:
+      pull-tokens-per-second: 10
+      pull-burst-capacity: 30
+      digest-tokens-per-second: 1
+      digest-burst-capacity: 3
+      max-page-size: 500
+      max-ids: 200
+      max-org-scope-roots: 100
 
     # 全局变更流水表定期清理配置（app-sync-changelog-pull change design.md Decision 8），
     # 全部为默认值，此处显式列出便于按需覆盖。
@@ -152,7 +162,7 @@ rbac:
       # PROCESSING 状态的租约时长（秒），需明显大于通知请求响应超时（3 秒）。
       lease-seconds: 60
       # 独立调度器扫描到期任务的轮询间隔（秒）。
-      scheduler-poll-interval-seconds: 10
+      scheduler-poll-interval-seconds: 30
       # 调度器单轮最多抢占的任务数。
       scheduler-batch-size: 100
 

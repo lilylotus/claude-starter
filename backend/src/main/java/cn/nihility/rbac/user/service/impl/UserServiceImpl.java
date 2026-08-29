@@ -52,6 +52,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -181,7 +182,7 @@ public class UserServiceImpl implements UserService {
      * 事务内完成，因此整个方法标注 {@link Transactional}。
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public UserVO create(UserCreateRequest request) {
         checkCodeUnique(request.getCode(), null);
         validateDynamicFields(request, true, null);

@@ -112,6 +112,7 @@ letter"）。日期前缀只在归档时由 `openspec-archive-change` 自动加�
 - 所有表字段、数据层DTO类字段必须检查是否和各个类型数据库关键字冲突，防止SQL语法错误。字段命名规则：驼峰命名，数据库字段统一下划线分隔，避免使用数据库关键字。
 - 所有表必须有默认字段创建人、创建时间、更新人、更新时间
 - 所有手写 SQL（Flyway 迁移脚本 `db/migration/*.sql`、MyBatis 自定义 Mapper XML）禁止使用数据库版本相关或厂商专属的特性写法（如窗口函数 `ROW_NUMBER() OVER (...)`——MySQL 8.0+ 才支持，本项目实际部署/开发环境是 MySQL 5.7，用了会直接抛 SQL 语法错误；以及其他 CTE/`WITH`、`JSON_TABLE`、厂商专属函数等），尽量使用通用、可移植的标准 SQL 写法（如"每组最新一条记录"这类需求改用自连接 + `GROUP BY MAX(id)`），避免升级 MySQL 版本或将来切换数据库时大面积改写 SQL。写完手写 SQL 后，如果不确定某个写法的版本兼容性，先确认目标数据库的实际版本（如 `SELECT VERSION();`）或改用更保守的等价写法。
+- @Transactional 事务注解必须指定回滚异常和事务传播方式
 
 ### 前端约定（`.Codex/agents/vue3-frontend-dev.md`）
 

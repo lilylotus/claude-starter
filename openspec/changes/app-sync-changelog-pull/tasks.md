@@ -21,8 +21,8 @@
 ## 3. 后端：变更流水表写入
 
 - [x] 3.1 创建流水 Entity/Mapper/Service；写入事件原有雪花 `eventId`，由数据库生成自增 `changeSeq` 并回填；验证雪花 ID 与游标序号职责独立、重复 `eventId` 被唯一键拒绝（已核对字段与 V12 一致；补充 `AppDataChangeLogServiceImplTest` 覆盖字段映射、插入后 `changeSeq`/`entityType` 可用于范围查询、非法操作类型拒绝）
-- [x] 3.2 `DomainChangeEventProcessor.process` 在一个本地数据库事务中写入一条流水；候选解析/通知任务落库仍是 app-sync-drop-changelog 遗留的旧实现（未持久化为 PENDING 任务），**只把"写变更流水"这一半放入事务**（`AppDataChangeLogServiceImpl.append` 标注 `@Transactional`），流水写入失败时记录 ERROR 日志并跳过通知分支、不发送没有 `changeSeq` 的通知；"流水 + 全部候选应用 PENDING 通知任务同事务落库"留给第 6 节通知状态机改造完成后再合并；策略自动重新执行保持事务外独立执行
-- [ ] 3.3 清理任务每批在同一事务中删除过期流水并更新 metadata floor 为本批删除最大序号；验证任一步失败整体回滚、floor 不提前、空表和自增空洞判断准确
+- [x] 3.2 `DomainChangeEventProcessor.process` 通过 `DomainChangeRecorder.record` 在一个本地数据库事务中写入一条流水并创建全部候选通知任务；候选解析或任一任务插入失败整体回滚；事务提交后再执行策略副作用与即时发送优化
+- [x] 3.3 清理任务每批在同一事务中删除过期流水并更新 metadata floor 为本批删除最大序号；验证任一步失败整体回滚、floor 不提前、空表和自增空洞判断准确（`cleanupExpiredBatch` 使用同一批实际删除主键的最大值推进 floor，`AppDataChangeLogCleanupSchedulerTest` 已纳入同步模块回归并通过）
 - [x] 3.4 明确记录 Disruptor 阶段性可靠性：补充启动/优雅停机测试和"异常崩溃可能丢事件、由 digest 对账兜底"的运维说明；保持 publisher/processor 接口可由 RabbitMQ/RocketMQ 适配器复用（新增 `startAndStop_shouldToggleRunningState_andSupportRestart` 用例）
 
 ## 4. 后端：增量游标拉取接口
@@ -31,7 +31,7 @@
 - [x] 4.2 Mapper 使用 `path = prefix OR path LIKE CONCAT(prefix, '/%')` 的边界安全范围过滤；验证 `/1/12` 不会命中 `/1/123`，并覆盖多前缀及 LIKE 通配字符拒绝（`AppDataChangeLogMapper.xml#selectChanges` 对 `org_scope_path_before`/`org_scope_path_after` 两列分别应用；LIKE 通配字符拒绝在 `resolveScopePrefixes` 入口处防御性校验，`ORG_PATH_PATTERN` 只放行数字与 `/`）
 - [x] 4.3 新增 `/changes`，`entityType` 必填且仅允许 ORG/USER/POSITION/APP/ROLE；USER 批量查询任职并循环扫描；通过 metadata floor 判断过期；覆盖非法类型、合法未开通域、默认/最大 pageSize（`SyncChangesServiceImpl`/`SyncChangesServiceImplTest` 11 个用例，含 USER 循环扫描凑页、全部过滤仍前进 nextSeq 两个关键场景；新增 `AppSyncMetadataEntity/Mapper/Service` 承载 floor 读取）
 - [x] 4.4 成功响应后以响应 `nextSeq` 原子更新 `last_delivered_seq`，文案明确它不是消费 ACK；验证并发/乱序请求不回退（新增 `sync/cursor` 包 `AppSyncCursorEntity/Mapper/Service`，`upsertLastDeliveredSeq` 用 `ON DUPLICATE KEY UPDATE ... GREATEST(...)` 原子 SQL；`AppSyncCursorServiceImplTest` 覆盖参数透传与写入异常不影响主流程）
-- [x] 4.5 原子维护应用级 `config_epoch`；`/changes`、`/digest` 返回 epoch；任何配置变化后文档和测试均要求重建该应用全部已启用数据域，不描述为仅重建单域（本 change 范围内只读透传当前值，递增写路径留给后续阶段，design.md 已补充"实现落地澄清"说明）
+- [x] 4.5 原子维护应用级 `config_epoch`；`/changes`、`/digest` 返回 epoch；总开关配置使用单条 SQL 同步更新并递增 epoch，数据域/组织范围/字段映射在各自事务内调用 `AppConfigMapper.incrementConfigEpoch`；任何配置变化后要求重建该应用全部已启用数据域
 - [x] 4.6 扩展 `SyncBizPageRow`/`SyncBizPageQueryResolver`/`SyncPullServiceImpl.toRecord`，让 ORG/USER/POSITION/APP/ROLE 的 `/pull` 结果固定返回 `version`；地址与请求参数保持兼容（`toRecord` 抽取为独立 `SyncRecordAssembler` 组件供 `/pull`、`/digest` 共用；`SyncBizPageQueryResolverTest` 覆盖 ORG 版本号透传与 DICT 恒为 `null`，`SyncPullServiceImplTest` 新增 `pull_shouldIncludeVersionAsDecimalString` 覆盖记录里 `version` 为十进制字符串）
 - [x] 4.7 对外所有 BIGINT 标识、水位和版本按十进制字符串序列化与解析，Springdoc 声明为 string；覆盖超过 `2^53-1` 的往返、签名原文和非法数字测试（`/changes` 请求 `sinceSeq`、响应 `SyncChangePointerVO`/`SyncChangesPageVO`/`SyncDigestVO` 全字段均为字符串；`SyncChangesServiceImplTest` 覆盖非法 `sinceSeq`/超过 `Integer` 范围的 `changeSeq=105`/`entityVersion=3` 等字符串往返；未单独构造 `2^53-1` 边界用例，`Long.parseLong`/`String.valueOf` 手工转换天然不受 JS 精度限制影响）
 
@@ -41,21 +41,25 @@
 
 ## 6. 后端：通知重试与死信
 
-- [ ] 6.1 流水与全部 `PENDING` 任务在同一事务落库；事务提交后立即异步提交一次发送仅作低延迟优化，同一事件不同应用共享 eventId，重试复用
-- [ ] 6.2 实现状态机、原子抢占和租约；调度器扫描 PENDING、到期 RETRY、租约超时 PROCESSING；验证提交后未进入线程池的 PENDING 可恢复、并发不重复抢占、超时恢复和最大次数转 DEAD
-- [ ] 6.3 手动重推接口原子清理租约/下次重试时间并把 DEAD 重置为 PENDING，由即时优化或 PENDING 扫描器发送；本 change 不新增前端按钮
+- [x] 6.1 流水与全部 `PENDING` 任务在同一事务落库；事务提交后立即异步提交一次发送仅作低延迟优化，同一事件不同应用共享 eventId，重试复用（`DomainChangeRecorder.record` 统一事务，`DomainChangeEventProcessor` 提交后调用 `NotifySendCoordinator`）
+- [x] 6.2 实现状态机、原子抢占和租约；调度器扫描 PENDING、到期 RETRY、租约超时 PROCESSING；验证提交后未进入线程池的 PENDING 可恢复、并发不重复抢占、超时恢复和最大次数转 DEAD（`AppNotifyTaskServiceImpl`/`NotifyRetryScheduler`/`NotifySendCoordinator` 及对应测试已通过同步模块回归）
+- [x] 6.3 手动重推接口原子清理租约/下次重试时间并把 DEAD 重置为 PENDING，由即时优化或 PENDING 扫描器发送；本 change 不新增前端按钮（`AppNotifyRecordServiceImpl.retryDeadTask`）
 
 ## 7. 后端：限流
 
-- [ ] 7.1 新增 `rbac.sync.rate-limit` 配置节：`pull`/`changes` 与 `digest` 按 `(appRefId, 接口)` 各自独立令牌桶（`tokens-per-second`/`burst-capacity` 默认 `pull`/`changes`=10/30，`digest`=1/3，design.md Decision 7）；超限时 HTTP 状态码仍为 200，返回 `Result.error(RATE_LIMITED, ...)`，`Retry-After` 写入响应头（延续项目既有"业务错误一律 HTTP 200 + `Result.code`"约定）；同配置节新增 `pageSize` 上限 500、`ids` 数量上限 200、组织范围根数量上限 100，超出直接参数校验失败（不占用令牌桶配额）；验证不同应用/不同接口配额相互隔离及参数放大攻击被拒绝
+- [x] 7.1 新增 `rbac.sync.rate-limit` 配置节：`pull`/`changes` 与 `digest` 按 `(appRefId, 接口)` 各自独立令牌桶（`tokens-per-second`/`burst-capacity` 默认 `pull`/`changes`=10/30，`digest`=1/3，design.md Decision 7）；超限时 HTTP 状态码仍为 200，返回 `Result.error(RATE_LIMITED, ...)`，`Retry-After` 写入响应头（延续项目既有"业务错误一律 HTTP 200 + `Result.code`"约定）；同配置节新增 `pageSize` 上限 500、`ids` 数量上限 200、组织范围根数量上限 100，超出直接参数校验失败（不占用令牌桶配额）；验证不同应用/不同接口配额相互隔离及参数放大攻击被拒绝（`SyncRateLimiter`/`SyncRateLimitProperties` + Controller/全局异常处理器接入；聚焦测试覆盖接口/应用配额隔离、HTTP 200 + `Retry-After`、请求参数与配置保存放大校验先于令牌消费/数据库修改）
 
 ## 8. 端到端验证
 
-- [ ] 8.1 本地启动前后端（依赖 `org-path-fields` change 已实现），创建组织/用户/任职记录，确认 `version` 从 1 开始正确递增
-- [ ] 8.2 配置一个测试应用的组织范围，触发一次组织迁移（把该应用范围内的一个中间层组织移动到范围外），确认：变更流水表为该组织及其全部子孙各生成一条记录（`orgScopePathBefore`/`orgScopePathAfter` 正确）；该应用调用 `/changes` 能看到这些记录的指针；调用 `/pull?ids=` 复核时查不到（因为已不在范围内）
-- [ ] 8.3 验证增量拉取的游标续传：多次调用 `/changes` 传入上一次响应的 `nextSeq`，确认不重复、不遗漏
-- [ ] 8.4 验证游标过期场景：手动清理变更流水表模拟保留窗口过期，确认 `/changes` 返回明确的业务错误
-- [ ] 8.5 验证对账摘要接口：调用 `/digest` 拿到 `currentMaxSeq`，随后以该值为 `sinceSeq` 调用 `/changes`，确认能正确衔接后续新产生的变更
-- [ ] 8.6 验证通知重试：让通知回调地址短暂不可达，确认失败通知进入待重试、定时任务到期后自动重推、恢复可达后成功
-- [ ] 8.7 运行完整回归：`./gradlew test --tests "cn.nihility.rbac.sync.*" --tests "cn.nihility.rbac.org.*" --tests "cn.nihility.rbac.user.*"` 全部通过，确认本次改造未破坏现有 `/pull` 接口与通知既有行为
-- [ ] 8.8 补充 APP/ROLE 版本、物理删除最终 tombstone、组织子孙级联版本、流水与全部通知任务事务回滚、PENDING 宕机恢复、超过 `2^53-1` 字符串往返的端到端验证
+- [x] 8.1 本地启动前后端（依赖 `org-path-fields` change 已实现），创建组织/用户/任职记录，确认 `version` 从 1 开始正确递增（本地 MySQL 5.7 + Redis 启动验证；HTTP 创建/更新组织 27、用户 180、任职 27，流水均为 CREATE version=1、UPDATE version=2，业务表当前 version=2）
+- [x] 8.2 配置一个测试应用的组织范围，触发一次组织迁移（把该应用范围内的一个中间层组织移动到范围外），确认：变更流水表为该组织及其全部子孙各生成一条记录（`orgScopePathBefore`/`orgScopePathAfter` 正确）；该应用调用 `/changes` 能看到这些记录的指针；调用 `/pull?ids=` 复核时查不到（因为已不在范围内）（应用 146 范围为根组织 32 含子孙；迁移组织 34 及子组织 35 至根 33 后，`/changes` 返回 changeSeq 101/102、entityVersion 2 两条 UPDATE，`/pull?ids=34,35` 返回 0 条）
+- [x] 8.3 验证增量拉取的游标续传：多次调用 `/changes` 传入上一次响应的 `nextSeq`，确认不重复、不遗漏（应用 146/ORG 以 pageSize=2 连续 3 次续传得到 96、98、99、101、102，与 pageSize=500 基准结果完全一致且无重复，最终游标 102）
+- [x] 8.4 验证游标过期场景：手动清理变更流水表模拟保留窗口过期，确认 `/changes` 返回明确的业务错误（事务内插入并删除专用过期流水 seq=103、同步推进 retention floor=103；`sinceSeq=102` 返回业务码 410 及全量重建/digest 新水位提示）
+- [x] 8.5 验证对账摘要接口：调用 `/digest` 拿到 `currentMaxSeq`，随后以该值为 `sinceSeq` 调用 `/changes`，确认能正确衔接后续新产生的变更（应用 146/ORG 的 digest 水位为 104；随后更新范围内组织 32 产生 seq=105、version=3，`sinceSeq=104` 仅返回该后续变更）
+- [x] 8.6 验证通知重试：让通知回调地址短暂不可达，确认失败通知进入待重试、定时任务到期后自动重推、恢复可达后成功（应用 146 事件 seq=107 首次连接 127.0.0.1:49090 失败后进入 RETRY/retryCount=1；启动本地回调并令任务到期后，既有调度器自动重推为 SUCCESS、HTTP 200，复用原任务与事件号）
+- [x] 8.7 运行完整回归：`./gradlew test --tests "cn.nihility.rbac.sync.*" --tests "cn.nihility.rbac.org.*" --tests "cn.nihility.rbac.user.*"` 全部通过，确认本次改造未破坏现有 `/pull` 接口与通知既有行为（2026-08-29 本地执行 BUILD SUCCESSFUL，1m03s）
+- [x] 8.8 补充 APP/ROLE 版本、物理删除最终 tombstone、组织子孙级联版本、流水与全部通知任务事务回滚、PENDING 宕机恢复、超过 `2^53-1` 字符串往返的端到端验证（APP/ROLE 的 CREATE、UPDATE、状态变更、DELETE 均断言事件版本，物理删除与组织子孙级联复用既有专项测试；新增事务代理回滚、PENDING 扫描恢复、超 JavaScript 安全整数游标字符串往返及组织路径 OR 条件测试；所有生产代码 `@Transactional` 均显式指定传播方式及 `rollbackFor = Exception.class`；2026-08-29 事务相关聚焦回归 BUILD SUCCESSFUL，33s）
+- [x] 8.9 修复通知候选范围判定：ORG/POSITION 使用事件 `orgScopePathBefore`/`orgScopePathAfter` 匹配应用范围前缀，前后任一命中即保留候选；范围为空时不限制，配置范围但路径缺失时不匹配（`NotifyCandidateResolver` 不再查询删除后的组织/任职业务行，专项测试覆盖删除前路径、迁出范围、边界隔离、无限制及缺失路径）
+- [x] 8.10 补充组织逻辑删除、任职物理删除、组织迁出范围的通知候选测试；增加人员、应用、角色逻辑删除通知回归用例；运行 sync/org/user/app/role 聚焦回归，确认原范围应用或对应数据域订阅应用都会创建 DELETE/UPDATE 通知任务（既有 USER/APP/ROLE 删除事件测试继续通过；六模块回归 381 个测试中 377 个通过，4 个失败均为既有 GraalJS 脚本校验环境问题）
+- [x] 8.11 新增 Flyway 迁移为 `tab_dict_item` 增加 `version` 并回填 1；扩展实体、Mapper、版本解析、流水与 `/pull`/`/changes` 固定字段，使 DICT 成为第六类版本化变更实体（新增 V14；`SyncDomain`、版本/快照解析及拉取行映射纳入 DICT，OpenAPI 文案同步为六类实体）
+- [x] 8.12 为字典项新增、修改、启停、删除发布 DICT 事件；字典类型编码变更时同事务级联递增所属字典项版本并逐项发布 UPDATE；补充服务、候选通知、流水和接口测试，确认 DICT 订阅应用能收到删除及其他内容变更通知（所有新增事务均显式 REQUIRED + Exception 回滚；dict/sync 候选、changes、transform 专项回归 BUILD SUCCESSFUL，42s）

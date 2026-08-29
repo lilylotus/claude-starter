@@ -59,6 +59,19 @@
         AND up.status != #{deletedStatus}
     </select>
 
+    <select id="selectPositionNamesByIds" resultType="cn.nihility.rbac.user.dto.PositionVO">
+        SELECT p.id,
+               u.name AS user_name,
+               o.name AS org_name
+        FROM tab_user_position p
+        LEFT JOIN tab_user u ON u.id = p.user_id
+        LEFT JOIN tab_org o ON o.id = p.org_id
+        WHERE p.id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </select>
+
     <!-- 按管辖组织范围查询全部未被逻辑删除的任职记录，供 master-data-excel-export
          能力的任职导出使用：allowedOrgIds 为 null 表示不限制，非 null（哪怕是空集合）
          表示受限，空集合时用恒不匹配的哨兵条件兜底（design.md Decision 1）。 -->

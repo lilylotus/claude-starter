@@ -18,6 +18,9 @@ import cn.nihility.rbac.dict.entity.DictTypeEntity;
 import cn.nihility.rbac.dict.mapper.DictItemMapper;
 import cn.nihility.rbac.dict.mapper.DictTypeMapper;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.app.sync.constant.SyncDomain;
+import cn.nihility.rbac.sync.event.DomainChangeEvent;
+import cn.nihility.rbac.sync.event.DomainEventPublisher;
 import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.util.List;
@@ -26,6 +29,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
@@ -55,6 +59,9 @@ class DictItemServiceImplTest {
     @Mock
     private UserDisplayService userDisplayService;
 
+    @Mock
+    private DomainEventPublisher domainEventPublisher;
+
     /** 被测服务实例。 */
     private DictItemServiceImpl dictItemService;
 
@@ -65,7 +72,7 @@ class DictItemServiceImplTest {
     @BeforeEach
     void setUp() {
         dictItemService = new DictItemServiceImpl(dictItemMapper, dictTypeMapper, operationLogRecorder,
-                currentOperatorService, userDisplayService);
+                currentOperatorService, userDisplayService, domainEventPublisher);
         lenient().when(currentOperatorService.resolveUserId()).thenReturn(1L);
         lenient().when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
     }
@@ -109,6 +116,10 @@ class DictItemServiceImplTest {
 
         verify(operationLogRecorder).recordCreate(org.mockito.ArgumentMatchers.eq("dictItem"), any(),
                 org.mockito.ArgumentMatchers.eq("主职"), any(Map.class));
+        ArgumentCaptor<DomainChangeEvent> eventCaptor = ArgumentCaptor.forClass(DomainChangeEvent.class);
+        verify(domainEventPublisher).publish(eventCaptor.capture());
+        assertThat(eventCaptor.getValue().getDataType()).isEqualTo(SyncDomain.DICT);
+        assertThat(eventCaptor.getValue().getEntityVersion()).isEqualTo(1L);
     }
 
     /**

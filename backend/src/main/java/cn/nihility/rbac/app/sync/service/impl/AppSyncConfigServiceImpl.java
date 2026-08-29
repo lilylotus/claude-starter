@@ -1,6 +1,7 @@
 package cn.nihility.rbac.app.sync.service.impl;
 
 import cn.nihility.rbac.app.entity.AppEntity;
+import cn.nihility.rbac.app.mapper.AppConfigMapper;
 import cn.nihility.rbac.app.mapper.AppMapper;
 import cn.nihility.rbac.app.support.AppScopeGuard;
 import cn.nihility.rbac.app.sync.constant.SyncDomain;
@@ -30,6 +31,7 @@ import cn.nihility.rbac.metadata.entity.MetadataFieldEntity;
 import cn.nihility.rbac.metadata.mapper.MetadataFieldMapper;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.sync.openapi.config.SyncRateLimitProperties;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.time.LocalDateTime;
 import java.util.HashSet;
@@ -40,6 +42,7 @@ import java.util.Objects;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -69,8 +72,14 @@ public class AppSyncConfigServiceImpl implements AppSyncConfigService {
     /** 应用同步组织范围数据访问接口。 */
     private final AppSyncOrgScopeMapper appSyncOrgScopeMapper;
 
+    /** 对外同步接口请求规模上限配置。 */
+    private final SyncRateLimitProperties syncRateLimitProperties;
+
     /** 应用数据访问接口，仅用于只读查询应用实体（校验存在性、管辖组织范围）。 */
     private final AppMapper appMapper;
+
+    /** 应用总配置 Mapper，用于原子递增应用级同步配置纪元。 */
+    private final AppConfigMapper appConfigMapper;
 
     /** 元数据字段数据访问接口，校验字段映射请求中 {@code metadataFieldId} 的合法性。 */
     private final MetadataFieldMapper metadataFieldMapper;
@@ -121,10 +130,16 @@ public class AppSyncConfigServiceImpl implements AppSyncConfigService {
      * {@inheritDoc}
      */
     @Override
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public AppSyncDomainConfigVO updateDomainConfig(Long appRefId, String syncDomain,
             AppSyncDomainConfigUpdateRequest request) {
         if (!SyncDomain.ALL_DOMAINS.contains(syncDomain)) {
             throw new BusinessException("非法的数据域：" + syncDomain);
+        }
+        if (request.getPageSize() != null
+                && request.getPageSize() > syncRateLimitProperties.getMaxPageSize()) {
+            throw new BusinessException("拉取分页大小不能超过 "
+                    + syncRateLimitProperties.getMaxPageSize());
         }
         AppEntity appEntity = AppScopeGuard.getExistingAppInScope(appMapper, orgScopeService, appRefId);
         AppSyncDomainConfigEntity entity = findDomainConfig(appRefId, syncDomain);
@@ -135,6 +150,7 @@ public class AppSyncConfigServiceImpl implements AppSyncConfigService {
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         appSyncDomainConfigMapper.updateById(entity);
+        appConfigMapper.incrementConfigEpoch(appRefId, entity.getUpdateBy(), entity.getUpdateTime());
 
         operationLogRecorder.recordUpdate(OperationLogResourceType.APP, appRefId, appEntity.getName(),
                 beforeSnapshot, toDomainConfigLogSnapshot(entity));
@@ -158,7 +174,7 @@ public class AppSyncConfigServiceImpl implements AppSyncConfigService {
      * {@inheritDoc}
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public List<AppSyncFieldMappingVO> replaceFieldMappings(Long appRefId, String syncDomain,
             List<AppSyncFieldMappingSaveRequest> requests) {
         if (!SyncDomain.FIELD_MAPPING_DOMAINS.contains(syncDomain)) {
@@ -190,6 +206,7 @@ public class AppSyncConfigServiceImpl implements AppSyncConfigService {
             entity.setUpdateTime(now);
             appSyncFieldMappingMapper.insert(entity);
         }
+        appConfigMapper.incrementConfigEpoch(appRefId, operator, now);
 
         operationLogRecorder.recordUpdate(OperationLogResourceType.APP, appRefId, appEntity.getName(),
                 Map.of("字段映射", beforeCount + " 行"), Map.of("字段映射", effectiveRequests.size() + " 行"));
@@ -281,7 +298,7 @@ public class AppSyncConfigServiceImpl implements AppSyncConfigService {
      * {@inheritDoc}
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public List<AppSyncOrgScopeVO> replaceOrgScope(Long appRefId, String syncDomain,
             List<AppSyncOrgScopeRequest> requests) {
         if (!SyncDomain.ORG_SCOPE_DOMAINS.contains(syncDomain)) {
@@ -289,6 +306,10 @@ public class AppSyncConfigServiceImpl implements AppSyncConfigService {
         }
         AppEntity appEntity = AppScopeGuard.getExistingAppInScope(appMapper, orgScopeService, appRefId);
         List<AppSyncOrgScopeRequest> effectiveRequests = requests == null ? List.of() : requests;
+        if (effectiveRequests.size() > syncRateLimitProperties.getMaxOrgScopeRoots()) {
+            throw new BusinessException("组织范围根数量不能超过 "
+                    + syncRateLimitProperties.getMaxOrgScopeRoots());
+        }
         assertOrgScopeRequestsValid(effectiveRequests);
 
         LambdaQueryWrapper<AppSyncOrgScopeEntity> deleteWrapper = new LambdaQueryWrapper<AppSyncOrgScopeEntity>()
@@ -313,6 +334,7 @@ public class AppSyncConfigServiceImpl implements AppSyncConfigService {
                     .build();
             appSyncOrgScopeMapper.insert(entity);
         }
+        appConfigMapper.incrementConfigEpoch(appRefId, operator, now);
 
         operationLogRecorder.recordUpdate(OperationLogResourceType.APP, appRefId, appEntity.getName(),
                 Map.of("同步范围", beforeCount + " 行"), Map.of("同步范围", effectiveRequests.size() + " 行"));

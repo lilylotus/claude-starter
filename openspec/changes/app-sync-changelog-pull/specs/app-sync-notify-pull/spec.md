@@ -42,7 +42,7 @@
 - **THEN** 系统写入一条变更流水表记录（`entityType=POSITION`、`operationType=UPDATE`），`orgScopePathBefore` 为组织 A 的 `orgPath`、`orgScopePathAfter` 为组织 B 的 `orgPath`
 
 ### Requirement: 通知模式下的变更通知
-当候选应用使用通知模式时，系统 SHALL 先持久化通知任务，再由独立调度器发起 HTTP 请求，不得在 Disruptor 单消费者线程内同步等待外部回调。请求体 SHALL 包含稳定 `eventId`、数据类型、操作类型、对象 id、`bizCode`、发生时间、`changeSeq`、`entityVersion` 与自定义参数。一次变更匹配多个应用时分别创建任务，一个应用失败不得阻塞其他应用或全局流水处理。
+当候选应用使用通知模式时，系统 SHALL 先持久化通知任务，再由独立调度器发起 HTTP 请求，不得在 Disruptor 单消费者线程内同步等待外部回调。请求体 SHALL 包含稳定 `eventId`、数据类型、操作类型、对象 id、`bizCode`、发生时间、`changeSeq`、`entityVersion` 与自定义参数。一次变更匹配多个应用时分别创建任务，一个应用失败不得阻塞其他应用或全局流水处理。ORG/POSITION 的候选范围 SHALL 使用事件的变更前后组织路径判定，前后任一命中即通知，不得因业务行已删除或已迁出当前范围而丢失通知。
 
 #### Scenario: 通知模式且数据域允许同步时发起通知
 - **WHEN** 某应用 `syncMode=NOTIFY` 且组织数据域配置为允许同步（且该组织落在其配置的组织范围内），发生一条归属该应用候选的组织新增变更
@@ -51,6 +51,18 @@
 #### Scenario: 拉取模式下不发起通知
 - **WHEN** 某应用 `syncMode=PULL`，发生一条本会匹配该应用的数据变更
 - **THEN** 系统不向该应用发起任何 HTTP 通知请求，也不为此产生任何持久化通知记录
+
+#### Scenario: 范围内组织删除后仍通知原范围应用
+- **WHEN** 一个原本位于应用组织同步范围内的组织被逻辑删除，事件携带删除前路径且删除后路径为空
+- **THEN** 系统使用删除前路径保留该应用为通知候选，创建并发送 `operationType=DELETE` 的通知任务，使应用能够清理本地组织数据
+
+#### Scenario: 范围内任职物理删除后仍通知原范围应用
+- **WHEN** 一条原本位于应用任职同步范围内的任职记录被物理删除，事件携带删除前所属组织路径且删除后路径为空
+- **THEN** 系统不再查询已删除任职行，而使用删除前路径创建并发送 `operationType=DELETE` 的通知任务
+
+#### Scenario: 字典项删除通知订阅应用
+- **WHEN** 一个字典项被逻辑删除，且某应用以 NOTIFY 模式启用了 DICT 数据域
+- **THEN** 系统为该应用创建并发送 `dataType=DICT`、`operationType=DELETE`、`bizId` 为字典项 id 的通知任务
 
 #### Scenario: 数据域未开通或组织范围不匹配时不发起通知
 - **WHEN** 某应用 `syncMode=NOTIFY` 但用户数据域配置为不允许同步，或用户数据域配置的组织范围不包含本次变更用户的任何任职组织
@@ -88,7 +100,7 @@
 - **THEN** 对应流水记录的 `orgScopePathBefore` 为删除前路径、`orgScopePathAfter` 为空，该应用能在 `/changes` 看到指针并在 `/pull?ids=` 查不到实体
 
 ### Requirement: 记录版本号
-系统 SHALL 为组织、用户、任职、应用、角色五类同步实体维护整型版本号（`version`），初始值为 1，每次编辑、启用、停用、删除时通过原子数据库更新自增 1。删除事件携带最终 tombstone 版本。该版本号 SHALL 在变更流水、通知请求体和分页拉取结果中暴露，供外部应用判断同一实体的重复与乱序；系统分页 SHALL NOT 依赖该版本号。
+系统 SHALL 为组织、用户、任职、应用、角色、字典项六类同步实体维护整型版本号（`version`），初始值为 1，每次编辑、启用、停用、删除时通过原子数据库更新自增 1。删除事件携带最终 tombstone 版本。该版本号 SHALL 在变更流水、通知请求体和分页拉取结果中暴露，供外部应用判断同一实体的重复与乱序；系统分页 SHALL NOT 依赖该版本号。
 
 #### Scenario: 新增记录的初始版本号
 - **WHEN** 客户端成功创建一个组织
@@ -99,11 +111,15 @@
 - **THEN** 编辑后的 `version` 比编辑前多 1，停用后的 `version` 又比编辑后多 1
 
 #### Scenario: 分页拉取结果携带版本号
-- **WHEN** 调用方请求 ORG/USER/POSITION/APP/ROLE 任一数据类型的分页拉取接口
+- **WHEN** 调用方请求 ORG/USER/POSITION/APP/ROLE/DICT 任一数据类型的分页拉取接口
 - **THEN** 每条返回记录携带十进制字符串 `version`，接口地址和请求参数保持兼容
 
+#### Scenario: 字典类型编码变更递增所属字典项版本
+- **WHEN** 一个字典类型的编码发生变化并影响所属字典项对外 `dictTypeCode`
+- **THEN** 系统在同一事务内递增该类型全部字典项的版本，并为每个字典项发布携带新版本的 UPDATE 事件
+
 ### Requirement: 增量游标拉取变更指针
-系统 SHALL 提供增量游标拉取接口，`entityType` 必填且只允许 ORG/USER/POSITION/APP/ROLE。每条指针返回 `eventId` 与 `changeSeq`；ORG/POSITION 使用边界安全路径过滤，USER 批量查询任职并循环扫描。`nextSeq` 等于本轮最后扫描的底层序号，即使结果为空也前进；`hasMore` 表示底层是否仍有未扫描记录。
+系统 SHALL 提供增量游标拉取接口，`entityType` 必填且只允许 ORG/USER/POSITION/APP/ROLE/DICT。每条指针返回 `eventId` 与 `changeSeq`；ORG/POSITION 使用边界安全路径过滤，USER 批量查询任职并循环扫描，DICT 不做组织范围过滤。`nextSeq` 等于本轮最后扫描的底层序号，即使结果为空也前进；`hasMore` 表示底层是否仍有未扫描记录。
 
 系统 SHALL 使用持久化 `retentionFloorSeq` 判断游标过期。响应携带应用级 `configEpoch`；任一相关配置变化导致 epoch 改变时，调用方 SHALL 对该应用全部已启用数据域重新全量同步。
 

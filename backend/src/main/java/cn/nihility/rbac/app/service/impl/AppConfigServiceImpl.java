@@ -153,7 +153,8 @@ public class AppConfigServiceImpl implements AppConfigService {
         entity.setSyncMasterEnabled(request.getSyncMasterEnabled());
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
-        appConfigMapper.updateById(entity);
+        appConfigMapper.updateSyncConfigAndIncrementEpoch(entity);
+        entity.setConfigEpoch(entity.getConfigEpoch() == null ? 1L : entity.getConfigEpoch() + 1L);
 
         operationLogRecorder.recordUpdate(OperationLogResourceType.APP, appRefId, appEntity.getName(),
                 beforeSnapshot, toLogSnapshot(entity));

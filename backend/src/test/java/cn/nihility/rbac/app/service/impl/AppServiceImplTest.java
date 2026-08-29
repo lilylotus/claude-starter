@@ -380,15 +380,22 @@ class AppServiceImplTest {
     @Test
     void delete_shouldSetDeletedStatus() {
         AppEntity entity = buildEntity(10L, 1L, 100L, AppStatus.ENABLED);
+        entity.setVersion(3L);
         when(appMapper.selectById(10L)).thenReturn(entity);
 
         appService.delete(10L);
 
         assertThat(entity.getStatus()).isEqualTo(AppStatus.DELETED);
+        assertThat(entity.getVersion()).isEqualTo(4L);
         verify(appMapper).updateById(entity);
+        verify(appMapper).incrementVersion(10L);
         verify(appMapper, never()).deleteById(any(Long.class));
         verify(operationLogRecorder).recordDelete(org.mockito.ArgumentMatchers.eq("app"),
                 org.mockito.ArgumentMatchers.eq(10L), any(), any(Map.class));
+        ArgumentCaptor<cn.nihility.rbac.sync.event.DomainChangeEvent> eventCaptor =
+                ArgumentCaptor.forClass(cn.nihility.rbac.sync.event.DomainChangeEvent.class);
+        verify(domainEventPublisher).publish(eventCaptor.capture());
+        assertThat(eventCaptor.getValue().getEntityVersion()).isEqualTo(4L);
     }
 
     /**

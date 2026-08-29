@@ -122,6 +122,7 @@ public class RoleServiceImpl implements RoleService {
                 .dataType(SyncDomain.ROLE)
                 .bizId(entity.getId())
                 .operationType(OperationType.CREATE)
+                .entityVersion(entity.getVersion())
                 .operator(entity.getCreateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());
@@ -155,6 +156,7 @@ public class RoleServiceImpl implements RoleService {
                 .dataType(SyncDomain.ROLE)
                 .bizId(id)
                 .operationType(OperationType.UPDATE)
+                .entityVersion(entity.getVersion())
                 .operator(entity.getUpdateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());
@@ -198,6 +200,7 @@ public class RoleServiceImpl implements RoleService {
                 .dataType(SyncDomain.ROLE)
                 .bizId(id)
                 .operationType(OperationType.DELETE)
+                .entityVersion(entity.getVersion())
                 .operator(entity.getUpdateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());
@@ -239,6 +242,7 @@ public class RoleServiceImpl implements RoleService {
                 .dataType(SyncDomain.ROLE)
                 .bizId(id)
                 .operationType(status == RoleStatus.ENABLED ? OperationType.ENABLE : OperationType.DISABLE)
+                .entityVersion(entity.getVersion())
                 .operator(entity.getUpdateBy())
                 .occurredAt(LocalDateTime.now())
                 .build());

@@ -1,6 +1,8 @@
 package cn.nihility.rbac.common.exception;
 
 import cn.nihility.rbac.common.result.Result;
+import cn.nihility.rbac.sync.openapi.support.SyncRateLimiter;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.validation.FieldError;
@@ -19,6 +21,14 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    /** 处理同步开放接口限流，保持 HTTP 200 并写入 Retry-After 响应头。 */
+    @ExceptionHandler(SyncRateLimiter.RateLimitedException.class)
+    public Result<Void> handleRateLimitedException(SyncRateLimiter.RateLimitedException ex,
+            HttpServletResponse response) {
+        response.setHeader("Retry-After", String.valueOf(ex.getRetryAfterSeconds()));
+        return Result.error(ex.getCode(), ex.getMessage());
+    }
 
     /** 参数校验失败时的默认状态码。 */
     private static final int VALIDATION_ERROR_CODE = 400;

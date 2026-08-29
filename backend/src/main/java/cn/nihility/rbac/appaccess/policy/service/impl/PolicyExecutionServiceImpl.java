@@ -37,6 +37,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -96,7 +97,7 @@ public class PolicyExecutionServiceImpl implements PolicyExecutionService {
      * {@code AppAccessEffectivePermissionService#isAuthorized(Long, Long, String, String)}。
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public PolicyVO execute(Long policyId) {
         return execute(policyId, Objects.toString(currentOperatorService.resolveUserId(), null));
     }
@@ -105,7 +106,7 @@ public class PolicyExecutionServiceImpl implements PolicyExecutionService {
      * {@inheritDoc}
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public PolicyVO execute(Long policyId, String operator) {
         PolicyEntity policy = policyMapper.selectById(policyId);
         if (policy == null) {

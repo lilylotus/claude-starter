@@ -16,6 +16,10 @@ import cn.nihility.rbac.dict.mapstruct.DictConvert;
 import cn.nihility.rbac.dict.service.DictItemService;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.operationlog.constant.OperationType;
+import cn.nihility.rbac.app.sync.constant.SyncDomain;
+import cn.nihility.rbac.sync.event.DomainChangeEvent;
+import cn.nihility.rbac.sync.event.DomainEventPublisher;
 import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -29,6 +33,8 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 /**
@@ -52,6 +58,9 @@ public class DictItemServiceImpl implements DictItemService {
 
     /** 审计字段（{@code createBy}/{@code updateBy}）展示名批量解析服务。 */
     private final UserDisplayService userDisplayService;
+
+    /** 数据变更事件发布器。 */
+    private final DomainEventPublisher domainEventPublisher;
 
     /**
      * {@inheritDoc}
@@ -83,6 +92,7 @@ public class DictItemServiceImpl implements DictItemService {
      * {@inheritDoc}
      */
     @Override
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public DictItemVO create(DictItemCreateRequest request) {
         checkCodeUnique(request.getDictTypeId(), request.getCode(), null);
 
@@ -90,6 +100,7 @@ public class DictItemServiceImpl implements DictItemService {
         DictItemEntity entity = DictConvert.INSTANCE.toItemEntity(request);
         LocalDateTime now = LocalDateTime.now();
         entity.setStatus(DictStatus.ENABLED);
+        entity.setVersion(1L);
         entity.setCreateBy(operator);
         entity.setCreateTime(now);
         entity.setUpdateBy(operator);
@@ -98,6 +109,7 @@ public class DictItemServiceImpl implements DictItemService {
 
         operationLogRecorder.recordCreate(OperationLogResourceType.DICT_ITEM, entity.getId(), entity.getLabel(),
                 toLogSnapshot(entity));
+        publishEvent(entity, OperationType.CREATE);
 
         return getById(entity.getId());
     }
@@ -106,6 +118,7 @@ public class DictItemServiceImpl implements DictItemService {
      * {@inheritDoc}
      */
     @Override
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public DictItemVO update(Long id, DictItemUpdateRequest request) {
         DictItemEntity entity = getExistingEntity(id);
         checkCodeUnique(entity.getDictTypeId(), request.getCode(), id);
@@ -115,9 +128,12 @@ public class DictItemServiceImpl implements DictItemService {
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         dictItemMapper.updateById(entity);
+        dictItemMapper.incrementVersion(id);
+        entity.setVersion(entity.getVersion() == null ? 2L : entity.getVersion() + 1L);
 
         operationLogRecorder.recordUpdate(OperationLogResourceType.DICT_ITEM, id, entity.getLabel(),
                 beforeSnapshot, toLogSnapshot(entity));
+        publishEvent(entity, OperationType.UPDATE);
 
         return getById(id);
     }
@@ -126,6 +142,7 @@ public class DictItemServiceImpl implements DictItemService {
      * {@inheritDoc}
      */
     @Override
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public DictItemVO enable(Long id) {
         return changeStatus(id, DictStatus.ENABLED);
     }
@@ -134,6 +151,7 @@ public class DictItemServiceImpl implements DictItemService {
      * {@inheritDoc}
      */
     @Override
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public DictItemVO disable(Long id) {
         return changeStatus(id, DictStatus.DISABLED);
     }
@@ -142,6 +160,7 @@ public class DictItemServiceImpl implements DictItemService {
      * {@inheritDoc}
      */
     @Override
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public void delete(Long id) {
         DictItemEntity entity = getExistingEntity(id);
         Map<String, Object> beforeSnapshot = toLogSnapshot(entity);
@@ -150,8 +169,11 @@ public class DictItemServiceImpl implements DictItemService {
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         dictItemMapper.updateById(entity);
+        dictItemMapper.incrementVersion(id);
+        entity.setVersion(entity.getVersion() == null ? 2L : entity.getVersion() + 1L);
 
         operationLogRecorder.recordDelete(OperationLogResourceType.DICT_ITEM, id, entity.getLabel(), beforeSnapshot);
+        publishEvent(entity, OperationType.DELETE);
     }
 
     /**
@@ -189,10 +211,25 @@ public class DictItemServiceImpl implements DictItemService {
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
         dictItemMapper.updateById(entity);
+        dictItemMapper.incrementVersion(id);
+        entity.setVersion(entity.getVersion() == null ? 2L : entity.getVersion() + 1L);
 
         operationLogRecorder.recordStatusChange(OperationLogResourceType.DICT_ITEM, id, entity.getLabel(),
                 status == DictStatus.ENABLED, beforeSnapshot, toLogSnapshot(entity));
+        publishEvent(entity, status == DictStatus.ENABLED ? OperationType.ENABLE : OperationType.DISABLE);
         return getById(id);
+    }
+
+    /** 发布携带稳定字典项版本的 DICT 领域事件。 */
+    private void publishEvent(DictItemEntity entity, Integer operationType) {
+        domainEventPublisher.publish(DomainChangeEvent.builder()
+                .dataType(SyncDomain.DICT)
+                .bizId(entity.getId())
+                .operationType(operationType)
+                .entityVersion(entity.getVersion())
+                .operator(entity.getUpdateBy())
+                .occurredAt(LocalDateTime.now())
+                .build());
     }
 
     /**

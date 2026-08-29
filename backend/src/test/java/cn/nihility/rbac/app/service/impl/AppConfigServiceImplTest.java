@@ -381,7 +381,7 @@ class AppConfigServiceImplTest {
         AppConfigVO vo = appConfigService.updateSyncConfig(10L, request);
 
         assertThat(vo.getSyncMode()).isEqualTo(SyncMode.PULL);
-        verify(appConfigMapper).updateById(configEntity);
+        verify(appConfigMapper).updateSyncConfigAndIncrementEpoch(configEntity);
     }
 
     /**
@@ -404,7 +404,7 @@ class AppConfigServiceImplTest {
 
         assertThat(vo.getSyncMasterEnabled()).isFalse();
         ArgumentCaptor<AppConfigEntity> captor = ArgumentCaptor.forClass(AppConfigEntity.class);
-        verify(appConfigMapper).updateById(captor.capture());
+        verify(appConfigMapper).updateSyncConfigAndIncrementEpoch(captor.capture());
         assertThat(captor.getValue().getSyncMasterEnabled()).isFalse();
     }
 
@@ -425,7 +425,7 @@ class AppConfigServiceImplTest {
         AppConfigVO vo = appConfigService.updateSyncConfig(10L, request);
 
         assertThat(vo.getSyncMode()).isEqualTo(SyncMode.PULL);
-        verify(appConfigMapper).updateById(any(AppConfigEntity.class));
+        verify(appConfigMapper).updateSyncConfigAndIncrementEpoch(any(AppConfigEntity.class));
     }
 
     /**
@@ -462,7 +462,7 @@ class AppConfigServiceImplTest {
         AppConfigVO vo = appConfigService.updateSyncConfig(10L, request);
 
         assertThat(vo.getSyncMode()).isEqualTo(SyncMode.PULL);
-        verify(appConfigMapper).updateById(configEntity);
+        verify(appConfigMapper).updateSyncConfigAndIncrementEpoch(configEntity);
     }
 
     /**
@@ -523,7 +523,7 @@ class AppConfigServiceImplTest {
         assertThat(vo.getNotifyParams()).containsEntry("token", "abc123").containsEntry("source", "rbac");
 
         ArgumentCaptor<AppConfigEntity> captor = ArgumentCaptor.forClass(AppConfigEntity.class);
-        verify(appConfigMapper).updateById(captor.capture());
+        verify(appConfigMapper).updateSyncConfigAndIncrementEpoch(captor.capture());
         assertThat(captor.getValue().getNotifyParams()).contains("abc123").contains("rbac");
     }
 

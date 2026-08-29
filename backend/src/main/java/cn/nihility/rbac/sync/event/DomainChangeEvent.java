@@ -26,7 +26,7 @@ public class DomainChangeEvent {
 
     /**
      * 数据类型，{@code cn.nihility.rbac.app.sync.constant.SyncDomain} 五个可变更取值之一
-     * （ORG/USER/POSITION/APP/ROLE，不含 DICT）。
+     * （ORG/USER/POSITION/APP/ROLE/DICT）。
      */
     private final String dataType;
 

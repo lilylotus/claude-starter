@@ -2,6 +2,7 @@ package cn.nihility.rbac.sync.transform;
 
 import cn.nihility.rbac.app.mapper.AppMapper;
 import cn.nihility.rbac.app.sync.constant.SyncDomain;
+import cn.nihility.rbac.dict.mapper.DictItemMapper;
 import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.role.mapper.RoleMapper;
 import cn.nihility.rbac.sync.event.DomainSnapshotSupport;
@@ -37,6 +38,7 @@ public class BizSnapshotResolver {
 
     /** 角色业务表数据访问接口。 */
     private final RoleMapper roleMapper;
+    private final DictItemMapper dictItemMapper;
 
     /**
      * 按数据域和业务主键现查对应业务表，返回该行当前的字段快照。
@@ -86,6 +88,7 @@ public class BizSnapshotResolver {
             case SyncDomain.POSITION -> userPositionMapper.selectById(bizId);
             case SyncDomain.APP -> appMapper.selectById(bizId);
             case SyncDomain.ROLE -> roleMapper.selectById(bizId);
+            case SyncDomain.DICT -> dictItemMapper.selectById(bizId);
             default -> null;
         };
     }

@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -40,7 +41,7 @@ public class DomainChangeRecorder {
      * @param event 领域变更事件
      * @return 已写入的流水与候选应用通知任务列表
      */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public DomainChangeRecordResult record(DomainChangeEvent event) {
         AppDataChangeLogEntity changeLog = appDataChangeLogService.append(event);
         List<Long> candidateAppRefIds = notifyCandidateResolver.resolveCandidateAppRefIds(event);

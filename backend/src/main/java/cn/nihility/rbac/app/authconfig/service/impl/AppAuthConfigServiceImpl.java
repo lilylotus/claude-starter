@@ -44,6 +44,7 @@ import java.util.Objects;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -291,7 +292,7 @@ public class AppAuthConfigServiceImpl implements AppAuthConfigService {
      * {@inheritDoc}
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public List<AppUserinfoFieldMappingVO> replaceUserinfoFieldMappings(Long appRefId,
             List<AppUserinfoFieldMappingSaveRequest> requests) {
         AppEntity appEntity = AppScopeGuard.getExistingAppInScope(appMapper, orgScopeService, appRefId);

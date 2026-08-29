@@ -14,8 +14,8 @@ import lombok.Getter;
 @Schema(description = "增量游标拉取变更指针响应")
 public class SyncChangesPageVO {
 
-    /** 数据类型：ORG/USER/POSITION/APP/ROLE。 */
-    @Schema(description = "数据类型：ORG/USER/POSITION/APP/ROLE")
+    /** 数据类型：ORG/USER/POSITION/APP/ROLE/DICT。 */
+    @Schema(description = "数据类型：ORG/USER/POSITION/APP/ROLE/DICT")
     private final String entityType;
 
     /** 本次请求实际使用的起始游标，十进制字符串。 */

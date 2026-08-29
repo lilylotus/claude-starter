@@ -380,15 +380,22 @@ class RoleServiceImplTest {
     @Test
     void delete_shouldSetDeletedStatus() {
         RoleEntity entity = buildEntity(10L, RoleStatus.ENABLED);
+        entity.setVersion(3L);
         when(roleMapper.selectById(10L)).thenReturn(entity);
 
         roleService.delete(10L);
 
         assertThat(entity.getStatus()).isEqualTo(RoleStatus.DELETED);
+        assertThat(entity.getVersion()).isEqualTo(4L);
         verify(roleMapper).updateById(entity);
+        verify(roleMapper).incrementVersion(10L);
         verify(roleMapper, never()).deleteById(any(Long.class));
         verify(operationLogRecorder).recordDelete(org.mockito.ArgumentMatchers.eq("role"),
                 org.mockito.ArgumentMatchers.eq(10L), any(), any(Map.class));
+        ArgumentCaptor<cn.nihility.rbac.sync.event.DomainChangeEvent> eventCaptor =
+                ArgumentCaptor.forClass(cn.nihility.rbac.sync.event.DomainChangeEvent.class);
+        verify(domainEventPublisher).publish(eventCaptor.capture());
+        assertThat(eventCaptor.getValue().getEntityVersion()).isEqualTo(4L);
     }
 
     /**

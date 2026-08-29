@@ -36,6 +36,7 @@ import java.util.Map;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -98,7 +99,7 @@ public class UpstreamSourceServiceImpl implements UpstreamSourceService {
      * {@inheritDoc}
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public UpstreamSourceVO create(UpstreamSourceCreateRequest request) {
         String operator = Objects.toString(currentOperatorService.resolveUserId(), null);
         LocalDateTime now = LocalDateTime.now();
@@ -195,7 +196,7 @@ public class UpstreamSourceServiceImpl implements UpstreamSourceService {
      * {@inheritDoc}
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public void delete(Long id) {
         getExistingEntity(id);
         upstreamFieldMappingMapper.delete(new LambdaQueryWrapper<UpstreamFieldMappingEntity>()

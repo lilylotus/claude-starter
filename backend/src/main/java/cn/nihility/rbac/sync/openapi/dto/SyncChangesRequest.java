@@ -15,8 +15,8 @@ import lombok.Getter;
 @Schema(description = "增量游标拉取变更指针请求参数")
 public class SyncChangesRequest {
 
-    /** 数据类型：ORG/USER/POSITION/APP/ROLE（不含 DICT）。 */
-    @Schema(description = "数据类型：ORG/USER/POSITION/APP/ROLE（不含 DICT）")
+    /** 数据类型：ORG/USER/POSITION/APP/ROLE/DICT。 */
+    @Schema(description = "数据类型：ORG/USER/POSITION/APP/ROLE/DICT")
     private final String entityType;
 
     /**

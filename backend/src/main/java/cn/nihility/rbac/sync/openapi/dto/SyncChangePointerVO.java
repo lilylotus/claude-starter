@@ -21,8 +21,8 @@ public class SyncChangePointerVO {
     @Schema(description = "雪花全局事件标识，十进制字符串，用于幂等追踪，不参与排序")
     private final String eventId;
 
-    /** 数据类型：ORG/USER/POSITION/APP/ROLE。 */
-    @Schema(description = "数据类型：ORG/USER/POSITION/APP/ROLE")
+    /** 数据类型：ORG/USER/POSITION/APP/ROLE/DICT。 */
+    @Schema(description = "数据类型：ORG/USER/POSITION/APP/ROLE/DICT")
     private final String entityType;
 
     /** 被变更实体主键 id，十进制字符串。 */

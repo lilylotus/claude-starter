@@ -11,6 +11,7 @@ import cn.nihility.rbac.org.entity.OrgEntity;
 import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.role.entity.RoleEntity;
 import cn.nihility.rbac.role.mapper.RoleMapper;
+import cn.nihility.rbac.dict.mapper.DictItemMapper;
 import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.entity.UserPositionEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
@@ -45,11 +46,15 @@ class BizSnapshotResolverTest {
     @Mock
     private RoleMapper roleMapper;
 
+    @Mock
+    private DictItemMapper dictItemMapper;
+
     private BizSnapshotResolver resolver;
 
     @BeforeEach
     void setUp() {
-        resolver = new BizSnapshotResolver(orgMapper, userMapper, userPositionMapper, appMapper, roleMapper);
+        resolver = new BizSnapshotResolver(orgMapper, userMapper, userPositionMapper, appMapper, roleMapper,
+                dictItemMapper);
     }
 
     /**

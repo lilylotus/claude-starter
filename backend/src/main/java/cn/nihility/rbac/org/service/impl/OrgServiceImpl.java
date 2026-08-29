@@ -42,6 +42,7 @@ import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -189,7 +190,7 @@ public class OrgServiceImpl implements OrgService {
      * {@link Transactional}（org-add-parent-code change design.md Decision 4）。
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public OrgVO create(OrgCreateRequest request) {
         assertParentOrgInScope(request.getParentId());
         checkCodeUnique(request.getCode(), null);
@@ -236,7 +237,7 @@ public class OrgServiceImpl implements OrgService {
      * （org-add-parent-code change design.md Decision 2/4，Risks/Trade-offs）。
      */
     @Override
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public OrgVO update(Long id, OrgUpdateRequest request) {
         OrgEntity entity = getExistingEntityInScope(id);
         checkCodeUnique(request.getCode(), id);

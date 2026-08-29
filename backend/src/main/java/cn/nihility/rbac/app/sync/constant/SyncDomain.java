@@ -54,7 +54,7 @@ public final class SyncDomain {
      * app-sync-changelog-pull change proposal.md），供接口层校验 {@code entityType} 请求
      * 参数合法性（design.md Decision 4，tasks.md 4.3）。
      */
-    public static final Set<String> CHANGES_ENTITY_TYPES = Set.of(ORG, USER, POSITION, APP, ROLE);
+    public static final Set<String> CHANGES_ENTITY_TYPES = Set.of(ORG, USER, POSITION, APP, ROLE, DICT);
 
     /**
      * 支持按应用配置同步范围（全部数据/指定组织范围）的 3 个数据域，供接口层校验组织范围
