@@ -27,9 +27,13 @@ import org.springframework.stereotype.Component;
  * {@code tab_app_sync_org_scope} 配置的允许组织 id 集合，语义与
  * {@code cn.nihility.rbac.auth.service.OrgScopeService}（管理员管辖组织范围解析）完全对齐
  * ——{@code Optional.empty()} 表示不限制，非空 {@link Set} 是已展开
- * {@code include_children} 子孙的完整允许组织 id 集合，复用同一个
- * {@link OrgDescendantExpander} 展开算法，但物理上是两张独立的表（按应用维度 vs. 按管理员
- * 维度），互不影响（app-sync-org-scope-and-app-change-log change design.md Decision 2）。
+ * {@code include_children} 子孙的完整允许组织 id 集合，物理上是两张独立的表（按应用维度
+ * vs. 按管理员维度），互不影响（app-sync-org-scope-and-app-change-log change design.md
+ * Decision 2）。与 {@code OrgScopeService} 不同的是，本类展开子孙时使用
+ * {@link OrgDescendantExpander#expandWithDescendantsIncludingDeleted}，不排除已逻辑删除
+ * 的组织——组织被逻辑删除后仍应留在应用同步范围内，使其自身及归属该组织的用户/任职记录
+ * 能继续通过 {@code /open/api/sync/pull} 拉取到并观察到 {@code bizStatus} 已变为已删除
+ * （fix-app-sync-pull-deleted-org-scope change design.md Decision 1/2）。
  * 不引入缓存，每次调用实时查库，与 {@code OrgScopeService} 现有"不缓存，实时查库"的约定
  * 保持一致。
  */
@@ -85,7 +89,7 @@ public class AppSyncOrgScopeResolver {
             }
         }
         if (!recursiveRootOrgIds.isEmpty()) {
-            allowedOrgIds.addAll(orgDescendantExpander.expandWithDescendants(recursiveRootOrgIds));
+            allowedOrgIds.addAll(orgDescendantExpander.expandWithDescendantsIncludingDeleted(recursiveRootOrgIds));
         }
         return Optional.of(allowedOrgIds);
     }

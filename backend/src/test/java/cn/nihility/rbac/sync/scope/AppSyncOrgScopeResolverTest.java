@@ -71,22 +71,60 @@ class AppSyncOrgScopeResolverTest {
         Optional<Set<Long>> result = resolver.resolveAllowedOrgIds(1L, SyncDomain.ORG);
 
         assertThat(result).isEmpty();
-        verify(orgDescendantExpander, never()).expandWithDescendants(any());
+        verify(orgDescendantExpander, never()).expandWithDescendantsIncludingDeleted(any());
     }
 
     /**
-     * {@code include_children = 1} 的配置行应展开为该组织及其全部子孙组织 id。
+     * {@code include_children = 1} 的配置行应展开为该组织及其全部子孙组织 id，且必须调用
+     * {@code expandWithDescendantsIncludingDeleted}（不排除已删除组织），而不是
+     * {@code expandWithDescendants}（fix-app-sync-pull-deleted-org-scope change design.md
+     * Decision 2）。
      */
     @Test
     void resolveAllowedOrgIds_shouldExpandDescendants_whenIncludeChildrenTrue() {
         AppSyncOrgScopeEntity scope = AppSyncOrgScopeEntity.builder().orgId(10L).includeChildren(true).build();
         when(appSyncOrgScopeMapper.selectList(any())).thenReturn(List.of(scope));
-        when(orgDescendantExpander.expandWithDescendants(Set.of(10L))).thenReturn(Set.of(10L, 11L, 12L));
+        when(orgDescendantExpander.expandWithDescendantsIncludingDeleted(Set.of(10L)))
+                .thenReturn(Set.of(10L, 11L, 12L));
 
         Optional<Set<Long>> result = resolver.resolveAllowedOrgIds(1L, SyncDomain.ORG);
 
         assertThat(result).isPresent();
         assertThat(result.get()).containsExactlyInAnyOrder(10L, 11L, 12L);
+        verify(orgDescendantExpander, never()).expandWithDescendants(any());
+    }
+
+    /**
+     * 范围根组织被删除后，{@code allowedOrgIds} 仍应包含其删除前展开出的全部子孙组织 id
+     * （包括已被逻辑删除的子孙），验证 {@code resolveAllowedOrgIds} 不再因为组织被删除而
+     * 把它排除出应用同步范围（fix-app-sync-pull-deleted-org-scope change tasks.md 2.2）。
+     */
+    @Test
+    void resolveAllowedOrgIds_shouldRetainDeletedRootAndDescendants_afterRootOrgDeleted() {
+        AppSyncOrgScopeEntity scope = AppSyncOrgScopeEntity.builder().orgId(10L).includeChildren(true).build();
+        when(appSyncOrgScopeMapper.selectList(any())).thenReturn(List.of(scope));
+        when(orgDescendantExpander.expandWithDescendantsIncludingDeleted(Set.of(10L)))
+                .thenReturn(Set.of(10L, 11L, 12L));
+
+        Optional<Set<Long>> result = resolver.resolveAllowedOrgIds(1L, SyncDomain.ORG);
+
+        assertThat(result).isPresent();
+        assertThat(result.get()).containsExactlyInAnyOrder(10L, 11L, 12L);
+    }
+
+    /**
+     * 范围内某个非根组织被删除后，{@code allowedOrgIds} 仍应包含该已删除组织，
+     * {@code isOrgIdWithinScope} 对其应仍返回 {@code true}（fix-app-sync-pull-deleted-org-scope
+     * change tasks.md 2.2）。
+     */
+    @Test
+    void isOrgIdWithinScope_shouldReturnTrue_forDeletedNonRootOrgWithinExpandedScope() {
+        AppSyncOrgScopeEntity scope = AppSyncOrgScopeEntity.builder().orgId(10L).includeChildren(true).build();
+        when(appSyncOrgScopeMapper.selectList(any())).thenReturn(List.of(scope));
+        when(orgDescendantExpander.expandWithDescendantsIncludingDeleted(Set.of(10L)))
+                .thenReturn(Set.of(10L, 11L, 12L));
+
+        assertThat(resolver.isOrgIdWithinScope(1L, SyncDomain.ORG, 12L)).isTrue();
     }
 
     /**
