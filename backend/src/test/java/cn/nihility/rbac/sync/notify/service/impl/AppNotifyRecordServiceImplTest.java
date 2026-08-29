@@ -4,11 +4,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import cn.nihility.rbac.app.entity.AppEntity;
+import cn.nihility.rbac.app.mapper.AppMapper;
+import cn.nihility.rbac.app.sync.constant.SyncDomain;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.common.result.PageResult;
+import cn.nihility.rbac.org.entity.OrgEntity;
+import cn.nihility.rbac.org.mapper.OrgMapper;
+import cn.nihility.rbac.role.entity.RoleEntity;
+import cn.nihility.rbac.role.mapper.RoleMapper;
 import cn.nihility.rbac.sync.notify.constant.NotifyStatus;
 import cn.nihility.rbac.sync.notify.constant.NotifyTaskStatus;
 import cn.nihility.rbac.sync.notify.dto.AppNotifyRecordQueryRequest;
@@ -17,9 +25,14 @@ import cn.nihility.rbac.sync.notify.entity.AppNotifyRecordEntity;
 import cn.nihility.rbac.sync.notify.mapper.AppNotifyRecordMapper;
 import cn.nihility.rbac.sync.notify.service.AppNotifyTaskService;
 import cn.nihility.rbac.sync.notify.support.NotifySendCoordinator;
+import cn.nihility.rbac.user.dto.PositionVO;
+import cn.nihility.rbac.user.entity.UserEntity;
+import cn.nihility.rbac.user.mapper.UserMapper;
+import cn.nihility.rbac.user.mapper.UserPositionMapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -48,12 +61,28 @@ class AppNotifyRecordServiceImplTest {
     @Mock
     private NotifySendCoordinator notifySendCoordinator;
 
+    @Mock
+    private OrgMapper orgMapper;
+
+    @Mock
+    private UserMapper userMapper;
+
+    @Mock
+    private UserPositionMapper userPositionMapper;
+
+    @Mock
+    private AppMapper appMapper;
+
+    @Mock
+    private RoleMapper roleMapper;
+
     /** 被测服务实例。 */
     private AppNotifyRecordServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        service = new AppNotifyRecordServiceImpl(appNotifyRecordMapper, appNotifyTaskService, notifySendCoordinator);
+        service = new AppNotifyRecordServiceImpl(appNotifyRecordMapper, appNotifyTaskService, notifySendCoordinator,
+                orgMapper, userMapper, userPositionMapper, appMapper, roleMapper);
     }
 
     /**
@@ -119,6 +148,86 @@ class AppNotifyRecordServiceImplTest {
         assertThat(vo.getBizId()).isEqualTo(88L);
         assertThat(vo.getNotifyStatus()).isEqualTo(NotifyStatus.SUCCESS);
         assertThat(vo.getNotifyUrl()).isEqualTo("http://example.com/notify");
+    }
+
+    /**
+     * 五类业务名称应按类型各批量查询一次；同类型重复 id 不得产生逐行查询。
+     */
+    @Test
+    void page_shouldResolveFiveDomainNamesInBatches_withoutNPlusOneQueries() {
+        List<AppNotifyRecordEntity> entities = List.of(
+                record(1L, SyncDomain.ORG, 11L),
+                record(2L, SyncDomain.ORG, 11L),
+                record(3L, SyncDomain.USER, 12L),
+                record(4L, SyncDomain.POSITION, 13L),
+                record(5L, SyncDomain.APP, 14L),
+                record(6L, SyncDomain.ROLE, 15L));
+        Page<AppNotifyRecordEntity> page = new Page<>(1, 10);
+        page.setRecords(entities);
+        when(appNotifyRecordMapper.selectNotifyRecordPage(any(), any())).thenReturn(page);
+        when(orgMapper.selectByIds(Set.of(11L)))
+                .thenReturn(List.of(OrgEntity.builder().id(11L).name("研发部").build()));
+        when(userMapper.selectByIds(Set.of(12L)))
+                .thenReturn(List.of(UserEntity.builder().id(12L).name("张三").build()));
+        when(userPositionMapper.selectPositionNamesByIds(Set.of(13L)))
+                .thenReturn(List.of(PositionVO.builder().id(13L).userName("李四").orgName("财务部").build()));
+        when(appMapper.selectByIds(Set.of(14L)))
+                .thenReturn(List.of(AppEntity.builder().id(14L).name("门户").build()));
+        when(roleMapper.selectByIds(Set.of(15L)))
+                .thenReturn(List.of(RoleEntity.builder().id(15L).name("管理员").build()));
+
+        PageResult<AppNotifyRecordVO> result = service.page(queryRequest());
+
+        assertThat(result.getRecords()).extracting(AppNotifyRecordVO::getBizName)
+                .containsExactly("研发部", "研发部", "张三", "李四-财务部", "门户", "管理员");
+        verify(orgMapper, times(1)).selectByIds(Set.of(11L));
+        verify(userMapper, times(1)).selectByIds(Set.of(12L));
+        verify(userPositionMapper, times(1)).selectPositionNamesByIds(Set.of(13L));
+        verify(appMapper, times(1)).selectByIds(Set.of(14L));
+        verify(roleMapper, times(1)).selectByIds(Set.of(15L));
+    }
+
+    /**
+     * 空 id、未知类型、查无数据及任职关联部分缺失时仍应返回整页并兼容降级。
+     */
+    @Test
+    void page_shouldKeepPageAvailable_whenNamesCannotBeFullyResolved() {
+        Page<AppNotifyRecordEntity> page = new Page<>(1, 10);
+        page.setRecords(List.of(
+                record(1L, null, null),
+                record(2L, "UNKNOWN", 20L),
+                record(3L, SyncDomain.ORG, 21L),
+                record(4L, SyncDomain.POSITION, 22L),
+                record(5L, SyncDomain.POSITION, 23L),
+                record(6L, SyncDomain.POSITION, 24L)));
+        when(appNotifyRecordMapper.selectNotifyRecordPage(any(), any())).thenReturn(page);
+        when(orgMapper.selectByIds(Set.of(21L))).thenReturn(List.of());
+        when(userPositionMapper.selectPositionNamesByIds(Set.of(22L, 23L, 24L))).thenReturn(List.of(
+                PositionVO.builder().id(22L).userName("王五").build(),
+                PositionVO.builder().id(23L).orgName("销售部").build(),
+                PositionVO.builder().id(24L).userName(" ").orgName(null).build()));
+
+        PageResult<AppNotifyRecordVO> result = service.page(queryRequest());
+
+        assertThat(result.getRecords()).extracting(AppNotifyRecordVO::getBizName)
+                .containsExactly(null, null, null, "王五", "销售部", null);
+        verify(userMapper, never()).selectByIds(any());
+        verify(appMapper, never()).selectByIds(any());
+        verify(roleMapper, never()).selectByIds(any());
+    }
+
+    /** 构造通知日志实体。 */
+    private AppNotifyRecordEntity record(Long id, String dataType, Long bizId) {
+        return AppNotifyRecordEntity.builder().id(id).appRefId(1L).dataType(dataType).bizId(bizId).build();
+    }
+
+    /** 构造默认分页请求。 */
+    private AppNotifyRecordQueryRequest queryRequest() {
+        AppNotifyRecordQueryRequest request = new AppNotifyRecordQueryRequest();
+        request.setAppRefId(1L);
+        request.setPage(1);
+        request.setPageSize(10);
+        return request;
     }
 
     /**

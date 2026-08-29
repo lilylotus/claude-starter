@@ -4,6 +4,7 @@ import cn.nihility.rbac.sync.notify.dto.AppNotifyRecordVO;
 import cn.nihility.rbac.sync.notify.entity.AppNotifyRecordEntity;
 import java.util.List;
 import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
 import org.mapstruct.factory.Mappers;
 
 /**
@@ -22,6 +23,7 @@ public interface AppNotifyRecordConvert {
      * @param entity 应用通知发送记录实体
      * @return 应用通知发送记录视图对象
      */
+    @Mapping(target = "bizName", ignore = true)
     AppNotifyRecordVO toVO(AppNotifyRecordEntity entity);
 
     /**

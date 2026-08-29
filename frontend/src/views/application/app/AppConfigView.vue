@@ -37,6 +37,7 @@ import {
 import { METADATA_FIELD_STATUS_ENABLED, type MetadataField, type MetadataFieldBizType } from '@/types/metadataField'
 import type { OrgTreeNode } from '@/types/org'
 import { usePermission } from '@/composables/usePermission'
+import { formatNotifyBiz, formatNotifyDataType } from './notifyLogDisplay'
 
 const route = useRoute()
 const router = useRouter()
@@ -1244,10 +1245,14 @@ function handlePullLogSizeChange(newSize: number) {
 
             <el-table v-loading="notifyLogLoading" :data="notifyLogList" empty-text="暂无通知日志">
               <el-table-column label="数据类型" width="100">
-                <template #default="{ row }">{{ displayOrDash((row as AppNotifyRecordRow).dataType) }}</template>
+                <template #default="{ row }">
+                  {{ formatNotifyDataType((row as AppNotifyRecordRow).dataType) }}
+                </template>
               </el-table-column>
-              <el-table-column label="bizId" width="100">
-                <template #default="{ row }">{{ displayOrDash((row as AppNotifyRecordRow).bizId) }}</template>
+              <el-table-column label="bizId" min-width="180" show-overflow-tooltip>
+                <template #default="{ row }">
+                  {{ formatNotifyBiz((row as AppNotifyRecordRow).bizId, (row as AppNotifyRecordRow).bizName) }}
+                </template>
               </el-table-column>
               <el-table-column label="状态" width="90">
                 <template #default="{ row }">

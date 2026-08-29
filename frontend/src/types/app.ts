@@ -306,10 +306,11 @@ export interface AppNotifyRecordQueryParams {
 
 // 通知日志列表行，来自 GET /api/apps/{id}/config/sync/notify-records 分页接口；
 // dataType/bizId/notifyUrl 三列历史记录可能为空（旧数据未落这三列，见 proposal.md），
-// httpStatus 未收到响应时为空，errorMsg 仅失败时有值
+// bizName 为按当前业务数据解析的可空名称，httpStatus 未收到响应时为空，errorMsg 仅失败时有值
 export interface AppNotifyRecordRow {
   dataType: string | null
   bizId: number | null
+  bizName: string | null
   notifyStatus: number
   httpStatus: number | null
   notifyUrl: string | null

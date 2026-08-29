@@ -35,6 +35,10 @@ public class AppNotifyRecordVO {
     @Schema(description = "被变更对象 id，历史数据可能为空")
     private Long bizId;
 
+    /** 被变更业务对象名称；历史、未知类型或当前业务数据不存在时为空。 */
+    @Schema(description = "被变更业务对象名称，无法解析时为空", nullable = true)
+    private String bizName;
+
     /** 通知状态：1=成功，2=失败。 */
     @Schema(description = "通知状态：1=成功，2=失败")
     private Integer notifyStatus;
