@@ -72,9 +72,10 @@ mybatis-plus:
 # RBAC 权限点体系产生第二套并行机制。
 #
 flowable:
-  # Flowable 自身的 ACT_* 系列表由其官方维护版本演进，首次启动自动建表，不纳入本项目
-  # Flyway 迁移脚本管理（这些表的 schema 演进由 Flowable 自身版本负责）。
-  database-schema-update: true
+  # Flowable 自身的 ACT_* 系列表由其官方版本演进管理，不纳入本项目 Flyway 迁移。
+  # 首次部署先在空 schema 执行 db/flowable/flowable.mysql.create.7.2.0.sql，再启动应用；
+  # 运行时只校验已初始化的 Flowable schema，不自动建表或升级。
+  database-schema-update: false
   # 本次只使用 BPMN ProcessEngine。通用 starter 默认还会启动 App/CMMN/DMN/EventRegistry/IDM
   # 引擎，显式关闭这些未使用的引擎，避免创建无关的运行时组件和数据库表。
   app:
