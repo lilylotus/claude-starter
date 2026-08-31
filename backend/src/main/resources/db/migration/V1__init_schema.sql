@@ -1,20 +1,21 @@
 -- ----------------------------------------------------------------------------
 -- RBAC 权限管理系统 - 数据库基线脚本（Flyway 迁移版本 V1）
--- 本文件由原 V1~V10 共 10 个迁移文件合并而来（openspec change
--- consolidate-flyway-migrations-v4，此前三次分别是 consolidate-flyway-migrations/
--- -v2/-v3），代表这些迁移按顺序执行完毕后的最终数据库状态（全部 40 张表的建表语句 +
+-- 本文件由原 V1~V14 共 14 个迁移文件合并而来（openspec change
+-- consolidate-flyway-migrations-v5），代表这些迁移按顺序执行完毕后的最终数据库状态
+-- （全部 46 张表的建表语句 +
 -- 全部种子数据），不再保留中间过程中的 ALTER/UPDATE/DROP 步骤与已被后续存量数据
 -- 回填但对全新数据库无意义的 INSERT...SELECT。整体按"先建表、后插入有依赖关系的
 -- 种子数据"的顺序线性组织。
 -- 数据库需提前手动创建，例如：
 --   CREATE DATABASE rbac_demo DEFAULT CHARACTER SET utf8mb4;
--- 注意：本地开发库如果已经跑过旧的 V1~V10，需要先清空该库（或删除
--- flyway_schema_history 表）后重新执行本文件，否则 Flyway 会因为找不到对应版本号
--- 的历史文件而报错。
+-- 兼容数据库：MySQL 5.7 / MySQL 8.0。
+-- 注意：本文件只适用于全新空 schema。已经执行过旧 V1~V14 的数据库不得仅删除
+-- flyway_schema_history 后重跑本文件；需要保留数据的环境必须继续使用与既有历史匹配的
+-- 旧迁移集合，需要重建的开发/测试环境必须完整删除并重新创建 schema。
 -- ----------------------------------------------------------------------------
 
 -- ============================================================================
--- 第一部分：建表语句（共 40 张表）
+-- 第一部分：建表语句（共 46 张表）
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -28,6 +29,9 @@ CREATE TABLE IF NOT EXISTS `tab_org`
     `code`        VARCHAR(64)  NOT NULL COMMENT '组织编码',
     `parent_id`   BIGINT       NOT NULL DEFAULT 0 COMMENT '上级组织 id，0 表示顶级/根节点',
     `parent_code` VARCHAR(64)  NULL COMMENT '上级组织编码',
+    `org_path`    VARCHAR(255) NULL COMMENT '从根组织到当前组织的 id 路径',
+    `org_name_path` VARCHAR(255) NULL COMMENT '从根组织到当前组织的名称路径',
+    `org_parent_path` VARCHAR(255) NULL COMMENT '当前组织的父级 id 路径',
     `status`      INT          NOT NULL DEFAULT 2000 COMMENT '状态：2000=启用，3000=停用，-1000=已删除（逻辑删除）',
     `show_order`  INT          NOT NULL DEFAULT 0 COMMENT '显示序号，值越大越靠前',
     `remark`      VARCHAR(255) NULL COMMENT '备注',
@@ -45,9 +49,12 @@ CREATE TABLE IF NOT EXISTS `tab_org`
     `create_time` DATETIME     NULL COMMENT '创建时间',
     `update_by`   VARCHAR(64)  NULL COMMENT '更新人',
     `update_time` DATETIME     NULL COMMENT '更新时间',
+    `version`     BIGINT       NOT NULL DEFAULT 1 COMMENT '同步实体版本',
     PRIMARY KEY (`id`),
     KEY `idx_tab_org_parent_id` (`parent_id`),
-    KEY `idx_tab_org_code` (`code`)
+    KEY `idx_tab_org_code` (`code`),
+    KEY `idx_tab_org_path` (`org_path`),
+    KEY `idx_tab_org_name_path` (`org_name_path`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_general_ci
@@ -85,6 +92,7 @@ CREATE TABLE IF NOT EXISTS `tab_dict_item`
     `show_order`   INT          NOT NULL DEFAULT 0 COMMENT '显示序号，值越大越靠前',
     `remark`       VARCHAR(255) NULL COMMENT '备注',
     `status`       INT          NOT NULL DEFAULT 2000 COMMENT '状态：2000=启用，3000=停用，-1000=已删除（逻辑删除）',
+    `version`      BIGINT       NOT NULL DEFAULT 1 COMMENT '面向外部同步消费者的实体版本',
     `create_by`    VARCHAR(64)  NULL COMMENT '创建人',
     `create_time`  DATETIME     NULL COMMENT '创建时间',
     `update_by`    VARCHAR(64)  NULL COMMENT '更新人',
@@ -126,6 +134,7 @@ CREATE TABLE IF NOT EXISTS `tab_user`
     `create_time` DATETIME    NULL COMMENT '创建时间',
     `update_by`   VARCHAR(64) NULL COMMENT '更新人',
     `update_time` DATETIME    NULL COMMENT '更新时间',
+    `version`     BIGINT      NOT NULL DEFAULT 1 COMMENT '同步实体版本',
     PRIMARY KEY (`id`),
     KEY `idx_tab_user_code` (`code`),
     KEY `idx_tab_user_id_card` (`id_card`),
@@ -160,6 +169,7 @@ CREATE TABLE IF NOT EXISTS `tab_user_position`
     `create_time`      DATETIME    NULL COMMENT '创建时间',
     `update_by`        VARCHAR(64) NULL COMMENT '更新人',
     `update_time`      DATETIME    NULL COMMENT '更新时间',
+    `version`          BIGINT      NOT NULL DEFAULT 1 COMMENT '同步实体版本',
     PRIMARY KEY (`id`),
     KEY `idx_tab_user_position_user_id` (`user_id`),
     KEY `idx_tab_user_position_org_id` (`org_id`)
@@ -214,6 +224,7 @@ CREATE TABLE IF NOT EXISTS `tab_app` (
     `create_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `update_by`   VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
     `update_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `version`     BIGINT       NOT NULL DEFAULT 1 COMMENT '同步实体版本',
     PRIMARY KEY (`id`),
     KEY `idx_tab_app_owner_id` (`owner_id`),
     KEY `idx_tab_app_org_id` (`org_id`),
@@ -242,6 +253,7 @@ CREATE TABLE IF NOT EXISTS `tab_app_config` (
     `create_time`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `update_by`      VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
     `update_time`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `config_epoch`   BIGINT       NOT NULL DEFAULT 0 COMMENT '应用同步配置纪元',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_tab_app_config_app_id` (`app_id`),
     UNIQUE KEY `uk_tab_app_config_open_app_id` (`open_app_id`),
@@ -346,7 +358,7 @@ CREATE TABLE IF NOT EXISTS `tab_app_sync_field_mapping` (
 -- 应用数据同步通知/拉取模块
 -- ----------------------------------------------------------------------------
 
--- 应用通知发送记录表：仅用于问题排查/展示，不驱动自动重试。定位通知记录直接使用
+-- 应用通知发送记录表：同时承载通知排查信息和异步重试任务状态。定位通知记录直接使用
 -- data_type/biz_id 两列，通知也改为数据变更时直接判定候选应用并即时触发，不再有
 -- 任何"变更记录"表居中转发（app-sync-drop-changelog change design.md Migration
 -- Plan）。notify_url 记录本次回调实际使用的地址快照，不依赖 tab_app_config.notify_url
@@ -357,19 +369,29 @@ CREATE TABLE IF NOT EXISTS `tab_app_sync_field_mapping` (
 CREATE TABLE IF NOT EXISTS `tab_app_notify_record` (
     `id`            BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
     `app_ref_id`    BIGINT       NOT NULL COMMENT '关联 tab_app.id',
+    `event_id`      BIGINT       NULL COMMENT '雪花事件标识',
+    `change_seq`    BIGINT       NULL COMMENT '变更流水序号',
+    `entity_version` BIGINT      NULL COMMENT '实体版本',
     `data_type`     VARCHAR(20)  NULL COMMENT '数据类型：ORG/USER/POSITION/APP/ROLE，历史数据为空',
     `biz_id`        BIGINT       NULL COMMENT '被变更对象 id，历史数据为空',
-    `notify_status` TINYINT      NOT NULL COMMENT '通知状态：1=成功，2=失败',
+    `notify_status` TINYINT      NULL COMMENT '通知状态：1=成功，2=失败，任务处于 PENDING/PROCESSING/RETRY 时为空',
     `http_status`   INT          NULL COMMENT '外部接口返回的 HTTP 状态码，失败且未收到响应时为空',
     `error_msg`     VARCHAR(500) NULL COMMENT '失败原因摘要',
     `notify_url`    VARCHAR(255) NULL COMMENT '本次回调实际使用的地址快照，历史数据为空',
+    `request_body`  TEXT         NULL COMMENT '通知请求体快照',
+    `task_status`   VARCHAR(16)  NOT NULL DEFAULT 'SUCCESS' COMMENT 'PENDING/PROCESSING/RETRY/SUCCESS/DEAD',
+    `retry_count`   INT          NOT NULL DEFAULT 0 COMMENT '已失败尝试次数',
+    `next_retry_time` DATETIME   NULL COMMENT '下次重试时间',
+    `lease_until`   DATETIME     NULL COMMENT '处理租约截止时间',
     `create_by`     VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
     `create_time`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `update_by`     VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
     `update_time`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),
     KEY `idx_tab_app_notify_record_app_ref_id` (`app_ref_id`),
-    KEY `idx_tab_app_notify_record_app_time` (`app_ref_id`, `create_time`)
+    KEY `idx_tab_app_notify_record_app_time` (`app_ref_id`, `create_time`),
+    UNIQUE KEY `uk_tab_app_notify_record_app_event` (`app_ref_id`, `event_id`),
+    KEY `idx_tab_app_notify_record_schedule` (`task_status`, `next_retry_time`, `lease_until`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
   COMMENT = '应用通知发送记录表，仅用于问题排查/展示，不驱动自动重试';
 
@@ -394,6 +416,45 @@ CREATE TABLE IF NOT EXISTS `tab_app_pull_record` (
     KEY `idx_tab_app_pull_record_app_time` (`app_ref_id`, `create_time`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
   COMMENT = '应用拉取变更数据请求记录，仅用于问题排查/展示';
+
+-- 应用数据全局变更流水：change_seq 由数据库生成，event_id 为雪花事件标识。
+CREATE TABLE IF NOT EXISTS `tab_app_data_change_log` (
+    `change_seq` BIGINT NOT NULL AUTO_INCREMENT COMMENT '数据库生成的全局递增游标',
+    `event_id` BIGINT NOT NULL COMMENT '雪花算法生成的全局事件标识',
+    `entity_type` VARCHAR(16) NOT NULL COMMENT 'ORG/USER/POSITION/APP/ROLE',
+    `entity_id` BIGINT NOT NULL COMMENT '业务实体 id',
+    `operation_type` VARCHAR(16) NOT NULL COMMENT 'CREATE/UPDATE/ENABLE/DISABLE/DELETE',
+    `entity_version` BIGINT NOT NULL COMMENT '实体结果版本',
+    `org_scope_path_before` VARCHAR(255) NULL COMMENT '变更前组织范围路径',
+    `org_scope_path_after` VARCHAR(255) NULL COMMENT '变更后组织范围路径',
+    `change_time` DATETIME NOT NULL COMMENT '变更发生时间',
+    `create_by` VARCHAR(64) NULL COMMENT '创建人',
+    `create_time` DATETIME NOT NULL COMMENT '创建时间',
+    `update_by` VARCHAR(64) NULL COMMENT '更新人',
+    `update_time` DATETIME NOT NULL COMMENT '更新时间',
+    PRIMARY KEY (`change_seq`),
+    UNIQUE KEY `uk_tab_app_data_change_log_event_id` (`event_id`),
+    KEY `idx_tab_app_data_change_log_type_seq` (`entity_type`, `change_seq`),
+    KEY `idx_tab_app_data_change_log_type_id` (`entity_type`, `entity_id`),
+    KEY `idx_tab_app_data_change_log_time` (`change_time`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '应用数据全局变更流水';
+
+CREATE TABLE IF NOT EXISTS `tab_app_sync_metadata` (
+    `metadata_key` VARCHAR(64) NOT NULL COMMENT '元数据键',
+    `metadata_value` VARCHAR(255) NOT NULL COMMENT '元数据值',
+    `update_time` DATETIME NOT NULL COMMENT '更新时间',
+    PRIMARY KEY (`metadata_key`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '应用同步全局元数据';
+
+CREATE TABLE IF NOT EXISTS `tab_app_sync_cursor` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `app_ref_id` BIGINT NOT NULL COMMENT '应用 id',
+    `entity_type` VARCHAR(16) NOT NULL COMMENT '同步实体类型',
+    `last_delivered_seq` BIGINT NOT NULL COMMENT '最近成功返回的序号',
+    `update_time` DATETIME NOT NULL COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_app_sync_cursor_app_entity` (`app_ref_id`, `entity_type`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '应用同步服务端投递水位';
 
 -- ----------------------------------------------------------------------------
 -- 应用同步组织范围模块
@@ -438,6 +499,7 @@ CREATE TABLE IF NOT EXISTS `tab_app_access_policy` (
     `name`           VARCHAR(128) NOT NULL COMMENT '策略名称',
     `remark`         VARCHAR(255) NULL COMMENT '备注',
     `status`         INT          NOT NULL DEFAULT 2000 COMMENT '状态：2000=启用，3000=停用',
+    `show_order`     INT          NOT NULL DEFAULT 0 COMMENT '显示序号，值越小优先级越高，运行时按升序取第一条命中身份的策略计算结果',
     `last_exec_time` DATETIME     NULL COMMENT '最近一次执行时间，从未执行过为空',
     `last_exec_by`   VARCHAR(64)  NULL COMMENT '最近一次执行人',
     `create_by`      VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
@@ -573,6 +635,7 @@ CREATE TABLE IF NOT EXISTS `tab_role` (
     `create_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `update_by`   VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
     `update_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `version`     BIGINT       NOT NULL DEFAULT 1 COMMENT '同步实体版本',
     PRIMARY KEY (`id`),
     KEY `idx_tab_role_code` (`code`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '角色主数据表';
@@ -734,6 +797,7 @@ CREATE TABLE IF NOT EXISTS `tab_login_log`
     `login_os`         VARCHAR(32)  NULL COMMENT '登录操作系统，从 User-Agent 解析，解析不出时为空',
     `login_browser`    VARCHAR(32)  NULL COMMENT '登录浏览器，从 User-Agent 解析，解析不出时为空',
     `login_user_agent` VARCHAR(512) NULL COMMENT '原始 User-Agent 请求头，取不到时为空',
+    `session_id`       VARCHAR(64)  NULL COMMENT '本次登录建立的 SSO 会话标识（会话令牌 SHA-256 摘要），仅 SSO 登录成功时填充，管理端口令登录/登录失败为 NULL',
     `create_by`        VARCHAR(64)  NOT NULL COMMENT '创建人，即本次登录尝试提交的账号，为空时存 unknown',
     `create_time`      DATETIME     NOT NULL COMMENT '创建时间，即本次登录尝试发生时间',
     `update_by`        VARCHAR(64)  NOT NULL COMMENT '更新人，恒等于 create_by（本表只追加不更新）',
@@ -741,11 +805,41 @@ CREATE TABLE IF NOT EXISTS `tab_login_log`
     PRIMARY KEY (`id`),
     KEY `idx_tab_login_log_login_account` (`login_account`),
     KEY `idx_tab_login_log_user_id` (`user_id`),
-    KEY `idx_tab_login_log_create_time` (`create_time`)
+    KEY `idx_tab_login_log_create_time` (`create_time`),
+    KEY `idx_tab_login_log_session_id` (`session_id`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_general_ci
   COMMENT = '登录日志表，记录每一次登录尝试（成功+失败），只追加不更新不删除';
+
+-- SSO 协议调用记录表：记录 CAS/OAuth2.0 协议运行时端点的每一次调用。
+CREATE TABLE IF NOT EXISTS `tab_sso_protocol_log`
+(
+    `id`               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `app_ref_id`       BIGINT       NULL COMMENT '解析出的应用 id，关联 tab_app.id，appId/client_id 解析不到应用时为 NULL',
+    `app_id`           VARCHAR(64)  NULL COMMENT '原始 appId/client_id 参数值，即使解析不到 app_ref_id 也保留，便于排查',
+    `protocol`         VARCHAR(16)  NOT NULL COMMENT '协议类型：CAS / OAUTH2 / NONE（应用不存在或未开启协议时的兜底值）',
+    `event_type`       VARCHAR(20)  NOT NULL COMMENT '事件类型：LOGIN/SERVICE_VALIDATE/LOGOUT/AUTHORIZE/TOKEN/USERINFO',
+    `user_id`          BIGINT       NULL COMMENT '关联的 tab_user.id，处理链路尚未解析出用户身份时为 NULL',
+    `session_id`       VARCHAR(64)  NULL COMMENT '本次调用所属 SSO 会话标识（会话令牌 SHA-256 摘要），处理链路尚未解析出会话时为 NULL',
+    `result`           TINYINT      NOT NULL COMMENT '调用结果：1=成功，2=失败',
+    `fail_reason`      VARCHAR(255) NULL COMMENT '失败原因文案，成功时为 NULL',
+    `denied_policy_id` BIGINT UNSIGNED NULL COMMENT '被应用访问授权策略拒绝时，拒绝来源的策略 id（tab_app_access_policy.id），仅该失败原因下非空',
+    `client_ip`        VARCHAR(64)  NULL COMMENT '客户端 IP，取不到时为空',
+    `user_agent`       VARCHAR(512) NULL COMMENT '原始 User-Agent 请求头，取不到时为空',
+    `create_by`        VARCHAR(64)  NOT NULL COMMENT '创建人，为空时存 unknown',
+    `create_time`      DATETIME     NOT NULL COMMENT '创建时间，即本次调用发生时间',
+    `update_by`        VARCHAR(64)  NOT NULL COMMENT '更新人，恒等于 create_by（本表只追加不更新）',
+    `update_time`      DATETIME     NOT NULL COMMENT '更新时间，恒等于 create_time（本表只追加不更新）',
+    PRIMARY KEY (`id`),
+    KEY `idx_tab_sso_protocol_log_app_ref_id` (`app_ref_id`, `create_time`),
+    KEY `idx_tab_sso_protocol_log_event_type` (`event_type`, `create_time`),
+    KEY `idx_tab_sso_protocol_log_user_id` (`user_id`),
+    KEY `idx_tab_sso_protocol_log_session_id` (`session_id`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci
+  COMMENT = 'SSO 协议调用记录表，记录 CAS/OAuth2.0 协议运行时端点的每一次调用（成功+失败），只追加不更新不删除';
 
 -- ----------------------------------------------------------------------------
 -- 元数据字段配置模块
@@ -792,6 +886,7 @@ CREATE TABLE IF NOT EXISTS `tab_form_field_definition`
     `show_in_list`      TINYINT   NOT NULL DEFAULT 1 COMMENT '是否在列表中展示',
     `show_in_create`    TINYINT   NOT NULL DEFAULT 1 COMMENT '是否在新增表单中展示',
     `show_in_edit`      TINYINT   NOT NULL DEFAULT 1 COMMENT '是否在编辑表单中展示',
+    `show_in_export`    TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否导出',
     `editable`          TINYINT   NOT NULL DEFAULT 1 COMMENT '表单中展示时是否可编辑，为否则只读展示',
     `validate_regex`    VARCHAR(255) NULL COMMENT '正则校验规则，前后端共用同一个字符串',
     `placeholder`       VARCHAR(128) NULL COMMENT '输入提示文字',
@@ -808,6 +903,48 @@ CREATE TABLE IF NOT EXISTS `tab_form_field_definition`
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_general_ci
   COMMENT = '表单字段定义表';
+
+-- ----------------------------------------------------------------------------
+-- 主数据审批流程模块
+-- ----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS `tab_approval_request` (
+    `id`                            BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `biz_type`                      VARCHAR(16)  NOT NULL COMMENT '业务对象类型：ORG/USER/POSITION/APP',
+    `operation_type`                VARCHAR(16)  NOT NULL COMMENT '操作类型：CREATE/UPDATE/ENABLE/DISABLE/DELETE',
+    `target_id`                     BIGINT       NULL COMMENT '目标记录 id，CREATE 申请为空，其余操作类型必填',
+    `result_target_id`              BIGINT       NULL COMMENT '审批通过后实际生效的记录 id，仅 CREATE 申请审批通过后回填',
+    `request_payload`               TEXT         NULL COMMENT 'JSON 序列化的原始请求体，CREATE/UPDATE 保存完整请求体，ENABLE/DISABLE/DELETE 为空',
+    `status`                        INT          NOT NULL DEFAULT 1000 COMMENT '申请状态：1000=待审批，2000=已通过，3000=已拒绝，4000=已撤回',
+    `approver_id`                   VARCHAR(64)  NULL COMMENT '审批人用户 id 文本，处理后回填',
+    `approve_time`                  DATETIME     NULL COMMENT '审批处理时间，处理后回填',
+    `opinion`                       VARCHAR(500) NULL COMMENT '审批意见，拒绝时必填，通过时可选',
+    `flowable_process_instance_id`  VARCHAR(64)  NULL COMMENT '关联的 Flowable 流程实例 id',
+    `flowable_task_id`              VARCHAR(64)  NULL COMMENT '关联的 Flowable 用户任务 id',
+    `create_by`                     VARCHAR(64)           DEFAULT NULL COMMENT '创建人，即提交人',
+    `create_time`                   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间，即提交时间',
+    `update_by`                     VARCHAR(64)           DEFAULT NULL COMMENT '更新人，即最后一次处理人',
+    `update_time`                   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_tab_approval_request_biz_type` (`biz_type`),
+    KEY `idx_tab_approval_request_status` (`status`),
+    KEY `idx_tab_approval_request_target` (`biz_type`, `target_id`),
+    KEY `idx_tab_approval_request_create_by` (`create_by`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+  COMMENT = '主数据变更审批申请表，统一承载组织/用户/任职/应用四类对象 x 五种操作的审批申请';
+
+CREATE TABLE IF NOT EXISTS `tab_approval_switch` (
+    `id`          BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `biz_type`    VARCHAR(16) NOT NULL COMMENT '业务对象类型：ORG/USER/POSITION/APP，唯一',
+    `enabled`     TINYINT     NOT NULL DEFAULT 0 COMMENT '是否开启审批：1=开启，0=关闭（关闭后对应 bizType 的写接口直接生效）',
+    `create_by`   VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`   VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_approval_switch_biz_type` (`biz_type`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+  COMMENT = '主数据审批开关表，按 bizType 各维护一条记录，默认全部关闭';
 
 -- ----------------------------------------------------------------------------
 -- Excel 导入字段配置模块
@@ -1027,6 +1164,16 @@ INSERT INTO `tab_dict_item` (`dict_type_id`, `label`, `code`, `show_order`, `rem
 SELECT `id`, '女', 'female', 3, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()
 FROM `tab_dict_type`
 WHERE `code` = 'gender';
+
+-- 主数据审批开关默认全部关闭，管理员按需手动开启。
+INSERT INTO `tab_approval_switch` (`biz_type`, `enabled`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES ('ORG', 0, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('USER', 0, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('POSITION', 0, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('APP', 0, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+INSERT INTO `tab_app_sync_metadata` (`metadata_key`, `metadata_value`, `update_time`)
+VALUES ('CHANGE_LOG_RETENTION_FLOOR_SEQ', '0', NOW());
 
 -- ----------------------------------------------------------------------------
 -- 菜单种子数据（菜单树 + 按钮资源）
@@ -1337,8 +1484,53 @@ VALUES ('新增上游数据源', 'UpstreamManagement:source:add', @upstream_id, 
        ('立即同步一次', 'UpstreamManagement:source:manualSync', @upstream_id, 2, 10,
         '手动触发一次同步，不等定时调度到点', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
 
+-- 插件管理（挂在 system 一级分组下）
+SET @system_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'system');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('插件管理', 'PluginManagement:plugin:view', @system_id, 1, 0, '插件（Bean 定义注册阶段）状态查询页面访问', 2000,
+        @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- 四类主数据导出按钮
+SET @org_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'OrgManagement:org:view');
+SET @user_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'UserManagement:user:view');
+SET @position_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'PositionManagement:position:view');
+SET @app_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'AppManagement:app:view');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('导出组织', 'OrgManagement:org:export', @org_id, 2, 6, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('导出用户', 'UserManagement:user:export', @user_id, 2, 6, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('导出任职记录', 'PositionManagement:position:export', @position_id, 2, 6, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('导出应用', 'AppManagement:app:export', @app_id, 2, 6, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- 审批管理：待我审批直接按 V9 修正后的最终形态登记为二级页面。
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('审批管理', 'approval', 0, 1, 25, '侧边栏一级导航分组', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+SET @approval_group_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'approval');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('我的申请', 'ApprovalManagement:request:view', @approval_group_id, 1, 20,
+        '查看我的申请/待我审批页面访问', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('审批设置', 'ApprovalManagement:switch:view', @approval_group_id, 1, 10,
+        '查看审批开关页面访问', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+SET @approval_switch_view_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'ApprovalManagement:switch:view');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('待我审批', 'ApprovalManagement:request:approve', @approval_group_id, 1, 15,
+        '查看并处理全部待审批申请', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('修改审批开关', 'ApprovalManagement:switch:edit', @approval_switch_view_id, 2, 10,
+        NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
 -- ----------------------------------------------------------------------------
--- 权限点种子数据（118 条，按 权限资源.txt 模块分段插入）
+-- 权限点种子数据（127 条，按 权限资源.txt 模块分段插入）
 -- ----------------------------------------------------------------------------
 -- 组织/用户/任职/应用/角色/权限点/管理员/菜单/字典/元数据配置/表单管理/操作日志
 -- 共 95 条源自 权限资源.txt（一次性脚本 gen_permission_seed.py 解析生成，此前版本的
@@ -1527,9 +1719,27 @@ VALUES
     ('新增/编辑人工例外', 'AppAccessManagement:override:add', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
     ('删除人工例外', 'AppAccessManagement:override:delete', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
 
+-- PluginManagement（插件管理，/system/plugins）
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES ('插件管理页面访问', 'PluginManagement:plugin:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- 主数据 Excel 导出
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES ('导出组织', 'OrgManagement:org:export', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('导出用户', 'UserManagement:user:export', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('导出任职记录', 'PositionManagement:position:export', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('导出应用', 'AppManagement:app:export', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+-- ApprovalManagement（审批管理）
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES ('查看我的申请/待我审批', 'ApprovalManagement:request:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('审批通过/拒绝', 'ApprovalManagement:request:approve', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('查看审批开关', 'ApprovalManagement:switch:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('修改审批开关', 'ApprovalManagement:switch:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
 -- ----------------------------------------------------------------------------
--- 超级管理员角色，关联全部种子权限点（含上面新增的 UpstreamManagement/AppAccessManagement
--- 系列权限点，因为本 INSERT...SELECT 在其之后执行，天然覆盖，不需要再单独补一次授权）
+-- 超级管理员角色，关联上面全部 127 个种子权限点；本 INSERT...SELECT 位于全部权限点之后，
+-- 天然覆盖本次合并新增的插件、导出和审批权限，不需要单独补授。
 -- ----------------------------------------------------------------------------
 
 INSERT INTO `tab_role` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
@@ -1657,81 +1867,81 @@ VALUES ('ROLE', 'tab_role', 'name', 'name', 'VARCHAR(64)', '角色名称', 2000,
 INSERT INTO `tab_form_field_definition`
     (`biz_type`, `metadata_field_id`, `field_name`, `field_code`, `control_type`, `dict_type_code`, `is_unique`,
      `is_required`, `show_in_list`, `show_in_create`, `show_in_edit`, `editable`, `validate_regex`, `placeholder`,
-     `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+     `show_in_export`, `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
 VALUES ('ORG', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_org' AND `column_name` = 'name'),
-        '组织名称', 'name', 1, NULL, 0, 1, 1, 1, 1, 1, NULL, NULL, 1, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+        '组织名称', 'name', 1, NULL, 0, 1, 1, 1, 1, 1, NULL, NULL, 1, 1, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
        ('ORG', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_org' AND `column_name` = 'code'),
-        '组织编码', 'code', 1, NULL, 1, 1, 1, 1, 1, 1, NULL, NULL, 3, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+        '组织编码', 'code', 1, NULL, 1, 1, 1, 1, 1, 1, NULL, NULL, 1, 3, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
        ('ORG',
         (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_org' AND `column_name` = 'show_order'),
-        '显示序号', 'showOrder', 2, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 5, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+        '显示序号', 'showOrder', 2, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 1, 5, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
        ('ORG', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_org' AND `column_name` = 'remark'),
-        '备注', 'remark', 1, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 7, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+        '备注', 'remark', 1, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 1, 7, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
 
 -- ---- 人员（USER） ----
 INSERT INTO `tab_form_field_definition`
     (`biz_type`, `metadata_field_id`, `field_name`, `field_code`, `control_type`, `dict_type_code`, `is_unique`,
      `is_required`, `show_in_list`, `show_in_create`, `show_in_edit`, `editable`, `validate_regex`, `placeholder`,
-     `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+     `show_in_export`, `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
 VALUES ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'name'),
-        '用户姓名', 'name', 1, NULL, 0, 1, 1, 1, 1, 1, NULL, NULL, 1, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+        '用户姓名', 'name', 1, NULL, 0, 1, 1, 1, 1, 1, NULL, NULL, 1, 1, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
        ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'code'),
-        '用户编号', 'code', 1, NULL, 1, 1, 1, 1, 1, 1, NULL, NULL, 3, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+        '用户编号', 'code', 1, NULL, 1, 1, 1, 1, 1, 1, NULL, NULL, 1, 3, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
        ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'mobile'),
-        '手机号', 'mobile', 1, NULL, 1, 0, 1, 1, 1, 1, NULL, NULL, 5, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+        '手机号', 'mobile', 1, NULL, 1, 0, 1, 1, 1, 1, NULL, NULL, 1, 5, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
        ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'id_card'),
-        '身份证号', 'idCard', 1, NULL, 1, 0, 1, 1, 1, 1, NULL, NULL, 7, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+        '身份证号', 'idCard', 1, NULL, 1, 0, 1, 1, 1, 1, NULL, NULL, 1, 7, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
        ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'gender'),
-        '性别', 'gender', 3, 'gender', 0, 0, 1, 1, 1, 1, NULL, NULL, 7, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+        '性别', 'gender', 3, 'gender', 0, 0, 1, 1, 1, 1, NULL, NULL, 1, 7, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
        ('USER',
         (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'show_order'),
-        '显示序号', 'showOrder', 2, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 9, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+        '显示序号', 'showOrder', 2, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 1, 9, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
        ('USER', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user' AND `column_name` = 'remark'),
-        '备注', 'remark', 1, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 11, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+        '备注', 'remark', 1, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 1, 11, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
 
 -- ---- 任职（POSITION） ----
 INSERT INTO `tab_form_field_definition`
     (`biz_type`, `metadata_field_id`, `field_name`, `field_code`, `control_type`, `dict_type_code`, `is_unique`,
      `is_required`, `show_in_list`, `show_in_create`, `show_in_edit`, `editable`, `validate_regex`, `placeholder`,
-     `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+     `show_in_export`, `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
 VALUES ('POSITION', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_user_position' AND `column_name` = 'position_type'),
         '任职类型', 'positionType', 3, 'position_type', 0, 1, 1, 1, 1,
-        1, NULL, NULL, 1, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+        1, NULL, NULL, 1, 1, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
     ('POSITION', (SELECT `id`
                      FROM `tab_metadata_field`
                      WHERE `table_name` = 'tab_user_position'
                        AND `column_name` = 'position_address'), '任职地址', 'positionAddress', 1, NULL, 0, 0, 1, 1, 1,
-        1, NULL, NULL, 1, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+        1, NULL, NULL, 1, 1, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
        ('POSITION', (SELECT `id`
                      FROM `tab_metadata_field`
                      WHERE `table_name` = 'tab_user_position'
                        AND `column_name` = 'position_phone'), '任职电话', 'positionPhone', 1, NULL, 0, 0, 1, 1, 1, 1,
-        NULL, NULL, 2, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+        NULL, NULL, 1, 2, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
        ('POSITION', (SELECT `id`
                      FROM `tab_metadata_field`
                      WHERE `table_name` = 'tab_user_position'
                        AND `column_name` = 'show_order'), '显示序号', 'showOrder', 2, NULL, 0, 0, 1, 1, 1, 1, NULL,
-        NULL, 3, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+        NULL, 1, 3, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
        ('POSITION', (SELECT `id`
                      FROM `tab_metadata_field`
                      WHERE `table_name` = 'tab_user_position'
-                       AND `column_name` = 'remark'), '备注', 'remark', 1, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 4,
-        2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+                       AND `column_name` = 'remark'), '备注', 'remark', 1, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 1,
+        4, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
 
 -- ---- 应用（APP） ----
 INSERT INTO `tab_form_field_definition`
     (`biz_type`, `metadata_field_id`, `field_name`, `field_code`, `control_type`, `dict_type_code`, `is_unique`,
      `is_required`, `show_in_list`, `show_in_create`, `show_in_edit`, `editable`, `validate_regex`, `placeholder`,
-     `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+     `show_in_export`, `show_order`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
 VALUES ('APP', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_app' AND `column_name` = 'name'),
-        '应用名称', 'name', 1, NULL, 0, 1, 1, 1, 1, 1, NULL, NULL, 1, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+        '应用名称', 'name', 1, NULL, 0, 1, 1, 1, 1, 1, NULL, NULL, 1, 1, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
        ('APP', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_app' AND `column_name` = 'code'),
-        '应用编码', 'code', 1, NULL, 1, 1, 1, 1, 1, 1, NULL, NULL, 3, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+        '应用编码', 'code', 1, NULL, 1, 1, 1, 1, 1, 1, NULL, NULL, 1, 3, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
        ('APP',
         (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_app' AND `column_name` = 'show_order'),
-        '显示序号', 'showOrder', 2, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 5, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+        '显示序号', 'showOrder', 2, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 1, 5, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
        ('APP', (SELECT `id` FROM `tab_metadata_field` WHERE `table_name` = 'tab_app' AND `column_name` = 'remark'),
-        '备注', 'remark', 1, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 7, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+        '备注', 'remark', 1, NULL, 0, 0, 1, 1, 1, 1, NULL, NULL, 1, 7, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
 
 -- ----------------------------------------------------------------------------
 -- Excel 导入字段配置种子数据
