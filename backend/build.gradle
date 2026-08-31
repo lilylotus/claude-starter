@@ -65,6 +65,13 @@ dependencies {
     // ============ 可选：Flowable REST API ============
     implementation "org.flowable:flowable-spring-boot-starter-rest:${FlowableVersion}"
 
+    implementation 'io.netty:netty-all:4.2.16.Final'
+    implementation 'org.springframework.boot:spring-boot-starter-websocket'
+
+    /* 聊天网关（chat-gateway-core change design.md Decision 6）：msgId 去重短路缓存 +
+       连接/消息令牌桶按访问频率淘汰，避免无界 Map 长期占用内存。 */
+    implementation 'com.github.ben-manes.caffeine:caffeine:3.1.8'
+
     compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'
     annotationProcessor "org.mapstruct:mapstruct-processor:1.6.3"
@@ -92,6 +99,15 @@ clean {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	/* 聊天网关（ChatGatewayServer）是一个随 Spring 容器启动即绑定真实 Netty 端口的
+	   SmartLifecycle Bean，与内嵌 Servlet 容器的 webEnvironment 类型无关；测试套件里
+	   大量 @SpringBootTest 用例按各自不同的 Mock/属性组合分别持有独立的 Spring 上下文
+	   缓存条目，每个新建的上下文都会尝试绑定同一个端口（chat.gateway.port），第一个
+	   之后的全部会因端口被占用而启动失败，进而波及该上下文下的全部测试用例。测试运行时
+	   通过 chat.gateway.enabled=false 整体关闭端口监听（该开关本身即为"问题回滚不需要
+	   回退代码"而设计，这里复用其语义），不影响 chat 模块自身单元测试（均为不依赖
+	   Spring 容器的纯 Mockito 单元测试）。 */
+	systemProperty 'chat.gateway.enabled', 'false'
 }
 
 /* Gradle 指定编码,Java 编译的时候缺省状态下会因为中文字符而失败 */

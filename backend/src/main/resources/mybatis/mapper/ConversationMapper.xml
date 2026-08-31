@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 会话内消息序号生成：调用方必须在同一事务内先调用 selectNextSeqForUpdate 加行锁读取
+     当前值，再调用 incrementNextSeq 原子自增（chat-gateway-core change design.md
+     Decision 7），不使用 MySQL 8.0+ 窗口函数。 -->
+<mapper namespace="cn.nihility.rbac.chat.mapper.ConversationMapper">
+
+    <select id="selectNextSeqForUpdate" resultType="java.lang.Long">
+        SELECT next_seq FROM tab_chat_conversation WHERE id = #{id} FOR UPDATE
+    </select>
+
+    <update id="incrementNextSeq">
+        UPDATE tab_chat_conversation SET next_seq = next_seq + 1 WHERE id = #{id}
+    </update>
+
+</mapper>

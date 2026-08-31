@@ -43,6 +43,8 @@ const implementedComponents: Record<string, () => Promise<unknown>> = {
   '/approval/mine': () => import('@/views/approval/mine/MyApprovalRequestView.vue'),
   '/approval/pending': () => import('@/views/approval/pending/PendingApprovalRequestView.vue'),
   '/approval/settings': () => import('@/views/approval/settings/ApprovalSettingsView.vue'),
+  '/chat': () => import('@/views/chat/ChatView.vue'),
+  '/system/sensitive-words': () => import('@/views/chat/SensitiveWordManagementView.vue'),
 }
 
 const menuRoutes = MENU_GROUPS.flatMap((group) =>
