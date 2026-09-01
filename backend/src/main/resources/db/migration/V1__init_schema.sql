@@ -886,7 +886,7 @@ CREATE TABLE IF NOT EXISTS `tab_form_field_definition`
     `show_in_list`      TINYINT   NOT NULL DEFAULT 1 COMMENT '是否在列表中展示',
     `show_in_create`    TINYINT   NOT NULL DEFAULT 1 COMMENT '是否在新增表单中展示',
     `show_in_edit`      TINYINT   NOT NULL DEFAULT 1 COMMENT '是否在编辑表单中展示',
-    `show_in_export`    TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否导出',
+    `show_in_export`    TINYINT   NOT NULL DEFAULT 1 COMMENT '是否导出',
     `editable`          TINYINT   NOT NULL DEFAULT 1 COMMENT '表单中展示时是否可编辑，为否则只读展示',
     `validate_regex`    VARCHAR(255) NULL COMMENT '正则校验规则，前后端共用同一个字符串',
     `placeholder`       VARCHAR(128) NULL COMMENT '输入提示文字',
