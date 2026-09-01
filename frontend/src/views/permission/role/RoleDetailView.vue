@@ -7,6 +7,7 @@ import { ArrowLeft } from '@element-plus/icons-vue'
 import OperationHistoryPanel from '@/components/OperationHistoryPanel.vue'
 import * as roleApi from '@/api/role'
 import { ROLE_STATUS_ENABLED, type RoleRow } from '@/types/role'
+import { buildPermissionTree, resolvePermissionModuleLabel } from '@/utils/permissionTree'
 
 const route = useRoute()
 const router = useRouter()
@@ -18,20 +19,12 @@ const loadError = ref('')
 const detailData = ref<RoleRow | null>(null)
 
 // 已分配权限点按编码冒号分隔的第一段（模块）分组，只读展示，不提供勾选交互，
-// 分组逻辑与 RoleManagementView.vue 新增/编辑弹窗内的权限点树保持一致
-const groupedPermissions = computed(() => {
-  const groups = new Map<string, { moduleName: string; items: { id: number; name: string }[] }>()
-  for (const permission of detailData.value?.permissions ?? []) {
-    const moduleName = permission.code.split(':')[0] || permission.code
-    let group = groups.get(moduleName)
-    if (!group) {
-      group = { moduleName, items: [] }
-      groups.set(moduleName, group)
-    }
-    group.items.push({ id: permission.id, name: permission.name })
-  }
-  return Array.from(groups.values())
-})
+// 分组算法与中文模块名映射复用 src/utils/permissionTree.ts，与
+// RoleManagementView.vue 新增/编辑弹窗内的权限点树、PermissionManagementView.vue
+// 权限点管理树保持一致，避免三处各自维护一份可能漂移的分组/中文名解析逻辑
+const groupedPermissions = computed(() =>
+  buildPermissionTree(detailData.value?.permissions ?? [], resolvePermissionModuleLabel),
+)
 
 async function fetchDetail() {
   loading.value = true
@@ -92,11 +85,11 @@ function goBack() {
         <h3 class="role-detail__subtitle">已分配权限点</h3>
         <p v-if="groupedPermissions.length === 0" class="role-detail__empty">暂未分配任何权限点</p>
         <div v-else class="role-permission-groups">
-          <div v-for="group in groupedPermissions" :key="group.moduleName" class="role-permission-group">
-            <span class="role-permission-group__name">{{ group.moduleName }}</span>
+          <div v-for="group in groupedPermissions" :key="group.id" class="role-permission-group">
+            <span class="role-permission-group__name">{{ group.label }}</span>
             <div class="role-permission-group__tags">
-              <el-tag v-for="item in group.items" :key="item.id" class="role-permission-tag">
-                {{ item.name }}
+              <el-tag v-for="item in group.children" :key="item.id" class="role-permission-tag">
+                {{ item.label }}
               </el-tag>
             </div>
           </div>

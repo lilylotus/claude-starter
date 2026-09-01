@@ -299,4 +299,27 @@ class IdentityAuthFilterTest {
         verify(passwordService, never()).isFirstLogin(any());
         verify(authorizationService, never()).hasPermission(any(), any());
     }
+
+    /**
+     * 表单字段渲染元数据接口供审批详情弹窗展示新旧字段对照使用，调用者不应被要求额外
+     * 持有被审批业务对象的管理权限点，应绕过角色权限点判断（fix-approval-detail-
+     * render-schema-permission change）。
+     */
+    @Test
+    void doFilter_shouldPassFormFieldRenderSchema_asSelfService() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "GET",
+                "/api/form-fields/render-schema");
+        request.addHeader("identity-token", "valid-access-key");
+        request.addHeader("menu", "ApprovalManagement:request:approve");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain filterChain = org.mockito.Mockito.mock(FilterChain.class);
+        when(tokenService.verifyAccessKey("valid-access-key")).thenReturn(Optional.of(1L));
+
+        filter.doFilter(request, response, filterChain);
+
+        verify(filterChain).doFilter(request, response);
+        verify(passwordService, never()).isFirstLogin(any());
+        verify(authorizationService, never()).hasPermission(any(), any());
+    }
 }

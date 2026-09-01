@@ -112,6 +112,13 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function handleError(body: ErrorFrameBody): void {
+    if (body.msgId) {
+      const creation = pendingSingleCreations.get(body.msgId)
+      if (creation) {
+        pendingSingleCreations.delete(body.msgId)
+        creation.reject(new Error(body.message || '发起单聊失败'))
+      }
+    }
     ElMessage.error(body.message || '聊天服务出现异常')
   }
 

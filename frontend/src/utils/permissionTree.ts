@@ -70,6 +70,8 @@ export const PERMISSION_MODULE_LABELS: Record<string, string> = {
   LoginLogManagement: '登录日志管理',
   PluginManagement: '插件管理',
   ApprovalManagement: '审批管理',
+  Chat: '聊天',
+  SensitiveWordManagement: '敏感词管理',
 }
 
 // 未在 PERMISSION_MODULE_LABELS 中登记的模块名（如后续新增模块但还没来得及补充映射）

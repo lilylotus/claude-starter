@@ -45,8 +45,13 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * 查看权限才能看到对应数字；同一 change 新增的"当前用户最近操作"接口同理——只返回当前
  * 登录账号自己的操作记录（按账号编码精确过滤），语义收窄为自助信息查询，不应要求账号
  * 必须拥有"操作日志管理"（{@code OperationLogManagement:log:view}）查看权限才能看到自己
- * 的操作记录。因此这四个接口（{@link #FIRST_LOGIN_WHITELIST}）同时豁免首登拦截与权限
- * 判断，保持同一批白名单、同一个语义（"自助操作，不受角色权限点约束"）。
+ * 的操作记录；表单字段渲染元数据接口（{@code GET /api/form-fields/render-schema}）同理——
+ * "我的申请"/"待我审批"页面共用的审批详情弹窗需要据此渲染新旧字段对照，调用者不应被要求
+ * 额外持有被审批业务对象（组织/用户/任职/应用）的管理权限点，该接口本身也只返回字段展示
+ * 名/控件类型/字典选项等渲染元数据，不涉及任何实际业务数据（fix-approval-detail-
+ * render-schema-permission change design.md Decision 1）。因此这些接口（{@link
+ * #FIRST_LOGIN_WHITELIST}）同时豁免首登拦截与权限判断，保持同一批白名单、同一个语义
+ * （"自助操作，不受角色权限点约束"）。
  */
 @RequiredArgsConstructor
 public class IdentityAuthFilter extends OncePerRequestFilter {
@@ -86,7 +91,8 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
     /**
      * 仍需 {@code identity-token}/{@code menu} 校验，但豁免"首登强制改密"拦截与
      * "权限编码校验"的路径：修改密码、查询当前用户权限编码、首页概览统计、当前用户最近
-     * 操作，以及仅查询/撤回本人审批申请的接口，均为不区分权限点的自助操作。
+     * 操作、仅查询/撤回本人审批申请的接口，以及表单字段渲染元数据查询接口，均为不区分
+     * 权限点的自助操作。
      */
     private static final List<String> FIRST_LOGIN_WHITELIST = List.of(
             "/api/auth/password",
@@ -94,7 +100,8 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
             "/api/dashboard/stats",
             "/api/dashboard/recent-operations",
             "/api/approval-requests/mine",
-            "/api/approval-requests/*/cancel");
+            "/api/approval-requests/*/cancel",
+            "/api/form-fields/render-schema");
 
     /** Ant 风格路径匹配器，用于维护白名单。 */
     private static final AntPathMatcher PATH_MATCHER = new AntPathMatcher();
