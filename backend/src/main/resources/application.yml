@@ -98,6 +98,49 @@ logging:
   level:
     cn.nihility.rbac: debug
 
+# 聊天网关配置（chat-gateway-core change design.md Migration Plan 3），与业务 HTTP 端口
+# （server.port）分离监听独立端口，随 Spring 容器生命周期启停（ChatGatewayServer）。
+chat:
+  gateway:
+    # 是否启用聊天网关端口监听，默认开启；置为 false 可整体关闭网关监听用于问题回滚，
+    # 不需要回退代码（不影响本进程内其余 REST 接口）。
+    enabled: true
+    port: 48091
+    websocket-path: /ws/chat
+    boss-threads: 1
+    # 0 表示使用 Netty 默认 worker 线程数（2 * CPU 核数）。
+    worker-threads: 0
+    business-threads: 16
+    max-frame-payload-length: 1048576
+    # 连接建立后必须在此时间窗口内完成认证握手（发送携带 accessKey 的 LOGIN 帧），
+    # 超时未认证的连接会被服务端主动关闭。
+    auth-timeout-seconds: 10
+    # 读空闲超时阈值：超过该时长未收到任何帧（含心跳）则主动断开并清理会话映射，
+    # 客户端心跳发送周期应明显小于该值（如 30 秒）。
+    idle-timeout-seconds: 60
+    tls:
+      # 生产环境必须开启并配置下方 cert-path/key-path 指向真实证书；本地开发默认关闭以
+      # 简化调试（浏览器不需要手动信任自签名证书即可用 ws:// 完成联调），该开关仅限
+      # 开发环境使用（chat-security spec"传输层加密"需求）。开启但未配置证书路径时，
+      # 会自动生成自签名证书兜底并打印明确的开发环境警告日志。
+      enabled: false
+      cert-path:
+      key-path:
+    rate-limit:
+      # 已认证用户消息发送令牌桶：每秒补充令牌数 / 突发容量上限。
+      user-message-tokens-per-second: 5
+      user-message-burst-capacity: 10
+      # 未认证阶段按来源 IP 建连令牌桶：每秒补充令牌数 / 突发容量上限。
+      ip-connect-tokens-per-second: 5
+      ip-connect-burst-capacity: 20
+    dedup:
+      # msgId 去重短路缓存存活时间（秒）与最大条目数，跨重启失效由数据库唯一索引兜底。
+      cache-ttl-seconds: 300
+      cache-max-size: 100000
+    offline:
+      # 离线消息补偿推送单批最多查询/推送的条数。
+      max-push-batch-size: 200
+
 rbac:
   user:
     login:

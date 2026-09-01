@@ -1,4 +1,4 @@
-import { UserFilled, Grid, Lock, Setting, Document, Checked } from '@element-plus/icons-vue'
+import { UserFilled, Grid, Lock, Setting, Document, Checked, ChatDotRound } from '@element-plus/icons-vue'
 import type { MenuGroup } from '@/types/menu'
 
 // 侧边栏的四个一级菜单及其子菜单，供 Sidebar 渲染，也是 router 子路由的数据来源。
@@ -43,6 +43,9 @@ export const MENU_GROUPS: MenuGroup[] = [
       { title: '字典管理', path: '/system/dicts', permissionKey: 'DictManagement:dictType:view' },
       { title: '元数据配置', path: '/system/metadata-fields', permissionKey: 'MetadataFieldManagement:metadataField:view' },
       { title: '表单管理', path: '/system/form-fields', permissionKey: 'FormFieldManagement:formField:view' },
+      // 聊天敏感词库后台管理，登记在"系统管理"分组下，与后端 V15__create_chat_tables.sql
+      // 权限点登记位置（parent_id 挂在 system 分组下）保持一致
+      { title: '敏感词管理', path: '/system/sensitive-words', permissionKey: 'SensitiveWordManagement:sensitiveWord:view' },
     ],
   },
   {
@@ -71,6 +74,15 @@ export const MENU_GROUPS: MenuGroup[] = [
       { title: '待我审批', path: '/approval/pending', permissionKey: 'ApprovalManagement:request:approve' },
       { title: '审批设置', path: '/approval/settings', permissionKey: 'ApprovalManagement:switch:view' },
     ],
+  },
+  {
+    // 聊天独立一级导航分组，与后端 V15__create_chat_tables.sql 新增的"聊天"侧边栏分组
+    // （code=chat）一一对应；本阶段只有"聊天"这一个页面，其下会话列表/消息收发/群聊
+    // 创建与成员管理都在同一个页面内完成，不拆分成多个子菜单项
+    key: 'chat',
+    title: '聊天',
+    icon: ChatDotRound,
+    children: [{ title: '聊天', path: '/chat', permissionKey: 'Chat:conversation:view' }],
   },
 ]
 

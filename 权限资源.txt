@@ -206,6 +206,14 @@ PluginManagement（插件管理，/system/plugins，见 openspec/changes/plugin-
 - PluginManagement:plugin:view      插件管理页面访问（查询插件 Bean 定义注册阶段状态、失败原因、覆盖关系列表）
 （只读页面，仅支持查询，没有 add/edit/enable/disable/delete；插件本身通过 plugins/ 目录 + 重启应用加载，不提供页面上传/启停/重新扫描操作）
 
+SensitiveWordManagement（敏感词管理，/system/sensitive-words，见 openspec/changes/chat-gateway-core）
+- SensitiveWordManagement:sensitiveWord:view      敏感词管理页面访问（分页查询聊天敏感词库）
+- SensitiveWordManagement:sensitiveWord:add       新增敏感词
+- SensitiveWordManagement:sensitiveWord:delete    删除敏感词（物理删除）
+- SensitiveWordManagement:sensitiveWord:enable    启用敏感词
+- SensitiveWordManagement:sensitiveWord:disable   停用敏感词
+（词条变更后立即触发内存 AC 自动机重建，无需重启服务；没有 edit/detail——只支持增删启停，不支持修改已有词条内容）
+
 
 日志管理
 --------
@@ -235,6 +243,19 @@ ApprovalManagement（审批管理，见 openspec/changes/add-master-data-approva
 后仍复用原有的 add/edit/enable/disable/delete 权限点，只是调用接口后是否立即生效改由
 对应 bizType 的审批开关状态决定，不需要新增/拆分按钮级权限点）
 
+
+聊天
+--------
+
+Chat（聊天，/chat，见 openspec/changes/chat-gateway-core）
+- Chat:conversation:view          聊天页面访问（会话列表 + 消息收发 + 历史消息查询，
+  单聊+群聊混排；单聊消息的实时收发通过 WebSocket 网关而非本清单登记的 REST 资源，
+  仍复用本权限点作为页面/相关只读查询接口的 menu 请求头）
+- Chat:conversation:create        创建群聊（发起群聊弹窗：填写群名称 + 选择初始成员）
+- Chat:conversation:manageMember  群成员管理（添加群成员、移除成员、退出群聊，合并为
+  一个权限点；移除他人成员额外要求当前用户是该群群主，由后端二次校验）
+（发起单聊不单独设权限点，任何拥有 Chat:conversation:view 的用户都可以发起单聊；
+没有单独的"删除会话"/"解散群聊"入口，本阶段未提供对应操作）
 
 尚未实现（不计入以上编码，实现后再补充）
 --------

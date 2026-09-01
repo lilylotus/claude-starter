@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 批量查询多个会话各自最新一条消息："每组最新一条记录"用自关联子查询 GROUP BY MAX(id)
+     实现（仓库约定禁止 MySQL 8.0+ 窗口函数，目标库 5.7），JOIN ON 只放关联键 m.id =
+     latest.max_id，子查询已经把 conversation_id IN (...) 过滤条件收敛在子查询内部。 -->
+<mapper namespace="cn.nihility.rbac.chat.mapper.ChatMessageMapper">
+
+    <select id="selectLatestByConversationIds" resultType="cn.nihility.rbac.chat.entity.ChatMessageEntity">
+        SELECT m.*
+        FROM tab_chat_message m
+        INNER JOIN (
+            SELECT conversation_id, MAX(id) AS max_id
+            FROM tab_chat_message
+            WHERE conversation_id IN
+            <foreach collection="conversationIds" item="conversationId" open="(" separator="," close=")">
+                #{conversationId}
+            </foreach>
+            GROUP BY conversation_id
+        ) latest ON m.id = latest.max_id
+    </select>
+
+</mapper>
