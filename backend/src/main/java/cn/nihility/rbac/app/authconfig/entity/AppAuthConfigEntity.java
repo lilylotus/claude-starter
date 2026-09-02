@@ -45,6 +45,13 @@ public class AppAuthConfigEntity {
     private String servicePatterns;
 
     /**
+     * 允许的登录认证方式，JSON 字符串数组文本，取值 {@code PASSWORD}/{@code SMS}/
+     * {@code QRCODE} 的子集，{@code PASSWORD} 恒定包含（add-sso-login-methods change
+     * design.md Decision 1），读写模式与 {@link #servicePatterns} 一致。
+     */
+    private String loginMethods;
+
+    /**
      * 登出通知回调地址：单点登出触发登出主流程时，系统按此地址以 POST +
      * {@code application/x-www-form-urlencoded} 方式回调通知该应用登出事件（add-sso-single-logout
      * change design.md Decision 2/3），未配置（{@code null}）时登出不通知该应用。

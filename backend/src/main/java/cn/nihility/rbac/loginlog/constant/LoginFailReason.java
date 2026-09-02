@@ -22,6 +22,16 @@ public final class LoginFailReason {
     /** 账号解密失败。 */
     public static final String DECRYPT_FAILED = "账号解密失败";
 
+    /** 短信验证码不正确或已过期（add-sso-login-methods change design.md Decision 4）。 */
+    public static final String SMS_CODE_MISMATCH = "短信验证码不正确或已过期";
+
+    /**
+     * 短信验证码正确，但按提交手机号此刻查询不到恰好一个启用状态账号（0 个或多个），属于
+     * 验证码发出后账号状态发生变化的边界情况（add-sso-login-methods change design.md
+     * Decision 4）。
+     */
+    public static final String MOBILE_NOT_MATCHED = "手机号未匹配到唯一可登录账号";
+
     /**
      * 工具类不允许实例化。
      */

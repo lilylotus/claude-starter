@@ -207,6 +207,38 @@ public final class RedisUtils {
     }
 
     /**
+     * 对一个整型计数器 key 执行原子自增（{@code INCR}），首次自增（即自增后值为 1，说明
+     * 该 key 此前不存在）时顺带设置过期时间，供需要"按天/按窗口计数且要求原子递增"的限流
+     * 场景使用（如短信发送每日上限），避免"先 GET 再判断再 SET"的读改写方式在并发下计数
+     * 不准（add-sso-login-methods change design.md Decision 4）。
+     *
+     * @param key     Redis key
+     * @param timeout 首次自增时设置的过期时间数值
+     * @param unit    过期时间单位
+     * @return 自增后的当前值
+     */
+    public static Long increment(String key, long timeout, TimeUnit unit) {
+        Long value = template().opsForValue().increment(key);
+        if (value != null && value == 1L) {
+            template().expire(key, timeout, unit);
+        }
+        return value;
+    }
+
+    /**
+     * 查询一个 key 的剩余过期时间，供需要"更新值但保留原有剩余有效期"的场景使用（如二维码
+     * 登录会话状态流转时不希望每次更新都把有效期重新拉满）。
+     *
+     * @param key  Redis key
+     * @param unit 返回值使用的时间单位
+     * @return 剩余过期时间，key 不存在时返回负值（语义同
+     *         {@link StringRedisTemplate#getExpire(Object, TimeUnit)}）
+     */
+    public static Long getExpire(String key, TimeUnit unit) {
+        return template().getExpire(key, unit);
+    }
+
+    /**
      * 批量写入一个 Hash 的多个字段。
      *
      * @param key  Redis key

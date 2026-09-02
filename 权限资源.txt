@@ -101,10 +101,13 @@ AppManagement（应用管理，/application/list）
   组织/用户/任职三个数据域按应用配置的同步范围——全部数据或指定组织范围（可选含子孙组织））
 - AppManagement:app:config:editAuth          修改认证管理配置（单点登录协议类型：无/CAS/
   OAuth2.0，回跳地址匹配列表 servicePatterns（CAS/OAuth2.0 等协议共用同一份存储），登出
-  通知回调地址；仅做协议接入前置配置维护，不含协议运行时鉴权逻辑，见
+  通知回调地址，允许的登录认证方式 loginMethods（口令恒定必选，短信、扫码可按应用单独
+  启用/停用，决定该应用 SSO 登录页展示哪些登录方式标签页）；仅做协议接入/登录方式前置
+  配置维护，不含协议运行时鉴权逻辑，见
   openspec/changes/archive/2026-08-17-app-auth-protocol-config、
   openspec/changes/archive/2026-08-19-add-sso-single-logout、
-  openspec/changes/archive/2026-08-19-unify-app-auth-service-patterns）
+  openspec/changes/archive/2026-08-19-unify-app-auth-service-patterns、
+  openspec/changes/add-sso-login-methods）
 
 
 权限管理

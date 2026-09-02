@@ -3,14 +3,30 @@
 // 登录页，完全独立于管理端登录（不接入 stores/auth.ts / api/request.ts）。
 // 登录成功后必须整页跳转（window.location.href）回 redirect 指向的后端原生 URL
 // （/api/authn/cas/**、/api/authn/oauth/** 等），不能用 router.push。
-import { computed, reactive, ref } from 'vue'
+//
+// 支持三种登录方式（口令/短信/扫码），实际展示哪些由后端按 redirect 反解出的目标应用
+// 认证配置决定（GET /authn/sso/login-methods）；仅 PASSWORD 时保持原有无标签页样式，
+// 出现 SMS/QRCODE 时用 el-tabs 切换展示。
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { User, Lock } from '@element-plus/icons-vue'
+import { ChatDotRound, Iphone, Lock, User } from '@element-plus/icons-vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { getSsoPublicKey, ssoChangePassword, ssoLogin } from '@/api/sso'
+import QRCode from 'qrcode'
+import {
+  createSsoQrcodeSession,
+  getSsoLoginMethods,
+  getSsoPublicKey,
+  getSsoQrcodeStatus,
+  ssoChangePassword,
+  ssoLogin,
+  ssoSendSmsCode,
+  ssoSmsLogin,
+} from '@/api/sso'
 import { rsaEncrypt } from '@/utils/rsa'
+import type { SsoLoginMethod, SsoQrcodeStatus } from '@/types/sso'
 
 const route = useRoute()
+const redirect = computed(() => (route.query.redirect as string) || '')
 
 const formRef = ref<FormInstance>()
 const passwordFormRef = ref<FormInstance>()
@@ -62,7 +78,7 @@ const subtitle = computed(() =>
 
 function redirectToTarget() {
   // 必须整页跳转：redirect 指向后端原生 URL（如 /api/authn/cas/**），不是 SPA 内部路由
-  window.location.href = (route.query.redirect as string) || '/'
+  window.location.href = redirect.value || '/'
 }
 
 async function handleSubmit() {
@@ -109,6 +125,178 @@ async function handlePasswordChange() {
     changingPassword.value = false
   }
 }
+
+// ---- 登录方式：根据 redirect 反解出的目标应用认证配置，决定展示哪些标签页 ----
+
+const loginMethods = ref<SsoLoginMethod[]>(['PASSWORD'])
+const activeTab = ref<SsoLoginMethod>('PASSWORD')
+
+async function loadLoginMethods() {
+  try {
+    const methods = await getSsoLoginMethods(redirect.value || undefined)
+    loginMethods.value = methods.length > 0 ? methods : ['PASSWORD']
+  } catch {
+    // 查询失败时保守退化为仅口令登录，不影响页面可用性
+    loginMethods.value = ['PASSWORD']
+  }
+  activeTab.value = loginMethods.value.includes('PASSWORD') ? 'PASSWORD' : loginMethods.value[0]
+}
+
+// ---- 短信验证码登录 ----
+
+const MOBILE_PATTERN = /^1\d{10}$/
+
+const smsFormRef = ref<FormInstance>()
+const smsForm = reactive({
+  mobile: '',
+  code: '',
+})
+const smsRules: FormRules = {
+  mobile: [
+    { required: true, message: '请输入手机号', trigger: 'blur' },
+    { pattern: MOBILE_PATTERN, message: '手机号格式不正确', trigger: 'blur' },
+  ],
+  code: [{ required: true, message: '请输入验证码', trigger: 'blur' }],
+}
+const smsSubmitting = ref(false)
+const sendingSmsCode = ref(false)
+const smsCountdown = ref(0)
+let smsCountdownTimer: ReturnType<typeof setInterval> | undefined
+
+function startSmsCountdown() {
+  smsCountdown.value = 60
+  smsCountdownTimer = setInterval(() => {
+    smsCountdown.value -= 1
+    if (smsCountdown.value <= 0 && smsCountdownTimer) {
+      clearInterval(smsCountdownTimer)
+      smsCountdownTimer = undefined
+    }
+  }, 1000)
+}
+
+async function handleSendSmsCode() {
+  const valid = await smsFormRef.value?.validateField('mobile').catch(() => false)
+  if (!valid) return
+
+  sendingSmsCode.value = true
+  try {
+    await ssoSendSmsCode(redirect.value, smsForm.mobile)
+    ElMessage.success('验证码已发送，请注意查收')
+    startSmsCountdown()
+  } catch {
+    // 错误提示已由响应拦截器统一展示
+  } finally {
+    sendingSmsCode.value = false
+  }
+}
+
+async function handleSmsSubmit() {
+  const valid = await smsFormRef.value?.validate().catch(() => false)
+  if (!valid) return
+
+  smsSubmitting.value = true
+  try {
+    const result = await ssoSmsLogin(redirect.value, smsForm.mobile, smsForm.code)
+    if (result.firstLogin) {
+      isPasswordChange.value = true
+      return
+    }
+    redirectToTarget()
+  } catch {
+    // 错误提示已由响应拦截器统一展示
+  } finally {
+    smsSubmitting.value = false
+  }
+}
+
+// ---- 扫码登录：进入标签页时创建会话并渲染二维码，随后每 2 秒轮询状态 ----
+
+const qrcodeDataUrl = ref('')
+const qrcodeStatus = ref<SsoQrcodeStatus | 'INIT'>('INIT')
+const qrcodeLoading = ref(false)
+let qrcodeToken = ''
+let qrcodePollTimer: ReturnType<typeof setInterval> | undefined
+
+const qrcodeStatusText = computed(() => {
+  switch (qrcodeStatus.value) {
+    case 'PENDING':
+      return '请使用手机浏览器扫描二维码登录'
+    case 'SCANNED':
+      return '已扫码，请在手机上确认登录'
+    case 'EXPIRED':
+      return '二维码已过期，请刷新后重试'
+    case 'CONFIRMED':
+      return '登录成功，正在跳转'
+    default:
+      return ''
+  }
+})
+
+function stopQrcodePolling() {
+  if (qrcodePollTimer) {
+    clearInterval(qrcodePollTimer)
+    qrcodePollTimer = undefined
+  }
+}
+
+async function pollQrcodeStatus() {
+  if (!qrcodeToken) return
+  try {
+    const result = await getSsoQrcodeStatus(qrcodeToken)
+    qrcodeStatus.value = result.status
+    if (result.status === 'CONFIRMED') {
+      stopQrcodePolling()
+      if (result.firstLogin) {
+        isPasswordChange.value = true
+        return
+      }
+      redirectToTarget()
+    } else if (result.status === 'EXPIRED') {
+      stopQrcodePolling()
+    }
+  } catch {
+    // 轮询请求失败（网络抖动）不打断，等待下一次轮询重试
+  }
+}
+
+async function initQrcodeSession() {
+  stopQrcodePolling()
+  qrcodeLoading.value = true
+  qrcodeStatus.value = 'INIT'
+  try {
+    const session = await createSsoQrcodeSession(redirect.value)
+    qrcodeToken = session.token
+    const confirmUrl = window.location.origin + session.confirmPath
+    qrcodeDataUrl.value = await QRCode.toDataURL(confirmUrl, { width: 220, margin: 1 })
+    qrcodeStatus.value = 'PENDING'
+    qrcodePollTimer = setInterval(pollQrcodeStatus, 2000)
+  } catch {
+    // 错误提示已由响应拦截器统一展示
+  } finally {
+    qrcodeLoading.value = false
+  }
+}
+
+function handleRefreshQrcode() {
+  initQrcodeSession()
+}
+
+function handleTabChange(name: string | number) {
+  if (name === 'QRCODE') {
+    initQrcodeSession()
+  } else {
+    stopQrcodePolling()
+  }
+}
+
+onMounted(() => {
+  loadLoginMethods()
+})
+
+onBeforeUnmount(() => {
+  stopQrcodePolling()
+  if (smsCountdownTimer) clearInterval(smsCountdownTimer)
+})
 </script>
 
 <template>
@@ -161,32 +349,7 @@ async function handlePasswordChange() {
         <p class="sso-login__subtitle">{{ subtitle }}</p>
 
         <el-form
-          v-if="!isPasswordChange"
-          ref="formRef"
-          :model="form"
-          :rules="rules"
-          size="large"
-          @keyup.enter="handleSubmit"
-        >
-          <el-form-item prop="username">
-            <el-input v-model="form.username" placeholder="用户名" :prefix-icon="User" />
-          </el-form-item>
-          <el-form-item prop="password">
-            <el-input v-model="form.password" type="password" placeholder="密码" :prefix-icon="Lock" show-password />
-          </el-form-item>
-          <el-button
-            class="sso-login__submit"
-            type="primary"
-            size="large"
-            :loading="submitting"
-            @click="handleSubmit"
-          >
-            登录
-          </el-button>
-        </el-form>
-
-        <el-form
-          v-else
+          v-if="isPasswordChange"
           ref="passwordFormRef"
           :model="passwordForm"
           :rules="passwordRules"
@@ -231,12 +394,117 @@ async function handlePasswordChange() {
           </el-button>
         </el-form>
 
-        <p class="sso-login__hint">
-          {{
-            isPasswordChange
-              ? '修改成功后将继续原 CAS/OAuth2.0 登录流程'
-              : '用户名为分配的用户编码，密码为初始密码或管理员重置后的默认密码'
-          }}
+        <template v-else>
+          <!-- 仅允许口令登录时，保持原有无标签页样式 -->
+          <el-form
+            v-if="loginMethods.length <= 1"
+            ref="formRef"
+            :model="form"
+            :rules="rules"
+            size="large"
+            @keyup.enter="handleSubmit"
+          >
+            <el-form-item prop="username">
+              <el-input v-model="form.username" placeholder="用户名" :prefix-icon="User" />
+            </el-form-item>
+            <el-form-item prop="password">
+              <el-input
+                v-model="form.password"
+                type="password"
+                placeholder="密码"
+                :prefix-icon="Lock"
+                show-password
+              />
+            </el-form-item>
+            <el-button
+              class="sso-login__submit"
+              type="primary"
+              size="large"
+              :loading="submitting"
+              @click="handleSubmit"
+            >
+              登录
+            </el-button>
+          </el-form>
+
+          <el-tabs v-else v-model="activeTab" class="sso-login__tabs" @tab-change="handleTabChange">
+            <el-tab-pane v-if="loginMethods.includes('PASSWORD')" label="口令登录" name="PASSWORD">
+              <el-form ref="formRef" :model="form" :rules="rules" size="large" @keyup.enter="handleSubmit">
+                <el-form-item prop="username">
+                  <el-input v-model="form.username" placeholder="用户名" :prefix-icon="User" />
+                </el-form-item>
+                <el-form-item prop="password">
+                  <el-input
+                    v-model="form.password"
+                    type="password"
+                    placeholder="密码"
+                    :prefix-icon="Lock"
+                    show-password
+                  />
+                </el-form-item>
+                <el-button
+                  class="sso-login__submit"
+                  type="primary"
+                  size="large"
+                  :loading="submitting"
+                  @click="handleSubmit"
+                >
+                  登录
+                </el-button>
+              </el-form>
+            </el-tab-pane>
+
+            <el-tab-pane v-if="loginMethods.includes('SMS')" label="短信登录" name="SMS">
+              <el-form ref="smsFormRef" :model="smsForm" :rules="smsRules" size="large" @keyup.enter="handleSmsSubmit">
+                <el-form-item prop="mobile">
+                  <el-input v-model="smsForm.mobile" placeholder="手机号" :prefix-icon="Iphone" maxlength="11" />
+                </el-form-item>
+                <el-form-item prop="code">
+                  <div class="sso-login__sms-code-row">
+                    <el-input v-model="smsForm.code" placeholder="验证码" :prefix-icon="ChatDotRound" />
+                    <el-button
+                      class="sso-login__sms-code-btn"
+                      :disabled="smsCountdown > 0"
+                      :loading="sendingSmsCode"
+                      @click="handleSendSmsCode"
+                    >
+                      {{ smsCountdown > 0 ? `${smsCountdown}秒后重试` : '获取验证码' }}
+                    </el-button>
+                  </div>
+                </el-form-item>
+                <el-button
+                  class="sso-login__submit"
+                  type="primary"
+                  size="large"
+                  :loading="smsSubmitting"
+                  @click="handleSmsSubmit"
+                >
+                  登录
+                </el-button>
+              </el-form>
+            </el-tab-pane>
+
+            <el-tab-pane v-if="loginMethods.includes('QRCODE')" label="扫码登录" name="QRCODE">
+              <div v-loading="qrcodeLoading" class="sso-login__qrcode">
+                <img
+                  v-if="qrcodeDataUrl && qrcodeStatus !== 'EXPIRED'"
+                  :src="qrcodeDataUrl"
+                  class="sso-login__qrcode-img"
+                  alt="扫码登录二维码"
+                />
+                <div v-else class="sso-login__qrcode-placeholder" />
+                <p class="sso-login__qrcode-status">{{ qrcodeStatusText }}</p>
+                <el-button v-if="qrcodeStatus === 'EXPIRED'" type="primary" @click="handleRefreshQrcode">
+                  刷新二维码
+                </el-button>
+              </div>
+            </el-tab-pane>
+          </el-tabs>
+        </template>
+
+        <p v-if="isPasswordChange" class="sso-login__hint">修改成功后将继续原 CAS/OAuth2.0 登录流程</p>
+        <p v-else-if="loginMethods.length <= 1 || activeTab === 'PASSWORD'" class="sso-login__hint">
+          用户名为分配的用户编码，密码为初始密码或管理员重置后的默认密码
         </p>
       </div>
     </section>
@@ -362,9 +630,69 @@ async function handlePasswordChange() {
   margin: 0 0 32px;
 }
 
+.sso-login__tabs {
+  :deep(.el-tabs__nav) {
+    width: 100%;
+    display: flex;
+  }
+
+  :deep(.el-tabs__item) {
+    flex: 1;
+    text-align: center;
+  }
+}
+
 .sso-login__submit {
   width: 100%;
   margin-top: 4px;
+}
+
+.sso-login__sms-code-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+
+  .el-input {
+    flex: 1;
+  }
+}
+
+.sso-login__sms-code-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.sso-login__qrcode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0 4px;
+  min-height: 260px;
+}
+
+.sso-login__qrcode-img {
+  width: 220px;
+  height: 220px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  background: #fff;
+}
+
+.sso-login__qrcode-placeholder {
+  width: 220px;
+  height: 220px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-canvas);
+}
+
+.sso-login__qrcode-status {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  text-align: center;
 }
 
 .sso-login__hint {

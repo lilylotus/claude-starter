@@ -26,6 +26,7 @@ import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.common.util.JacksonUtils;
 import cn.nihility.rbac.formfield.constant.FormFieldBizType;
+import cn.nihility.rbac.loginlog.constant.LoginMethod;
 import cn.nihility.rbac.metadata.constant.MetadataFieldStatus;
 import cn.nihility.rbac.metadata.entity.MetadataFieldEntity;
 import cn.nihility.rbac.metadata.mapper.MetadataFieldMapper;
@@ -89,6 +90,7 @@ public class AppAuthConfigServiceImpl implements AppAuthConfigService {
                 .appRefId(appRefId)
                 .authProtocol(AuthProtocol.NONE)
                 .servicePatterns(JacksonUtils.toJson(List.of()))
+                .loginMethods(JacksonUtils.toJson(List.of(LoginMethod.PASSWORD)))
                 .createBy(operator)
                 .createTime(now)
                 .updateBy(operator)
@@ -125,10 +127,12 @@ public class AppAuthConfigServiceImpl implements AppAuthConfigService {
         String logoutNotifyUrl = StringUtils.hasText(request.getLogoutNotifyUrl())
                 ? request.getLogoutNotifyUrl().trim() : null;
         assertValidLogoutNotifyUrl(logoutNotifyUrl);
+        List<String> loginMethods = normalizeLoginMethods(request.getLoginMethods());
 
         entity.setAuthProtocol(request.getAuthProtocol());
         entity.setServicePatterns(JacksonUtils.toJson(
                 AuthProtocol.NONE.equals(request.getAuthProtocol()) ? List.of() : servicePatterns));
+        entity.setLoginMethods(JacksonUtils.toJson(loginMethods));
         entity.setLogoutNotifyUrl(logoutNotifyUrl);
         entity.setUpdateBy(Objects.toString(currentOperatorService.resolveUserId(), null));
         entity.setUpdateTime(LocalDateTime.now());
@@ -174,6 +178,32 @@ public class AppAuthConfigServiceImpl implements AppAuthConfigService {
         } catch (URISyntaxException e) {
             throw new BusinessException("登出通知回调地址格式不正确，必须是 http/https 开头的合法 URL");
         }
+    }
+
+    /**
+     * 校验并规范化提交的登录认证方式列表：每一项只能是 {@code PASSWORD}/{@code SMS}/
+     * {@code QRCODE}，出现取值范围外的字符串直接拒绝；{@code PASSWORD} 恒定包含，缺失时
+     * 自动补齐而不是拒绝请求（add-sso-login-methods change design.md Decision 1）。
+     *
+     * @param loginMethods 原始登录认证方式列表，可能为 {@code null}
+     * @return 规范化后的登录认证方式列表，{@code PASSWORD} 固定排在首位
+     */
+    private List<String> normalizeLoginMethods(List<String> loginMethods) {
+        Set<String> result = new LinkedHashSet<>();
+        result.add(LoginMethod.PASSWORD);
+        if (loginMethods != null) {
+            for (String loginMethod : loginMethods) {
+                if (!StringUtils.hasText(loginMethod)) {
+                    continue;
+                }
+                String trimmed = loginMethod.trim();
+                if (!LoginMethod.ALL_VALUES.contains(trimmed)) {
+                    throw new BusinessException("非法的登录认证方式：" + trimmed);
+                }
+                result.add(trimmed);
+            }
+        }
+        return List.copyOf(result);
     }
 
     /**
@@ -224,6 +254,7 @@ public class AppAuthConfigServiceImpl implements AppAuthConfigService {
     private AppAuthConfigVO toVO(Long appRefId, AppAuthConfigEntity entity) {
         AppAuthConfigVO vo = AppAuthConfigConvert.INSTANCE.toVO(entity);
         vo.setServicePatterns(parsePatterns(entity.getServicePatterns()));
+        vo.setLoginMethods(parseLoginMethods(entity.getLoginMethods()));
 
         String appId = resolveAppId(appRefId);
         vo.setCasLoginUrl("/api/authn/cas/" + appId + "/login");
@@ -249,6 +280,21 @@ public class AppAuthConfigServiceImpl implements AppAuthConfigService {
     }
 
     /**
+     * 解析登录认证方式列表的 JSON 文本，空/未设置的历史数据按仅允许口令登录处理（防御性
+     * 兼容，迁移脚本已给存量行填充默认值，这里仅作为兜底）。
+     *
+     * @param loginMethodsJson JSON 字符串数组文本，可能为空
+     * @return 登录认证方式列表，为空或解析结果为空列表时返回仅含 {@code PASSWORD} 的列表
+     */
+    private List<String> parseLoginMethods(String loginMethodsJson) {
+        if (!StringUtils.hasText(loginMethodsJson)) {
+            return List.of(LoginMethod.PASSWORD);
+        }
+        List<String> loginMethods = JacksonUtils.toObj(loginMethodsJson, JacksonUtils.LIST_STRING_TYPE_REFERENCE);
+        return loginMethods == null || loginMethods.isEmpty() ? List.of(LoginMethod.PASSWORD) : loginMethods;
+    }
+
+    /**
      * 查询应用的对外应用标识（AppId），用于拼接协议接口地址。
      *
      * @param appRefId 应用 id
@@ -270,6 +316,7 @@ public class AppAuthConfigServiceImpl implements AppAuthConfigService {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("协议类型", entity.getAuthProtocol());
         snapshot.put("回跳地址匹配列表", entity.getServicePatterns());
+        snapshot.put("允许的登录认证方式", entity.getLoginMethods());
         snapshot.put("登出通知回调地址", entity.getLogoutNotifyUrl());
         return snapshot;
     }

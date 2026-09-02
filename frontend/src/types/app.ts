@@ -220,6 +220,17 @@ export const AUTH_PROTOCOL_OPTIONS: Array<{ value: AuthProtocol; label: string }
   { value: 'OAUTH2', label: 'OAuth2.0' },
 ]
 
+// SSO 登录页允许展示的登录认证方式，与后端 AppAuthConfigEntity.loginMethods 取值对齐；
+// PASSWORD 恒定包含且不可关闭，SMS/QRCODE 是否出现代表是否为该应用启用
+// （见 openspec/changes/add-sso-login-methods）
+export type SsoLoginMethod = 'PASSWORD' | 'SMS' | 'QRCODE'
+
+export const SSO_LOGIN_METHOD_OPTIONS: Array<{ value: SsoLoginMethod; label: string; disabled?: boolean }> = [
+  { value: 'PASSWORD', label: '口令登录', disabled: true },
+  { value: 'SMS', label: '短信登录' },
+  { value: 'QRCODE', label: '扫码登录' },
+]
+
 // 应用认证配置，来自 GET /api/apps/{id}/config/auth、PUT 同一地址的返回值；6 个协议接口
 // 地址由后端按该应用的 AppId 实时计算返回（路径部分，不含域名），无论 authProtocol 取值
 // 为何都会返回，方便管理员提前查看/复制
@@ -238,15 +249,20 @@ export interface AppAuthConfigVO {
   oauthAuthorizeUrl: string
   oauthTokenUrl: string
   oauthUserInfoUrl: string
+  // SSO 登录页允许展示的登录认证方式，PASSWORD 恒定包含；历史数据未存过时后端按
+  // ['PASSWORD'] 处理
+  loginMethods: SsoLoginMethod[]
 }
 
 // 修改认证配置请求体，对应 PUT /api/apps/{id}/config/auth；协议类型为 CAS/OAuth2.0 时
 // servicePatterns 不能为空，协议类型为无时会被后端清空（不保留旧值）；
-// logoutNotifyUrl 可留空，非空时须为合法 http/https URL
+// logoutNotifyUrl 可留空，非空时须为合法 http/https URL；loginMethods 缺少 PASSWORD 时
+// 由后端自动补齐，取值只能是 PASSWORD/SMS/QRCODE 的子集
 export interface AppAuthConfigUpdateRequest {
   authProtocol: AuthProtocol
   servicePatterns: string[]
   logoutNotifyUrl: string
+  loginMethods: SsoLoginMethod[]
 }
 
 // ---- 认证管理·用户信息响应字段映射：每个应用一份，CAS 票据验证/OAuth2 userinfo 接口共用，

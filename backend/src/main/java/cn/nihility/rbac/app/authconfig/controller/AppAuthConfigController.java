@@ -38,7 +38,8 @@ public class AppAuthConfigController {
      * @param id 应用 id（{@code tab_app.id}）
      * @return 应用单点登录协议配置详情
      */
-    @Operation(summary = "查询认证配置", description = "返回协议类型、匹配列表，以及按该应用 AppId 计算出的协议接口地址")
+    @Operation(summary = "查询认证配置", description = "返回协议类型、匹配列表、允许的登录认证方式（PASSWORD/SMS/QRCODE），"
+            + "以及按该应用 AppId 计算出的协议接口地址")
     @GetMapping("/api/apps/{id}/config/auth")
     public AppAuthConfigVO getAuthConfig(@PathVariable Long id) {
         return appAuthConfigService.getByAppId(id);
@@ -52,7 +53,8 @@ public class AppAuthConfigController {
      * @return 修改后的应用单点登录协议配置详情
      */
     @Operation(summary = "修改认证配置", description = "修改协议类型及对应的匹配列表；协议类型为 CAS/OAuth2.0 时对应匹配列表不能为空，"
-            + "协议类型为无时两个匹配列表均清空")
+            + "协议类型为无时两个匹配列表均清空；同时修改允许的登录认证方式（PASSWORD/SMS/QRCODE 子集），"
+            + "PASSWORD 恒定生效、缺失时自动补齐，非法取值直接拒绝")
     @PutMapping("/api/apps/{id}/config/auth")
     public AppAuthConfigVO updateAuthConfig(@PathVariable Long id,
             @Valid @RequestBody AppAuthConfigUpdateRequest request) {

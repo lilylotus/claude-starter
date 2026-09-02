@@ -1,6 +1,7 @@
 package cn.nihility.rbac.loginlog.service.impl;
 
 import cn.nihility.rbac.common.util.ClientRequestUtils;
+import cn.nihility.rbac.loginlog.constant.LoginMethod;
 import cn.nihility.rbac.loginlog.constant.LoginResult;
 import cn.nihility.rbac.loginlog.entity.LoginLogEntity;
 import cn.nihility.rbac.loginlog.mapper.LoginLogMapper;
@@ -42,7 +43,16 @@ public class LoginLogRecorderImpl implements LoginLogRecorder {
      */
     @Override
     public void recordSuccess(String loginAccount, Long userId, String userName, String sessionId) {
-        record(LoginResult.SUCCESS, loginAccount, userId, userName, null, sessionId);
+        recordSuccess(loginAccount, userId, userName, sessionId, LoginMethod.PASSWORD);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void recordSuccess(String loginAccount, Long userId, String userName, String sessionId,
+            String loginMethod) {
+        record(LoginResult.SUCCESS, loginAccount, userId, userName, null, sessionId, loginMethod);
     }
 
     /**
@@ -50,7 +60,16 @@ public class LoginLogRecorderImpl implements LoginLogRecorder {
      */
     @Override
     public void recordFailure(String loginAccount, Long userId, String userName, String failReason) {
-        record(LoginResult.FAILED, loginAccount, userId, userName, failReason, null);
+        recordFailure(loginAccount, userId, userName, failReason, LoginMethod.PASSWORD);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void recordFailure(String loginAccount, Long userId, String userName, String failReason,
+            String loginMethod) {
+        record(LoginResult.FAILED, loginAccount, userId, userName, failReason, null, loginMethod);
     }
 
     /**
@@ -62,9 +81,10 @@ public class LoginLogRecorderImpl implements LoginLogRecorder {
      * @param userName     关联的用户姓名，可为 {@code null}
      * @param failReason   失败原因文案，登录成功时为 {@code null}
      * @param sessionId    本次建立的 SSO 会话标识，仅 SSO 登录成功时非空
+     * @param loginMethod  登录方式，见 {@code LoginMethod}
      */
     private void record(int loginResult, String loginAccount, Long userId, String userName, String failReason,
-            String sessionId) {
+            String sessionId, String loginMethod) {
         HttpServletRequest request = currentRequest();
         LocalDateTime now = LocalDateTime.now();
         String operator = StringUtils.hasText(loginAccount) ? loginAccount : UNKNOWN_OPERATOR;
@@ -77,6 +97,7 @@ public class LoginLogRecorderImpl implements LoginLogRecorder {
                 .failReason(failReason)
                 .loginIp(ClientRequestUtils.resolveClientIp(request))
                 .sessionId(sessionId)
+                .loginMethod(loginMethod)
                 .createBy(operator)
                 .createTime(now)
                 .updateBy(operator)

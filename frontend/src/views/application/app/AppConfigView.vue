@@ -15,6 +15,7 @@ import {
   AUTH_PROTOCOL_OPTIONS,
   NOTIFY_STATUS_OPTIONS,
   NOTIFY_STATUS_SUCCESS,
+  SSO_LOGIN_METHOD_OPTIONS,
   SYNC_DOMAIN_FIELD_MAPPING_DOMAINS,
   SYNC_DOMAIN_OPTIONS,
   SYNC_DOMAIN_ORG_SCOPE_DOMAINS,
@@ -30,6 +31,7 @@ import {
   type AppSyncFieldMappingVO,
   type AppSyncOrgScopeFormItem,
   type SignAlgorithm,
+  type SsoLoginMethod,
   type SyncDomain,
   type SyncMode,
   type TransformType,
@@ -536,6 +538,9 @@ const authProtocol = ref<AuthProtocol>('NONE')
 const servicePatternRows = ref<string[]>([])
 // 登出通知回调地址：随协议类型/匹配列表一并读写，不区分协议类型都可填写，留空表示不通知
 const logoutNotifyUrl = ref('')
+// 允许的登录认证方式：口令固定选中且禁用取消勾选（SSO_LOGIN_METHOD_OPTIONS 里
+// PASSWORD 一项 disabled: true），短信/扫码可勾选；随协议类型/匹配列表一并读写
+const loginMethods = ref<SsoLoginMethod[]>(['PASSWORD'])
 // 6 个只读协议接口地址（路径部分），由后端按当前应用的 AppId 计算返回
 const authUrls = reactive({
   casLoginUrl: '',
@@ -559,6 +564,7 @@ function applyAuthConfig(data: AppAuthConfigVO) {
   authProtocol.value = data.authProtocol
   servicePatternRows.value = [...data.servicePatterns]
   logoutNotifyUrl.value = data.logoutNotifyUrl ?? ''
+  loginMethods.value = data.loginMethods && data.loginMethods.length > 0 ? [...data.loginMethods] : ['PASSWORD']
   authUrls.casLoginUrl = data.casLoginUrl
   authUrls.casServiceValidateUrl = data.casServiceValidateUrl
   authUrls.casLogoutUrl = data.casLogoutUrl
@@ -625,6 +631,9 @@ async function saveAuthConfig() {
       authProtocol: authProtocol.value,
       servicePatterns: servicePatternRows.value.map((row) => row.trim()).filter(Boolean),
       logoutNotifyUrl: logoutNotifyUrl.value.trim(),
+      // 口令恒定必选，即便前端 el-checkbox disabled 已阻止用户取消勾选，这里再兜底一次，
+      // 避免任何异常路径下提交出不含 PASSWORD 的列表（后端也会自动补齐，双重保险）
+      loginMethods: loginMethods.value.includes('PASSWORD') ? loginMethods.value : ['PASSWORD', ...loginMethods.value],
     })
     applyAuthConfig(data)
     ElMessage.success('保存成功')
@@ -1353,6 +1362,22 @@ function handlePullLogSizeChange(newSize: number) {
                 style="width: 420px"
                 placeholder="可选，单点登出时通知该地址，如 https://partner.example.com/sso/logout-notify"
               />
+            </el-form-item>
+
+            <el-form-item label="允许的登录认证方式">
+              <el-checkbox-group v-model="loginMethods">
+                <el-checkbox
+                  v-for="option in SSO_LOGIN_METHOD_OPTIONS"
+                  :key="option.value"
+                  :value="option.value"
+                  :disabled="option.disabled"
+                >
+                  {{ option.label }}
+                </el-checkbox>
+              </el-checkbox-group>
+              <div class="app-config__form-item-hint">
+                SSO 登录页仅展示这里勾选的认证方式；口令登录固定必选，不可取消。
+              </div>
             </el-form-item>
 
             <el-form-item label="回跳地址匹配列表">

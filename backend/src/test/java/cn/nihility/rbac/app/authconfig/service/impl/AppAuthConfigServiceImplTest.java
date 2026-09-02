@@ -30,6 +30,7 @@ import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.common.util.JacksonUtils;
 import cn.nihility.rbac.formfield.constant.FormFieldBizType;
+import cn.nihility.rbac.loginlog.constant.LoginMethod;
 import cn.nihility.rbac.metadata.constant.MetadataFieldStatus;
 import cn.nihility.rbac.metadata.entity.MetadataFieldEntity;
 import cn.nihility.rbac.metadata.mapper.MetadataFieldMapper;
@@ -108,6 +109,8 @@ class AppAuthConfigServiceImplTest {
         assertThat(captured.getAuthProtocol()).isEqualTo(AuthProtocol.NONE);
         assertThat(JacksonUtils.toObj(captured.getServicePatterns(), JacksonUtils.LIST_STRING_TYPE_REFERENCE))
                 .isEmpty();
+        assertThat(JacksonUtils.toObj(captured.getLoginMethods(), JacksonUtils.LIST_STRING_TYPE_REFERENCE))
+                .containsExactly(LoginMethod.PASSWORD);
         assertThat(captured.getCreateBy()).isEqualTo("1");
         assertThat(captured.getUpdateBy()).isEqualTo("1");
     }
@@ -131,6 +134,106 @@ class AppAuthConfigServiceImplTest {
         assertThat(vo.getOauthAuthorizeUrl()).isEqualTo("/api/authn/oauth/authorize");
         assertThat(vo.getOauthTokenUrl()).isEqualTo("/api/authn/oauth/token");
         assertThat(vo.getOauthUserInfoUrl()).isEqualTo("/api/authn/oauth/userinfo");
+    }
+
+    /**
+     * 存量数据 {@code loginMethods} 为空（未设置）时，查询应按仅允许口令登录处理
+     * （add-sso-login-methods change design.md Decision 1，防御性兼容）。
+     */
+    @Test
+    void getByAppId_shouldDefaultLoginMethodsToPasswordOnly_whenBlank() {
+        AppAuthConfigEntity entity = buildEntity(10L, AuthProtocol.NONE, List.of());
+        entity.setLoginMethods(null);
+        when(appAuthConfigMapper.selectOne(any())).thenReturn(entity);
+
+        AppAuthConfigVO vo = service.getByAppId(10L);
+
+        assertThat(vo.getLoginMethods()).containsExactly(LoginMethod.PASSWORD);
+    }
+
+    /**
+     * 已保存的 {@code loginMethods} 应原样返回。
+     */
+    @Test
+    void getByAppId_shouldReturnSavedLoginMethods() {
+        AppAuthConfigEntity entity = buildEntity(10L, AuthProtocol.NONE, List.of());
+        entity.setLoginMethods(JacksonUtils.toJson(List.of(LoginMethod.PASSWORD, LoginMethod.SMS)));
+        when(appAuthConfigMapper.selectOne(any())).thenReturn(entity);
+
+        AppAuthConfigVO vo = service.getByAppId(10L);
+
+        assertThat(vo.getLoginMethods()).containsExactlyInAnyOrder(LoginMethod.PASSWORD, LoginMethod.SMS);
+    }
+
+    /**
+     * 提交的登录认证方式列表缺少 {@code PASSWORD} 时应自动补齐，而不是拒绝请求
+     * （design.md Decision 1）。
+     */
+    @Test
+    void updateConfig_shouldAutoAddPassword_whenMissingFromLoginMethods() {
+        when(appMapper.selectById(10L)).thenReturn(buildAppEntity(10L, 100L));
+        when(appAuthConfigMapper.selectOne(any())).thenReturn(buildEntity(10L, AuthProtocol.NONE, List.of()));
+
+        AppAuthConfigUpdateRequest request = new AppAuthConfigUpdateRequest();
+        request.setAuthProtocol(AuthProtocol.NONE);
+        request.setLoginMethods(List.of(LoginMethod.QRCODE));
+
+        AppAuthConfigVO vo = service.updateConfig(10L, request);
+
+        assertThat(vo.getLoginMethods()).containsExactlyInAnyOrder(LoginMethod.PASSWORD, LoginMethod.QRCODE);
+    }
+
+    /**
+     * 未提交任何登录认证方式（{@code null}）时应保存为仅含 {@code PASSWORD}。
+     */
+    @Test
+    void updateConfig_shouldSavePasswordOnly_whenLoginMethodsNull() {
+        when(appMapper.selectById(10L)).thenReturn(buildAppEntity(10L, 100L));
+        when(appAuthConfigMapper.selectOne(any())).thenReturn(buildEntity(10L, AuthProtocol.NONE, List.of()));
+
+        AppAuthConfigUpdateRequest request = new AppAuthConfigUpdateRequest();
+        request.setAuthProtocol(AuthProtocol.NONE);
+        request.setLoginMethods(null);
+
+        AppAuthConfigVO vo = service.updateConfig(10L, request);
+
+        assertThat(vo.getLoginMethods()).containsExactly(LoginMethod.PASSWORD);
+    }
+
+    /**
+     * 提交非法的登录认证方式取值时应拒绝保存，不落库。
+     */
+    @Test
+    void updateConfig_shouldRejectInvalidLoginMethod() {
+        when(appMapper.selectById(10L)).thenReturn(buildAppEntity(10L, 100L));
+        when(appAuthConfigMapper.selectOne(any())).thenReturn(buildEntity(10L, AuthProtocol.NONE, List.of()));
+
+        AppAuthConfigUpdateRequest request = new AppAuthConfigUpdateRequest();
+        request.setAuthProtocol(AuthProtocol.NONE);
+        request.setLoginMethods(List.of("WECHAT"));
+
+        assertThatThrownBy(() -> service.updateConfig(10L, request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("非法的登录认证方式");
+        verify(appAuthConfigMapper, never()).updateById(any(AppAuthConfigEntity.class));
+    }
+
+    /**
+     * 合法提交的登录认证方式列表应原样保存（含 {@code PASSWORD} 本身不重复）。
+     */
+    @Test
+    void updateConfig_shouldSaveLoginMethods_whenValid() {
+        when(appMapper.selectById(10L)).thenReturn(buildAppEntity(10L, 100L));
+        when(appAuthConfigMapper.selectOne(any())).thenReturn(buildEntity(10L, AuthProtocol.NONE, List.of()));
+
+        AppAuthConfigUpdateRequest request = new AppAuthConfigUpdateRequest();
+        request.setAuthProtocol(AuthProtocol.NONE);
+        request.setLoginMethods(List.of(LoginMethod.PASSWORD, LoginMethod.SMS, LoginMethod.QRCODE));
+
+        AppAuthConfigVO vo = service.updateConfig(10L, request);
+
+        assertThat(vo.getLoginMethods())
+                .containsExactlyInAnyOrder(LoginMethod.PASSWORD, LoginMethod.SMS, LoginMethod.QRCODE);
     }
 
     /**

@@ -142,6 +142,34 @@ class LoginLogQueryServiceImplTest {
     }
 
     /**
+     * 按 loginMethod 精确匹配筛选时，查询条件应包含 loginMethod 等值限制，不包含
+     * loginAccount/loginResult 限制；返回行的 {@code loginMethodLabel} 应正确回填中文文案。
+     */
+    @Test
+    void getPage_shouldFilterByLoginMethod_whenProvided() {
+        LoginLogEntity entity = buildEntity(1L, "admin", LoginResult.SUCCESS);
+        entity.setLoginMethod(cn.nihility.rbac.loginlog.constant.LoginMethod.SMS);
+        Page<LoginLogEntity> resultPage = new Page<>(1, 10, 1L);
+        resultPage.setRecords(List.of(entity));
+        when(loginLogMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(resultPage);
+
+        LoginLogQueryRequest request = new LoginLogQueryRequest();
+        request.setLoginMethod(cn.nihility.rbac.loginlog.constant.LoginMethod.SMS);
+        request.setPage(1);
+        request.setPageSize(10);
+
+        var pageResult = loginLogQueryService.getPage(request);
+
+        assertThat(pageResult.getRecords().get(0).getLoginMethodLabel()).isEqualTo("短信验证码");
+
+        ArgumentCaptor<LambdaQueryWrapper<LoginLogEntity>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(loginLogMapper).selectPage(any(Page.class), captor.capture());
+        String sqlSegment = captor.getValue().getSqlSegment();
+        assertThat(sqlSegment).contains("login_method =");
+        assertThat(sqlSegment).doesNotContain("login_account =").doesNotContain("login_result =");
+    }
+
+    /**
      * 构造一个测试用的登录日志实体。
      *
      * @param id           主键 id

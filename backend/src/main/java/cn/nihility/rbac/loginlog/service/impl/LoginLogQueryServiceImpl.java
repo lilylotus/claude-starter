@@ -1,6 +1,7 @@
 package cn.nihility.rbac.loginlog.service.impl;
 
 import cn.nihility.rbac.common.result.PageResult;
+import cn.nihility.rbac.loginlog.constant.LoginMethod;
 import cn.nihility.rbac.loginlog.constant.LoginResult;
 import cn.nihility.rbac.loginlog.dto.LoginLogQueryRequest;
 import cn.nihility.rbac.loginlog.dto.LoginLogVO;
@@ -34,6 +35,7 @@ public class LoginLogQueryServiceImpl implements LoginLogQueryService {
                 .eq(StringUtils.hasText(request.getLoginAccount()),
                         LoginLogEntity::getLoginAccount, request.getLoginAccount())
                 .eq(request.getLoginResult() != null, LoginLogEntity::getLoginResult, request.getLoginResult())
+                .eq(StringUtils.hasText(request.getLoginMethod()), LoginLogEntity::getLoginMethod, request.getLoginMethod())
                 .ge(request.getStartTime() != null, LoginLogEntity::getCreateTime, request.getStartTime())
                 .le(request.getEndTime() != null, LoginLogEntity::getCreateTime, request.getEndTime())
                 .orderByDesc(LoginLogEntity::getCreateTime);
@@ -44,6 +46,7 @@ public class LoginLogQueryServiceImpl implements LoginLogQueryService {
         List<LoginLogVO> records = LoginLogConvert.INSTANCE.toVOList(resultPage.getRecords());
         for (LoginLogVO vo : records) {
             vo.setLoginResultLabel(LoginResult.label(vo.getLoginResult()));
+            vo.setLoginMethodLabel(LoginMethod.label(vo.getLoginMethod()));
         }
         return PageResult.of(records, resultPage);
     }

@@ -160,6 +160,14 @@ const router = createRouter({
       meta: { title: '单点登录' },
     },
     {
+      // 扫码登录确认页：手机浏览器扫码后打开的独立响应式页面，与 SSO 登录页同属"未登录
+      // 外部浏览器可访问"的豁免范围，不挂在 AppLayout 下、不设 requiresAuth
+      path: '/sso/qrcode/confirm',
+      name: 'sso-qrcode-confirm',
+      component: () => import('@/views/sso/SsoQrcodeConfirmView.vue'),
+      meta: { title: '扫码登录确认' },
+    },
+    {
       // 首登强制改密页面：不挂在 menu.ts 侧边栏菜单下（不是主动导航入口，是登录后
       // firstLogin=true 时被动跳转进入），因此不出现在侧边栏，也不在权限资源.txt 里
       // 登记为一个独立的可访问菜单资源；但 POST /api/auth/password 本身仍属于"业务接口"，

@@ -228,6 +228,23 @@ rbac:
     # design.md Decision 6，刷新时轮转签发新值，接入方须保证至少每天刷新一次）。
     oauth-refresh-token-expire-seconds: 86400
 
+  # SSO 短信验证码登录配置（add-sso-login-methods change design.md Decision 4），
+  # 全部为默认值，此处显式列出便于按需覆盖。
+  sms:
+    # 验证码有效期（秒），默认 300 秒（5 分钟）。
+    code-expire-seconds: 300
+    # 同一手机号两次发送验证码之间的最小间隔（秒），默认 60 秒。
+    cooldown-seconds: 60
+    # 同一手机号每日最多可发送验证码次数，默认 10 次。
+    daily-limit: 10
+    # 同一手机号连续校验失败的最大次数，达到后当前验证码失效需重新获取，默认 5 次。
+    max-attempts: 5
+
+  # SSO 扫码登录配置（add-sso-login-methods change design.md Decision 5）。
+  qrcode:
+    # 二维码登录会话有效期（秒），默认 300 秒（5 分钟）。
+    session-expire-seconds: 300
+
   # 登录日志/操作日志定期清理配置（close-sso-log-and-policy-gaps change design.md
   # Decision 4），两张表共用同一份 cron/保留天数配置，全部为默认值，此处显式列出便于按需覆盖。
   log-cleanup:

@@ -35,6 +35,14 @@ public class AppAuthConfigUpdateRequest {
     @Schema(description = "回跳地址 ANT 匹配规则列表，协议类型为 CAS 或 OAuth2.0 时至少一条")
     private List<String> servicePatterns;
 
+    /**
+     * 允许的登录认证方式，取值 {@code PASSWORD}/{@code SMS}/{@code QRCODE} 的子集，出现
+     * 取值范围外的字符串直接拒绝；缺少 {@code PASSWORD} 时由服务端自动补齐，不拒绝请求
+     * （service 层校验）。
+     */
+    @Schema(description = "允许的登录认证方式，取值 PASSWORD/SMS/QRCODE 的子集，缺少 PASSWORD 时服务端自动补齐")
+    private List<String> loginMethods;
+
     /** 登出通知回调地址，可选，允许留空；非空时必须是合法的 http/https URL（service 层校验）。 */
     @Size(max = 255, message = "登出通知回调地址长度不能超过 255 个字符")
     @Schema(description = "登出通知回调地址，可选，非空时必须是合法的 http/https URL")

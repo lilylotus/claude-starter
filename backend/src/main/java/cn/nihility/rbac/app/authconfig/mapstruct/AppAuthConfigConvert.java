@@ -26,6 +26,7 @@ public interface AppAuthConfigConvert {
      * @return 应用单点登录协议配置视图对象
      */
     @Mapping(target = "servicePatterns", ignore = true)
+    @Mapping(target = "loginMethods", ignore = true)
     @Mapping(target = "casLoginUrl", ignore = true)
     @Mapping(target = "casServiceValidateUrl", ignore = true)
     @Mapping(target = "casLogoutUrl", ignore = true)

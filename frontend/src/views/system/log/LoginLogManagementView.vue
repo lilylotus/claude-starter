@@ -4,13 +4,21 @@ import { QuestionFilled } from '@element-plus/icons-vue'
 import * as loginLogApi from '@/api/loginLog'
 import SsoProtocolLogDialog from '@/components/SsoProtocolLogDialog.vue'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '@/constants/pagination'
-import { LOGIN_RESULT_OPTIONS, LOGIN_RESULT_SUCCESS, type LoginLogRow } from '@/types/loginLog'
+import {
+  LOGIN_METHOD_LABELS,
+  LOGIN_METHOD_OPTIONS,
+  LOGIN_RESULT_OPTIONS,
+  LOGIN_RESULT_SUCCESS,
+  type LoginLogRow,
+  type LoginMethod,
+} from '@/types/loginLog'
 
 // ---- 筛选栏 + 分页表格 ----
 
 const filters = reactive({
   loginAccount: '',
   loginResult: undefined as number | undefined,
+  loginMethod: undefined as LoginMethod | undefined,
 })
 
 // datetimerange 选择器绑定值：value-format 为 'YYYY-MM-DDTHH:mm:ss'，未选择时为 null
@@ -28,6 +36,7 @@ async function fetchList() {
     const result = await loginLogApi.getLoginLogPage({
       loginAccount: filters.loginAccount.trim() || undefined,
       loginResult: filters.loginResult,
+      loginMethod: filters.loginMethod,
       startTime: dateRange.value?.[0],
       endTime: dateRange.value?.[1],
       page: page.value,
@@ -54,6 +63,7 @@ function handleSearch() {
 function handleReset() {
   filters.loginAccount = ''
   filters.loginResult = undefined
+  filters.loginMethod = undefined
   dateRange.value = null
   page.value = 1
   fetchList()
@@ -119,6 +129,11 @@ function openSsoProtocolLogDialog(row: LoginLogRow) {
             <el-option v-for="opt in LOGIN_RESULT_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
           </el-select>
         </el-form-item>
+        <el-form-item label="登录方式">
+          <el-select v-model="filters.loginMethod" placeholder="全部方式" clearable style="width: 120px">
+            <el-option v-for="opt in LOGIN_METHOD_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="登录时间">
           <el-date-picker
             v-model="dateRange"
@@ -149,6 +164,9 @@ function openSsoProtocolLogDialog(row: LoginLogRow) {
               {{ (row as LoginLogRow).loginResultLabel }}
             </el-tag>
           </template>
+        </el-table-column>
+        <el-table-column label="登录方式" width="90">
+          <template #default="{ row }">{{ LOGIN_METHOD_LABELS[(row as LoginLogRow).loginMethod] }}</template>
         </el-table-column>
         <el-table-column label="失败原因" min-width="140">
           <template #default="{ row }">{{ displayValue((row as LoginLogRow).failReason) }}</template>

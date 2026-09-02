@@ -65,6 +65,12 @@ public class LoginLogEntity {
      */
     private String sessionId;
 
+    /**
+     * 登录方式：{@code PASSWORD}=口令，{@code SMS}=短信验证码，{@code QRCODE}=扫码，
+     * 见 {@code LoginMethod}（add-sso-login-methods change design.md Decision 7）。
+     */
+    private String loginMethod;
+
     /** 创建人，即本次登录尝试提交的账号，为空时存固定值 {@code "unknown"}。 */
     private String createBy;
 

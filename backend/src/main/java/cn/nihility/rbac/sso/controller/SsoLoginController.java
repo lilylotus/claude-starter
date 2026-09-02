@@ -12,9 +12,11 @@ import cn.nihility.rbac.loginlog.service.LoginLogRecorder;
 import cn.nihility.rbac.sso.config.RbacSsoProperties;
 import cn.nihility.rbac.sso.dto.SsoLoginRequest;
 import cn.nihility.rbac.sso.dto.SsoLoginResponse;
+import cn.nihility.rbac.sso.dto.SsoSessionStatusVO;
 import cn.nihility.rbac.sso.session.SsoSessionCookieUtils;
 import cn.nihility.rbac.sso.session.SsoSessionIdHasher;
 import cn.nihility.rbac.sso.session.SsoSessionService;
+import cn.nihility.rbac.sso.support.SsoLoginContextResolver;
 import cn.nihility.rbac.user.constant.UserStatus;
 import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
@@ -24,12 +26,14 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
+import java.util.List;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -62,6 +66,39 @@ public class SsoLoginController {
 
     /** 登录日志记录组件，记录每一次 SSO 登录尝试（成功 + 失败），与管理端口令登录复用同一套记录粒度。 */
     private final LoginLogRecorder loginLogRecorder;
+
+    /** SSO 登录上下文解析器，按 {@code redirect} 反解出目标应用当前允许的登录认证方式。 */
+    private final SsoLoginContextResolver ssoLoginContextResolver;
+
+    /**
+     * 查询本次 SSO 登录允许展示的登录认证方式列表，登录页首屏据此决定展示哪些 Tab。
+     * {@code redirect} 缺失或无法解析归属应用时，保守返回仅含 {@code PASSWORD} 的列表，
+     * 页面退化为当前"只有口令表单"的样式（add-sso-login-methods change design.md Decision 3）。
+     *
+     * @param redirect SSO 登录页 {@code redirect} 参数原始值，可为空
+     * @return 允许的登录认证方式列表
+     */
+    @Operation(summary = "查询登录认证方式", description = "按 redirect 反解出目标应用，返回其允许的登录认证方式列表，"
+            + "无法识别时保守返回仅含 PASSWORD 的列表，无需身份校验")
+    @GetMapping("/api/authn/sso/login-methods")
+    public List<String> loginMethods(@RequestParam(required = false) String redirect) {
+        return ssoLoginContextResolver.resolve(redirect).allowedLoginMethods();
+    }
+
+    /**
+     * 查询当前请求携带的 SSO 会话 Cookie 是否有效，供扫码登录手机浏览器确认页判断"当前是否
+     * 已完成登录"使用。
+     *
+     * @param request 当前请求
+     * @return SSO 会话登录态查询结果
+     */
+    @Operation(summary = "查询当前 SSO 会话登录态", description = "校验当前请求携带的 SSO 会话 Cookie 是否有效，无需身份校验")
+    @GetMapping("/api/authn/sso/session/status")
+    public SsoSessionStatusVO sessionStatus(HttpServletRequest request) {
+        String sessionToken = SsoSessionCookieUtils.extractSessionToken(request);
+        boolean authenticated = ssoSessionService.verify(sessionToken).isPresent();
+        return SsoSessionStatusVO.builder().authenticated(authenticated).build();
+    }
 
     /**
      * 获取当前生效的 RSA 公钥（与管理端登录复用同一份密钥材料）。

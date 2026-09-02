@@ -21,6 +21,10 @@ public class LoginLogQueryRequest {
     @Schema(description = "登录结果：1=成功，2=失败")
     private Integer loginResult;
 
+    /** 登录方式，精确匹配，可选：PASSWORD=口令，SMS=短信验证码，QRCODE=扫码。 */
+    @Schema(description = "登录方式：PASSWORD=口令，SMS=短信验证码，QRCODE=扫码")
+    private String loginMethod;
+
     /** 登录时间范围起点（含），可选。 */
     @Schema(description = "登录时间范围起点（含）")
     private LocalDateTime startTime;

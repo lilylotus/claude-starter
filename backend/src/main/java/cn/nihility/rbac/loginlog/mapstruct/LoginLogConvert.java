@@ -18,13 +18,14 @@ public interface LoginLogConvert {
     LoginLogConvert INSTANCE = Mappers.getMapper(LoginLogConvert.class);
 
     /**
-     * 实体转列表行视图对象，{@code loginResultLabel}（登录结果中文文案）由服务层
-     * 另行赋值，不参与本次转换。
+     * 实体转列表行视图对象，{@code loginResultLabel}/{@code loginMethodLabel}（结果/登录方式
+     * 中文文案）由服务层另行赋值，不参与本次转换。
      *
      * @param entity 登录日志实体
      * @return 列表行视图对象
      */
     @Mapping(target = "loginResultLabel", ignore = true)
+    @Mapping(target = "loginMethodLabel", ignore = true)
     LoginLogVO toVO(LoginLogEntity entity);
 
     /**

@@ -29,6 +29,10 @@ public class AppAuthConfigVO {
     @Schema(description = "回跳地址 ANT 匹配规则列表，CAS/OAuth2.0 等协议共用同一份存储")
     private List<String> servicePatterns;
 
+    /** 允许的登录认证方式，取值 PASSWORD/SMS/QRCODE 的子集，PASSWORD 恒定包含。 */
+    @Schema(description = "允许的登录认证方式，取值 PASSWORD/SMS/QRCODE 的子集，PASSWORD 恒定包含")
+    private List<String> loginMethods;
+
     /** 登出通知回调地址，未配置时为空。 */
     @Schema(description = "登出通知回调地址，单点登出时系统按此地址回调通知该应用，未配置时为空")
     private String logoutNotifyUrl;
