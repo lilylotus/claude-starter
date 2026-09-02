@@ -2,10 +2,13 @@ package cn.nihility.rbac.common.util;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.util.StringUtils;
 
 /**
@@ -27,6 +30,35 @@ public final class RedisUtils {
 
     /** 由 Spring 启动阶段注入的字符串 Redis 模板，脱离容器时为 {@code null}。 */
     private static volatile StringRedisTemplate stringRedisTemplate;
+
+    /**
+     * "按预期值比较后删除"的 Lua 脚本：仅当 key 当前值等于传入的预期值时才删除，比较与删除
+     * 在一次 Redis 调用内原子完成，避免"先 GET 判断再 DEL"两步式写法在并发下出现误删（如
+     * A 的锁已过期被 B 重新持有后，A 迟到的解锁请求删掉了 B 的锁）。供 {@link #compareAndDelete}
+     * 使用。
+     */
+    private static final String COMPARE_AND_DELETE_SCRIPT =
+            "if redis.call('get', KEYS[1]) == ARGV[1] then "
+                    + "return redis.call('del', KEYS[1]) "
+                    + "else return 0 end";
+
+    /**
+     * "按预期值比较后续期"的 Lua 脚本：仅当 key 当前值等于传入的预期值时才重设过期时间
+     * （{@code ARGV[2]} 为毫秒数），与 {@link #COMPARE_AND_DELETE_SCRIPT} 同样的比较模式，
+     * 只是把"删除"换成"重设过期时间"。供 {@link #compareAndExpire} 使用。
+     */
+    private static final String COMPARE_AND_EXPIRE_SCRIPT =
+            "if redis.call('get', KEYS[1]) == ARGV[1] then "
+                    + "return redis.call('pexpire', KEYS[1], ARGV[2]) "
+                    + "else return 0 end";
+
+    /** {@link #COMPARE_AND_DELETE_SCRIPT} 对应的可执行脚本对象，返回值类型为 {@link Long}。 */
+    private static final RedisScript<Long> COMPARE_AND_DELETE_REDIS_SCRIPT =
+            new DefaultRedisScript<>(COMPARE_AND_DELETE_SCRIPT, Long.class);
+
+    /** {@link #COMPARE_AND_EXPIRE_SCRIPT} 对应的可执行脚本对象，返回值类型为 {@link Long}。 */
+    private static final RedisScript<Long> COMPARE_AND_EXPIRE_REDIS_SCRIPT =
+            new DefaultRedisScript<>(COMPARE_AND_EXPIRE_SCRIPT, Long.class);
 
     /**
      * 工具类不允许实例化。
@@ -115,6 +147,59 @@ public final class RedisUtils {
     public static Optional<String> get(String key) {
         String value = template().opsForValue().get(key);
         return StringUtils.hasText(value) ? Optional.of(value) : Optional.empty();
+    }
+
+    /**
+     * 原子地"仅当 key 当前不存在时写入该值并设置过期时间"（底层为 Redis
+     * {@code SET key value NX PX}，Spring Data Redis 原生支持的原子操作，一次往返即可完成，
+     * 不需要额外 Lua 脚本）。这是一个通用原子操作，不止分布式锁（{@code DistributedLockService}）
+     * 能用，也可被其他"首次执行标记"之类的幂等控制场景复用。
+     *
+     * @param key     Redis key
+     * @param value   待写入的值
+     * @param timeout 过期时间数值
+     * @param unit    过期时间单位
+     * @return 是否设置成功：{@code true} 表示 key 此前不存在、本次设置生效；{@code false}
+     *         表示 key 已存在，未做任何修改（原值与过期时间均不受影响）
+     */
+    public static boolean setIfAbsent(String key, String value, long timeout, TimeUnit unit) {
+        Boolean result = template().opsForValue().setIfAbsent(key, value, timeout, unit);
+        return Boolean.TRUE.equals(result);
+    }
+
+    /**
+     * 原子地"仅当 key 当前值等于 {@code expectedValue} 时才删除该 key"（底层用 Lua 脚本
+     * 实现，保证比较与删除在一次 Redis 调用内完成，不存在中间态被其他调用方读到或修改的
+     * 窗口）。这是一个通用原子操作（"按预期值比较后删除"），不专属于分布式锁的解锁场景，也可
+     * 被其他"按 token/版本号比较后删除"的场景复用。
+     *
+     * @param key           Redis key
+     * @param expectedValue 预期当前值
+     * @return 是否实际删除：{@code key} 不存在、或当前值与 {@code expectedValue} 不相等时
+     *         返回 {@code false}，不做任何修改
+     */
+    public static boolean compareAndDelete(String key, String expectedValue) {
+        Long result = template().execute(COMPARE_AND_DELETE_REDIS_SCRIPT, List.of(key), expectedValue);
+        return result != null && result != 0L;
+    }
+
+    /**
+     * 原子地"仅当 key 当前值等于 {@code expectedValue} 时才重新设置其过期时间"（底层用 Lua
+     * 脚本实现，保证比较与续期在一次 Redis 调用内完成）。这是一个通用原子操作（"按预期值比较
+     * 后续期"），供分布式锁看门狗续期使用，同样不专属于锁场景，未来其他"按 token 续期一个短
+     * 生命周期状态"的场景可直接复用。
+     *
+     * @param key           Redis key
+     * @param expectedValue 预期当前值
+     * @param timeout       过期时间数值
+     * @param unit          过期时间单位
+     * @return 是否实际续期成功：{@code key} 不存在、或当前值与 {@code expectedValue} 不相等
+     *         时返回 {@code false}，不修改其过期时间
+     */
+    public static boolean compareAndExpire(String key, String expectedValue, long timeout, TimeUnit unit) {
+        String millis = String.valueOf(unit.toMillis(timeout));
+        Long result = template().execute(COMPARE_AND_EXPIRE_REDIS_SCRIPT, List.of(key), expectedValue, millis);
+        return result != null && result != 0L;
     }
 
     /**

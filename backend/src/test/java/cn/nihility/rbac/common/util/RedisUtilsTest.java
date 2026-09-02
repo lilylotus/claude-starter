@@ -171,6 +171,110 @@ class RedisUtilsTest {
     }
 
     /**
+     * 首次调用 {@link RedisUtils#setIfAbsent} 时 key 不存在，应写入成功。
+     */
+    @Test
+    void setIfAbsent_shouldSucceed_whenKeyMissing() {
+        String key = trackedKey("set-if-absent-missing");
+
+        boolean result = RedisUtils.setIfAbsent(key, "first", 30, TimeUnit.SECONDS);
+
+        assertThat(result).isTrue();
+        assertThat(RedisUtils.get(key)).contains("first");
+    }
+
+    /**
+     * 二次调用 {@link RedisUtils#setIfAbsent} 时 key 已存在，应写入失败且不覆盖原值。
+     */
+    @Test
+    void setIfAbsent_shouldFail_whenKeyAlreadyExists() {
+        String key = trackedKey("set-if-absent-existing");
+        RedisUtils.setIfAbsent(key, "first", 30, TimeUnit.SECONDS);
+
+        boolean result = RedisUtils.setIfAbsent(key, "second", 30, TimeUnit.SECONDS);
+
+        assertThat(result).isFalse();
+        assertThat(RedisUtils.get(key)).contains("first");
+    }
+
+    /**
+     * {@link RedisUtils#compareAndDelete} 当前值匹配时应删除成功。
+     */
+    @Test
+    void compareAndDelete_shouldRemoveKey_whenValueMatches() {
+        String key = trackedKey("compare-and-delete-match");
+        RedisUtils.set(key, "token-1");
+
+        boolean result = RedisUtils.compareAndDelete(key, "token-1");
+
+        assertThat(result).isTrue();
+        assertThat(RedisUtils.hasKey(key)).isFalse();
+    }
+
+    /**
+     * {@link RedisUtils#compareAndDelete} 当前值不匹配时不应删除，原值保留。
+     */
+    @Test
+    void compareAndDelete_shouldNotRemoveKey_whenValueMismatches() {
+        String key = trackedKey("compare-and-delete-mismatch");
+        RedisUtils.set(key, "token-1");
+
+        boolean result = RedisUtils.compareAndDelete(key, "token-2");
+
+        assertThat(result).isFalse();
+        assertThat(RedisUtils.get(key)).contains("token-1");
+    }
+
+    /**
+     * {@link RedisUtils#compareAndDelete} key 不存在时不应删除（也不应抛异常）。
+     */
+    @Test
+    void compareAndDelete_shouldReturnFalse_whenKeyMissing() {
+        boolean result = RedisUtils.compareAndDelete(trackedKey("compare-and-delete-missing"), "token-1");
+
+        assertThat(result).isFalse();
+    }
+
+    /**
+     * {@link RedisUtils#compareAndExpire} 当前值匹配时应续期成功。
+     */
+    @Test
+    void compareAndExpire_shouldRenewTtl_whenValueMatches() {
+        String key = trackedKey("compare-and-expire-match");
+        RedisUtils.set(key, "token-1");
+
+        boolean result = RedisUtils.compareAndExpire(key, "token-1", 30, TimeUnit.SECONDS);
+
+        assertThat(result).isTrue();
+        assertThat(RedisUtils.getExpire(key, TimeUnit.SECONDS)).isGreaterThan(0L);
+    }
+
+    /**
+     * {@link RedisUtils#compareAndExpire} 当前值不匹配时不应续期。
+     */
+    @Test
+    void compareAndExpire_shouldNotRenewTtl_whenValueMismatches() {
+        String key = trackedKey("compare-and-expire-mismatch");
+        RedisUtils.set(key, "token-1");
+
+        boolean result = RedisUtils.compareAndExpire(key, "token-2", 30, TimeUnit.SECONDS);
+
+        assertThat(result).isFalse();
+        assertThat(RedisUtils.getExpire(key, TimeUnit.SECONDS)).isEqualTo(-1L);
+    }
+
+    /**
+     * {@link RedisUtils#compareAndExpire} key 不存在时不应续期（也不应抛异常）。
+     */
+    @Test
+    void compareAndExpire_shouldReturnFalse_whenKeyMissing() {
+        boolean result = RedisUtils.compareAndExpire(trackedKey("compare-and-expire-missing"), "token-1", 30,
+                TimeUnit.SECONDS);
+
+        assertThat(result).isFalse();
+    }
+
+    /**
      * 生成一个带前缀的测试 key，并记录下来供 {@link #cleanup()} 统一清理。
      *
      * @param suffix key 后缀
