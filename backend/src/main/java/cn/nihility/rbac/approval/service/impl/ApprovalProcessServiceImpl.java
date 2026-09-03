@@ -1,77 +1,68 @@
 package cn.nihility.rbac.approval.service.impl;
 
-import cn.nihility.rbac.approval.dto.ApprovalProcessInstance;
 import cn.nihility.rbac.approval.service.ApprovalProcessService;
-import cn.nihility.rbac.common.exception.BusinessException;
-import java.util.Map;
+import cn.nihility.rbac.workflow.constant.WorkflowConstants;
+import cn.nihility.rbac.workflow.dto.ApproveCommand;
+import cn.nihility.rbac.workflow.dto.RejectCommand;
+import cn.nihility.rbac.workflow.dto.StartProcessCommand;
+import cn.nihility.rbac.workflow.dto.WithdrawCommand;
+import cn.nihility.rbac.workflow.dto.WorkflowInstanceResult;
+import cn.nihility.rbac.workflow.engine.WorkflowService;
 import lombok.RequiredArgsConstructor;
-import org.flowable.engine.RuntimeService;
-import org.flowable.engine.TaskService;
-import org.flowable.engine.runtime.ProcessInstance;
-import org.flowable.task.api.Task;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 
 /**
- * 基于 Flowable RuntimeService/TaskService 的审批流程操作实现。
+ * 基于通用审批引擎 {@link WorkflowService} 的主数据审批流程操作实现，业务代码之外不再直接
+ * 依赖 Flowable 的 {@code RuntimeService}/{@code TaskService}（workflow-approval-engine change
+ * design.md Decision 8）。
  */
 @Service
 @RequiredArgsConstructor
 public class ApprovalProcessServiceImpl implements ApprovalProcessService {
 
-    /** BPMN 流程定义 key。 */
-    private static final String PROCESS_DEFINITION_KEY = "masterDataApprovalProcess";
+    /** 主数据变更审批流程业务侧编码，关联 {@code tab_wf_process_model.process_code}。 */
+    private static final String PROCESS_CODE = WorkflowConstants.MASTER_DATA_APPROVAL_PROCESS_CODE;
 
-    /** Flowable 运行时服务。 */
-    private final RuntimeService runtimeService;
-
-    /** Flowable 用户任务服务。 */
-    private final TaskService taskService;
+    /** 通用审批引擎接口。 */
+    private final WorkflowService workflowService;
 
     /**
      * {@inheritDoc}
      */
     @Override
-    public ApprovalProcessInstance start(Long requestId) {
-        ProcessInstance processInstance = runtimeService.startProcessInstanceByKey(
-                PROCESS_DEFINITION_KEY,
-                requestId.toString(),
-                Map.of("requestId", requestId));
-        Task task = taskService.createTaskQuery()
-                .processInstanceId(processInstance.getId())
-                .singleResult();
-        if (task == null) {
-            throw new BusinessException("审批流程未生成待处理任务");
-        }
-        return new ApprovalProcessInstance(processInstance.getId(), task.getId());
+    public WorkflowInstanceResult start(Long requestId, String bizType, Long applicantId, Long applicantOrgId) {
+        return workflowService.start(new StartProcessCommand(
+                PROCESS_CODE,
+                bizType,
+                requestId,
+                "主数据变更审批申请#" + requestId,
+                applicantId,
+                applicantOrgId,
+                null,
+                null));
     }
 
     /**
      * {@inheritDoc}
      */
     @Override
-    public void complete(String taskId, Long approverId, boolean approved) {
-        Task task = taskService.createTaskQuery().taskId(taskId).singleResult();
-        if (task == null) {
-            throw new BusinessException("审批任务不存在或已处理");
-        }
-        taskService.claim(taskId, approverId.toString());
-        taskService.complete(taskId, Map.of("approved", approved));
+    public void approve(Long taskId, Long approverId, String opinion) {
+        workflowService.approve(new ApproveCommand(taskId, approverId, opinion, null));
     }
 
     /**
      * {@inheritDoc}
      */
     @Override
-    public void terminate(String processInstanceId) {
-        if (!StringUtils.hasText(processInstanceId)) {
-            return;
-        }
-        ProcessInstance processInstance = runtimeService.createProcessInstanceQuery()
-                .processInstanceId(processInstanceId)
-                .singleResult();
-        if (processInstance != null) {
-            runtimeService.deleteProcessInstance(processInstanceId, "申请人撤回审批申请");
-        }
+    public void reject(Long taskId, Long approverId, String opinion) {
+        workflowService.reject(new RejectCommand(taskId, approverId, opinion, null));
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void withdraw(Long processInstanceId, Long operatorId) {
+        workflowService.withdraw(new WithdrawCommand(processInstanceId, operatorId, null, null));
     }
 }

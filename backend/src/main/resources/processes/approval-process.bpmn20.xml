@@ -1,15 +1,32 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  主数据变更审批流程定义（add-master-data-approval-workflow change design.md
-  Decision 3）：开始事件 -> 用户任务"审批" -> 排他网关按 approved 流程变量分流 ->
-  "已通过"/"已拒绝"两个结束事件。仅用于驱动审批申请的状态机与审计轨迹：
-  - 用户任务不设置 flowable:candidateGroups/flowable:candidateUsers，谁能处理该任务
-    完全由项目自有的 ApprovalManagement:request:approve 权限点判断，不引入 Flowable
-    IDM 身份/候选组机制（design.md Decision 3）。
-  - 流程变量 requestId 携带对应 tab_approval_request.id，供追溯；approved 变量在
-    完成用户任务时由 ApprovalProcessService 设置，驱动排他网关分流。
-  - 单一用户任务节点，为后续从单级审批演进到多级审批预留空间（新增/调整本文件
-    即可，不需要重写审批申请的数据模型或四个业务模块的接入方式）。
+  主数据变更审批流程定义，两级审批版本（workflow-approval-engine change design.md
+  Decision 8）：开始事件 -> 用户任务"部门负责人审批"(deptLeaderApprove) -> 排他网关按
+  approved 流程变量分流：驳回直接进入"已拒绝"结束事件（不产生新的用户任务，Reject 与
+  Return 语义区分 Requirement 的字面要求——任一级驳回都必须直接终止，不是只有最后一级
+  才能终止），通过则进入用户任务"安全管理员审批"(securityAdminApprove) -> 第二个排他网关
+  再次按 approved 分流到"已通过"/"已拒绝"。process id 保持 masterDataApprovalProcess 不变
+  （Flowable 按 key 自动生成新 version，历史运行中实例继续按其发布时刻的旧版本运行，
+  不受影响）。
+
+  - 两个用户任务均不再由 Java 分支硬编码审批人，而是各自挂
+    flowable:taskListener event="create" 指向
+    cn.nihility.rbac.workflow.engine.flowable.WorkflowAssigneeTaskListener：该监听器由
+    Flowable 部署产生的 flowable_definition_id 反查 tab_wf_process_definition.id，再按
+    (process_definition_id, taskDefinitionKey) 查 tab_wf_node_assignee_rule 解析实际审批人
+    （见同一迁移引入的 V7__add_workflow_engine_tables.sql 种子数据：deptLeaderApprove 配置
+    为 assignee_type=ORG_LEADER，securityAdminApprove 配置为 assignee_type=ROLE、
+    assignee_value=SECURITY_ADMIN），不依赖硬编码在 Java 分支中的业务判断，调整审批级数/
+    换审批角色只需改数据，不需要重新发布本 BPMN。
+  - 本流程同时是 tab_wf_process_model 里 processCode=MASTER_DATA_APPROVAL 的初始版本
+    （version=1），随 Flyway 迁移预置对应的 tab_wf_process_model（status=PUBLISHED）与
+    tab_wf_process_definition 行，应用启动完成部署后由 WorkflowDefinitionBackfillRunner
+    把实际部署产生的 flowable_definition_id 回填进去。默认流程从第一天起就纳入同一套版本
+    模型，后续业务方需要调整这两级审批规则时可以直接在（后续批次落地的）设计器里编辑并
+    发布新版本，不需要区分"手写的初始流程"和"设计器创建的流程"两条代码路径。
+  - 流程变量 requestId 携带对应 tab_approval_request.id（历史遗留兼容字段，四个业务模块
+    改造为经由 WorkflowService 驱动属于第 8 节任务范围，本次未改动 approval 包）；approved
+    变量在完成用户任务时设置，驱动排他网关分流。
 -->
 <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -20,7 +37,19 @@
 
         <startEvent id="startEvent" name="提交审批申请" />
 
-        <userTask id="approveTask" name="审批" />
+        <userTask id="deptLeaderApprove" name="部门负责人审批">
+            <extensionElements>
+                <flowable:taskListener event="create"
+                                        class="cn.nihility.rbac.workflow.engine.flowable.WorkflowAssigneeTaskListener" />
+            </extensionElements>
+        </userTask>
+
+        <userTask id="securityAdminApprove" name="安全管理员审批">
+            <extensionElements>
+                <flowable:taskListener event="create"
+                                        class="cn.nihility.rbac.workflow.engine.flowable.WorkflowAssigneeTaskListener" />
+            </extensionElements>
+        </userTask>
 
         <exclusiveGateway id="approveGateway" name="审批结果判断" />
 
@@ -28,15 +57,27 @@
 
         <endEvent id="rejectedEndEvent" name="已拒绝" />
 
-        <sequenceFlow id="flowStartToApprove" sourceRef="startEvent" targetRef="approveTask" />
+        <sequenceFlow id="flowStartToDeptLeader" sourceRef="startEvent" targetRef="deptLeaderApprove" />
 
-        <sequenceFlow id="flowApproveToGateway" sourceRef="approveTask" targetRef="approveGateway" />
+        <sequenceFlow id="flowDeptLeaderToGateway" sourceRef="deptLeaderApprove" targetRef="approveGateway" />
 
-        <sequenceFlow id="flowApprovedEnd" sourceRef="approveGateway" targetRef="approvedEndEvent">
+        <sequenceFlow id="flowDeptLeaderApprovedToSecurityAdmin" sourceRef="approveGateway" targetRef="securityAdminApprove">
             <conditionExpression xsi:type="tFormalExpression"><![CDATA[${approved == true}]]></conditionExpression>
         </sequenceFlow>
 
-        <sequenceFlow id="flowRejectedEnd" sourceRef="approveGateway" targetRef="rejectedEndEvent">
+        <sequenceFlow id="flowDeptLeaderRejectedEnd" sourceRef="approveGateway" targetRef="rejectedEndEvent">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${approved == false}]]></conditionExpression>
+        </sequenceFlow>
+
+        <sequenceFlow id="flowSecurityAdminToGateway" sourceRef="securityAdminApprove" targetRef="finalGateway" />
+
+        <exclusiveGateway id="finalGateway" name="最终审批结果判断" />
+
+        <sequenceFlow id="flowFinalApprovedEnd" sourceRef="finalGateway" targetRef="approvedEndEvent">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${approved == true}]]></conditionExpression>
+        </sequenceFlow>
+
+        <sequenceFlow id="flowFinalRejectedEnd" sourceRef="finalGateway" targetRef="rejectedEndEvent">
             <conditionExpression xsi:type="tFormalExpression"><![CDATA[${approved == false}]]></conditionExpression>
         </sequenceFlow>
 

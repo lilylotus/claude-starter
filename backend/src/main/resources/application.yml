@@ -74,9 +74,11 @@ mybatis-plus:
 flowable:
   # Flowable 自身的 ACT_* 系列表由其官方版本演进管理，不纳入本项目 Flyway 迁移。
   # 首次部署先在空 schema 执行 db/flowable/flowable.mysql.create.7.2.0.sql，再启动应用；
-  # 运行时只校验已初始化的 Flowable schema，不自动建表或升级。
-  # 生产环境禁止自动建表/改表，用flowable-db-schema工具单独执行DDL
-  database-schema-update: true
+  # 运行时只校验已初始化的 Flowable schema，不自动建表或升级。生产环境禁止自动建表/改表，
+  # 升级 Flowable 版本需要改表时用 flowable-db-schema 工具单独执行 DDL
+  # （workflow-approval-engine change design.md Decision 12，此前误开启为 true，
+  # 与本注释及 flowable-database-bootstrap 能力的初衷矛盾，本次改回 false）。
+  database-schema-update: false
   # 关闭异步执行器：本次接入只用同步的 RuntimeService/TaskService API 编程调用
   # （启动流程实例、完成用户任务、终止流程实例），没有定时器/异步延续任务场景，
   # 不需要额外的调度线程池。

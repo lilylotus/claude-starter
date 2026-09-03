@@ -57,4 +57,7 @@ public class ApprovalRequestVO {
 
     /** 目标记录当前值，更新申请详情使用。 */
     private Object targetSnapshot;
+
+    /** 当前所在审批节点名称，流程结束后为空。 */
+    private String currentNodeName;
 }

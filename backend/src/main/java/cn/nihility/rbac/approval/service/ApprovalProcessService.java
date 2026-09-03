@@ -1,33 +1,48 @@
 package cn.nihility.rbac.approval.service;
 
-import cn.nihility.rbac.approval.dto.ApprovalProcessInstance;
+import cn.nihility.rbac.workflow.dto.WorkflowInstanceResult;
 
 /**
- * Flowable 审批流程操作封装，隔离审批业务与流程引擎 API。
+ * 主数据变更审批流程操作的薄封装，内部全部委托给通用审批引擎
+ * {@link cn.nihility.rbac.workflow.engine.WorkflowService}，隔离审批业务与流程引擎实现细节
+ * （workflow-approval-engine change design.md Decision 8）。
  */
 public interface ApprovalProcessService {
 
     /**
-     * 启动主数据审批流程，并查询流程创建的当前用户任务。
+     * 启动主数据审批流程。
      *
-     * @param requestId 审批申请 id
-     * @return 流程实例与用户任务标识
+     * @param requestId      审批申请 id，作为流程实例的业务对象 id
+     * @param bizType        业务对象类型：ORG/USER/POSITION/APP
+     * @param applicantId    发起人用户 id
+     * @param applicantOrgId 发起人所属组织 id，解析不到时传 {@code null}
+     * @return 流程启动结果，含流程实例 id 与当前所在节点信息
      */
-    ApprovalProcessInstance start(Long requestId);
+    WorkflowInstanceResult start(Long requestId, String bizType, Long applicantId, Long applicantOrgId);
 
     /**
-     * 完成审批用户任务。
+     * 审批通过当前节点任务。
      *
-     * @param taskId     Flowable 用户任务 id
+     * @param taskId     审批任务 id（{@code tab_wf_approval_task.id}）
      * @param approverId 审批人用户 id
-     * @param approved   是否通过
+     * @param opinion    审批意见，可为空
      */
-    void complete(String taskId, Long approverId, boolean approved);
+    void approve(Long taskId, Long approverId, String opinion);
 
     /**
-     * 终止尚未结束的审批流程实例。
+     * 驳回当前节点任务，直接终止流程实例。
      *
-     * @param processInstanceId Flowable 流程实例 id
+     * @param taskId     审批任务 id（{@code tab_wf_approval_task.id}）
+     * @param approverId 审批人用户 id
+     * @param opinion    拒绝意见
      */
-    void terminate(String processInstanceId);
+    void reject(Long taskId, Long approverId, String opinion);
+
+    /**
+     * 撤回尚未产生任何一级审批记录的流程实例。
+     *
+     * @param processInstanceId 流程实例 id（{@code tab_wf_process_instance.id}）
+     * @param operatorId        操作人用户 id，须为流程发起人
+     */
+    void withdraw(Long processInstanceId, Long operatorId);
 }

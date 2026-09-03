@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  测试专用会签（Multi-Instance，AND 模式）流程夹具，供 workflow-approval-engine change
+  tasks.md 13.3 的集成测试对着真实 Flowable 引擎验证会签完成条件判定，不随应用启动部署
+  （仅测试类通过 RepositoryService.createDeployment().addClasspathResource(...) 动态部署，
+  见 cn.nihility.rbac.workflow.integration.MultiInstanceApprovalIntegrationTest）。
+
+  节点 miApprove 是唯一的会签用户任务：
+  - flowable:collection 引用的候选人集合流程变量名 approvers_miApprove，由
+    WorkflowMultiInstanceExecutionListener（executionListener event="start"）按
+    "approvers_<nodeId>" 命名约定写入（workflow-approval-engine change design.md
+    Decision 4）。
+  - flowable:elementVariable="approver" 暴露当前循环项，与
+    FlowableWorkflowService.doAddSign 加签时写入的流程变量名一致。
+  - flowable:assignee="${approver}" 把每个多实例分支绑定到具体候选人，供
+    WorkflowMultiInstanceTaskListener（taskListener event="create"）持久化
+    tab_wf_approval_task.assignee_id，及 TaskAuthorizationService 后续做 assignee
+    维度越权校验。**注意**：集成测试发现生产环境 WorkflowModelCompilerImpl.
+    buildApprovalUserTask 编译会签节点时并未设置该属性，导致其编译产出的会签用户任务
+    永远没有 assignee、任务候选人明细也不会被写入（详见该测试类顶部注释与本次任务的
+    最终报告），本文件按"预期正确写法"手工补齐，仅用于独立验证
+    engine.flowable 包下三个监听器 + FlowableWorkflowService 本身的行为，不代表
+    生产 DSL 编译器已具备该能力。
+  - completionCondition 硬编码为与
+    MultiInstanceCompletionEvaluator.buildCompletionCondition(ApprovalMode.AND, null)
+    完全一致的表达式字符串，避免测试夹具与 Java 端判定逻辑出现语义漂移。
+-->
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:flowable="http://flowable.org/bpmn"
+             targetNamespace="cn.nihility.rbac.workflow.test">
+
+    <process id="testMultiInstanceAndProcess" name="测试-会签AND模式" isExecutable="true">
+
+        <startEvent id="startEvent" name="提交审批申请" />
+
+        <userTask id="miApprove" name="会签审批(AND)" flowable:assignee="${approver}">
+            <extensionElements>
+                <flowable:executionListener event="start"
+                                             class="cn.nihility.rbac.workflow.engine.flowable.WorkflowMultiInstanceExecutionListener" />
+                <flowable:taskListener event="create"
+                                        class="cn.nihility.rbac.workflow.engine.flowable.WorkflowMultiInstanceTaskListener" />
+                <flowable:taskListener event="complete"
+                                        class="cn.nihility.rbac.workflow.engine.flowable.WorkflowMultiInstanceTaskListener" />
+            </extensionElements>
+            <multiInstanceLoopCharacteristics isSequential="false"
+                                               flowable:collection="approvers_miApprove"
+                                               flowable:elementVariable="approver">
+                <completionCondition><![CDATA[${miVeto == true || (nrOfCompletedInstances >= nrOfInstances)}]]></completionCondition>
+            </multiInstanceLoopCharacteristics>
+        </userTask>
+
+        <exclusiveGateway id="approveGateway" name="审批结果判断" />
+
+        <endEvent id="approvedEndEvent" name="已通过" />
+        <endEvent id="rejectedEndEvent" name="已拒绝" />
+
+        <sequenceFlow id="flowStartToApprove" sourceRef="startEvent" targetRef="miApprove" />
+        <sequenceFlow id="flowApproveToGateway" sourceRef="miApprove" targetRef="approveGateway" />
+
+        <sequenceFlow id="flowApprovedEnd" sourceRef="approveGateway" targetRef="approvedEndEvent">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${approved == true}]]></conditionExpression>
+        </sequenceFlow>
+        <sequenceFlow id="flowRejectedEnd" sourceRef="approveGateway" targetRef="rejectedEndEvent">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${approved == false}]]></conditionExpression>
+        </sequenceFlow>
+
+    </process>
+</definitions>

@@ -1,4 +1,4 @@
-import { UserFilled, Grid, Lock, Setting, Document, Checked, ChatDotRound } from '@element-plus/icons-vue'
+import { UserFilled, Grid, Lock, Setting, Document, Checked, Connection, ChatDotRound } from '@element-plus/icons-vue'
 import type { MenuGroup } from '@/types/menu'
 
 // 侧边栏的四个一级菜单及其子菜单，供 Sidebar 渲染，也是 router 子路由的数据来源。
@@ -74,6 +74,15 @@ export const MENU_GROUPS: MenuGroup[] = [
       { title: '待我审批', path: '/approval/pending', permissionKey: 'ApprovalManagement:request:approve' },
       { title: '审批设置', path: '/approval/settings', permissionKey: 'ApprovalManagement:switch:view' },
     ],
+  },
+  {
+    // 流程设计独立一级导航分组，对应后端 WorkflowDesign 权限模块（见 openspec/changes/
+    // workflow-approval-engine），当前只有"流程模型"一个页面（列表 + 进入 Vue Flow
+    // 设计器画布 + 版本历史），发布/下线/启用等操作按钮在页面内部按各自权限点门控
+    key: 'workflow-design',
+    title: '流程设计',
+    icon: Connection,
+    children: [{ title: '流程模型', path: '/workflow/models', permissionKey: 'WorkflowDesign:model:view' }],
   },
   {
     // 聊天独立一级导航分组，与后端 V15__create_chat_tables.sql 新增的"聊天"侧边栏分组

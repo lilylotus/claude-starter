@@ -1,96 +1,92 @@
 package cn.nihility.rbac.approval.service.impl;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import cn.nihility.rbac.approval.dto.ApprovalProcessInstance;
-import java.util.Map;
-import org.flowable.engine.RuntimeService;
-import org.flowable.engine.TaskService;
-import org.flowable.engine.runtime.ProcessInstance;
-import org.flowable.engine.runtime.ProcessInstanceQuery;
-import org.flowable.task.api.Task;
-import org.flowable.task.api.TaskQuery;
+import cn.nihility.rbac.workflow.dto.ApproveCommand;
+import cn.nihility.rbac.workflow.dto.RejectCommand;
+import cn.nihility.rbac.workflow.dto.StartProcessCommand;
+import cn.nihility.rbac.workflow.dto.WithdrawCommand;
+import cn.nihility.rbac.workflow.dto.WorkflowInstanceResult;
+import cn.nihility.rbac.workflow.engine.WorkflowService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * {@link ApprovalProcessServiceImpl} 单元测试。
+ * {@link ApprovalProcessServiceImpl} 单元测试：验证其作为薄封装正确构造命令对象并转调用
+ * {@link WorkflowService}（workflow-approval-engine change design.md Decision 8）。
  */
 @ExtendWith(MockitoExtension.class)
 class ApprovalProcessServiceImplTest {
 
     @Mock
-    private RuntimeService runtimeService;
-
-    @Mock
-    private TaskService taskService;
-
-    @Mock
-    private ProcessInstance processInstance;
-
-    @Mock
-    private TaskQuery taskQuery;
-
-    @Mock
-    private Task task;
-
-    @Mock
-    private ProcessInstanceQuery processInstanceQuery;
+    private WorkflowService workflowService;
 
     private ApprovalProcessServiceImpl service;
 
     /** 构造被测服务。 */
     @BeforeEach
     void setUp() {
-        service = new ApprovalProcessServiceImpl(runtimeService, taskService);
+        service = new ApprovalProcessServiceImpl(workflowService);
     }
 
-    /** 启动流程后应返回运行时流程实例和用户任务 id。 */
+    /** 启动流程时应使用固定的 MASTER_DATA_APPROVAL 流程编码，透传业务参数。 */
     @Test
-    void start_shouldReturnProcessAndTaskIds() {
-        when(runtimeService.startProcessInstanceByKey(
-                "masterDataApprovalProcess",
-                "10",
-                Map.of("requestId", 10L))).thenReturn(processInstance);
-        when(processInstance.getId()).thenReturn("process-1");
-        when(taskService.createTaskQuery()).thenReturn(taskQuery);
-        when(taskQuery.processInstanceId("process-1")).thenReturn(taskQuery);
-        when(taskQuery.singleResult()).thenReturn(task);
-        when(task.getId()).thenReturn("task-1");
+    void start_shouldDelegateToWorkflowServiceWithMasterDataProcessCode() {
+        WorkflowInstanceResult expected = new WorkflowInstanceResult(1L, "flowable-1", "deptLeaderApprove", "部门负责人审批");
+        when(workflowService.start(any())).thenReturn(expected);
 
-        ApprovalProcessInstance result = service.start(10L);
+        WorkflowInstanceResult result = service.start(10L, "ORG", 1L, 100L);
 
-        assertThat(result.processInstanceId()).isEqualTo("process-1");
-        assertThat(result.taskId()).isEqualTo("task-1");
+        ArgumentCaptor<StartProcessCommand> captor = ArgumentCaptor.forClass(StartProcessCommand.class);
+        verify(workflowService).start(captor.capture());
+        StartProcessCommand command = captor.getValue();
+        assertThat(command.processCode()).isEqualTo("MASTER_DATA_APPROVAL");
+        assertThat(command.businessType()).isEqualTo("ORG");
+        assertThat(command.businessId()).isEqualTo(10L);
+        assertThat(command.applicantId()).isEqualTo(1L);
+        assertThat(command.applicantOrgId()).isEqualTo(100L);
+        assertThat(result).isSameAs(expected);
     }
 
-    /** 完成审批任务时应认领任务并传入 approved 流程变量。 */
+    /** 审批通过应透传任务 id、操作人与意见。 */
     @Test
-    void complete_shouldClaimAndCompleteTask() {
-        when(taskService.createTaskQuery()).thenReturn(taskQuery);
-        when(taskQuery.taskId("task-1")).thenReturn(taskQuery);
-        when(taskQuery.singleResult()).thenReturn(task);
+    void approve_shouldDelegateApproveCommand() {
+        service.approve(5L, 2L, "同意");
 
-        service.complete("task-1", 2L, true);
-
-        verify(taskService).claim("task-1", "2");
-        verify(taskService).complete("task-1", Map.of("approved", true));
+        ArgumentCaptor<ApproveCommand> captor = ArgumentCaptor.forClass(ApproveCommand.class);
+        verify(workflowService).approve(captor.capture());
+        assertThat(captor.getValue().taskId()).isEqualTo(5L);
+        assertThat(captor.getValue().operatorId()).isEqualTo(2L);
+        assertThat(captor.getValue().remark()).isEqualTo("同意");
     }
 
-    /** 撤回时应终止仍在运行的流程实例。 */
+    /** 审批拒绝应透传任务 id、操作人与拒绝原因。 */
     @Test
-    void terminate_shouldDeleteRunningProcessInstance() {
-        when(runtimeService.createProcessInstanceQuery()).thenReturn(processInstanceQuery);
-        when(processInstanceQuery.processInstanceId("process-1")).thenReturn(processInstanceQuery);
-        when(processInstanceQuery.singleResult()).thenReturn(processInstance);
+    void reject_shouldDelegateRejectCommand() {
+        service.reject(5L, 2L, "拒绝原因");
 
-        service.terminate("process-1");
+        ArgumentCaptor<RejectCommand> captor = ArgumentCaptor.forClass(RejectCommand.class);
+        verify(workflowService).reject(captor.capture());
+        assertThat(captor.getValue().taskId()).isEqualTo(5L);
+        assertThat(captor.getValue().operatorId()).isEqualTo(2L);
+        assertThat(captor.getValue().remark()).isEqualTo("拒绝原因");
+    }
 
-        verify(runtimeService).deleteProcessInstance("process-1", "申请人撤回审批申请");
+    /** 撤回应透传流程实例 id 与操作人。 */
+    @Test
+    void withdraw_shouldDelegateWithdrawCommand() {
+        service.withdraw(9L, 1L);
+
+        ArgumentCaptor<WithdrawCommand> captor = ArgumentCaptor.forClass(WithdrawCommand.class);
+        verify(workflowService).withdraw(captor.capture());
+        assertThat(captor.getValue().processInstanceId()).isEqualTo(9L);
+        assertThat(captor.getValue().operatorId()).isEqualTo(1L);
     }
 }

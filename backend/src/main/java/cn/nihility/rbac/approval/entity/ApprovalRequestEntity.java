@@ -52,11 +52,17 @@ public class ApprovalRequestEntity {
     /** 审批意见。 */
     private String opinion;
 
-    /** Flowable 流程实例 id。 */
+    /** Flowable 流程实例 id，仅作兼容展示用，不再是驱动审批状态流转的依据。 */
     private String flowableProcessInstanceId;
 
-    /** Flowable 用户任务 id。 */
+    /** Flowable 用户任务 id，仅作兼容展示用，不再是驱动审批状态流转的依据。 */
     private String flowableTaskId;
+
+    /** 关联的通用审批引擎流程实例 id，对应 {@code tab_wf_process_instance.id}，驱动多级审批。 */
+    private Long processInstanceId;
+
+    /** 当前所在审批节点名称，流程结束（已通过/已拒绝/已撤回）后置空。 */
+    private String currentNodeName;
 
     /** 创建人，即申请提交人。 */
     private String createBy;

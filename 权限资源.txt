@@ -255,6 +255,27 @@ ApprovalManagement（审批管理，见 openspec/changes/add-master-data-approva
 对应 bizType 的审批开关状态决定，不需要新增/拆分按钮级权限点）
 
 
+流程设计
+--------
+
+WorkflowDesign（流程设计器，见 openspec/changes/workflow-approval-engine）
+- WorkflowDesign:model:view      流程模型列表/版本历史页面访问（查看流程模型列表、按流程
+  编码查看版本历史，只读展示发布人/发布时间/状态/DSL 快照，历史版本不提供编辑入口）
+- WorkflowDesign:model:edit      新增/编辑流程模型草稿（保存 Workflow JSON DSL 草稿，仅
+  更新草稿内容，不触发部署，不影响当前已发布、正在运行的版本）
+- WorkflowDesign:model:publish   发布流程模型（编译当前草稿为 BPMN 并部署，生成新的不可变
+  版本；与 edit 分别独立校验，持有编辑权限不隐含拥有发布权限，避免普通编辑者误发布未经
+  评审的流程变更）
+- WorkflowDesign:model:disable   下线/重新启用流程模型当前生效版本（下线后拒绝以该流程编码
+  新发起，不影响运行中实例；重新启用只能激活当前版本，不支持跳过版本直接激活更早的历史
+  版本；启/停复用同一权限点）
+前端落地为侧边栏"流程设计"一级菜单下的"流程模型"页面（/workflow/models，Vue Flow 画布见
+/workflow/designer/:id，不单独登记菜单，通过列表页"进入设计器"跳转）；后端流程模型的
+"分页列出全部流程模型"接口尚未提供（仅有草稿保存/发布/下线/启用/版本历史五个依赖已知 id
+的接口），列表页面对此做了兜底降级（手动输入 id 操作），后端补齐列表接口后不需要新增
+菜单/权限点。
+
+
 聊天
 --------
 

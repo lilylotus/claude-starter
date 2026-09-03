@@ -45,6 +45,7 @@ const implementedComponents: Record<string, () => Promise<unknown>> = {
   '/approval/settings': () => import('@/views/approval/settings/ApprovalSettingsView.vue'),
   '/chat': () => import('@/views/chat/ChatView.vue'),
   '/system/sensitive-words': () => import('@/views/chat/SensitiveWordManagementView.vue'),
+  '/workflow/models': () => import('@/views/workflow/process-model/ProcessModelListView.vue'),
 }
 
 const menuRoutes = MENU_GROUPS.flatMap((group) =>
@@ -137,6 +138,16 @@ const detailRoutes = [
     name: 'system-dicts-item-detail',
     component: () => import('@/views/system/dict/DictItemDetailView.vue'),
     meta: { title: '字典项详情', requiresAuth: true, permissionKey: 'DictManagement:dictItem:detail' },
+  },
+  {
+    // Vue Flow 流程设计器画布：不加入 menu.ts，只能通过"流程模型"列表页的"进入设计器"
+    // 按钮跳转，或直接访问带 id 的 URL 进入；权限点复用 WorkflowDesign:model:view
+    // （能进入页面查看画布），页面内部"保存草稿"/"发布"/"下线"/"启用"按钮再分别按
+    // WorkflowDesign:model:edit/publish/disable 做按钮级门控
+    path: 'workflow/designer/:id',
+    name: 'workflow-designer',
+    component: () => import('@/views/workflow/designer/ProcessDesignerView.vue'),
+    meta: { title: '流程设计器', requiresAuth: true, permissionKey: 'WorkflowDesign:model:view' },
   },
 ]
 

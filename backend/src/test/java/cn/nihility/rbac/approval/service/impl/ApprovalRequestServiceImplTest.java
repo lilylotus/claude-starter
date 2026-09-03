@@ -3,8 +3,11 @@ package cn.nihility.rbac.approval.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -17,7 +20,6 @@ import cn.nihility.rbac.app.dto.AppVO;
 import cn.nihility.rbac.app.service.AppService;
 import cn.nihility.rbac.approval.constant.ApprovalOperationType;
 import cn.nihility.rbac.approval.constant.ApprovalRequestStatus;
-import cn.nihility.rbac.approval.dto.ApprovalProcessInstance;
 import cn.nihility.rbac.approval.dto.ApprovalRequestVO;
 import cn.nihility.rbac.approval.dto.WriteOperationResultVO;
 import cn.nihility.rbac.approval.entity.ApprovalRequestEntity;
@@ -41,19 +43,34 @@ import cn.nihility.rbac.user.dto.UserCreateRequest;
 import cn.nihility.rbac.user.dto.UserPositionRequest;
 import cn.nihility.rbac.user.dto.UserUpdateRequest;
 import cn.nihility.rbac.user.dto.UserVO;
+import cn.nihility.rbac.user.entity.UserPositionEntity;
+import cn.nihility.rbac.user.mapper.UserPositionMapper;
 import cn.nihility.rbac.user.service.PositionService;
 import cn.nihility.rbac.user.service.UserDisplayService;
 import cn.nihility.rbac.user.service.UserService;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import cn.nihility.rbac.workflow.assignee.support.TaskAuthorizationService;
+import cn.nihility.rbac.workflow.constant.ProcessInstanceStatus;
+import cn.nihility.rbac.workflow.constant.TaskStatus;
+import cn.nihility.rbac.workflow.dto.WorkflowInstanceResult;
+import cn.nihility.rbac.workflow.entity.ApprovalRecordEntity;
+import cn.nihility.rbac.workflow.entity.ApprovalTaskEntity;
+import cn.nihility.rbac.workflow.entity.ProcessInstanceEntity;
+import cn.nihility.rbac.workflow.mapper.ApprovalRecordMapper;
+import cn.nihility.rbac.workflow.mapper.ApprovalTaskMapper;
+import cn.nihility.rbac.workflow.mapper.ProcessInstanceMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -62,23 +79,45 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.mockito.Mock;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.apache.ibatis.builder.MapperBuilderAssistant;
-import org.apache.ibatis.session.Configuration;
 
 /**
- * {@link ApprovalRequestServiceImpl} 核心状态流转单元测试。
+ * {@link ApprovalRequestServiceImpl} 核心状态流转单元测试，覆盖两级审批（部门负责人 ->
+ * 安全管理员）改造后的语义：非最终节点通过仅推进流程、最终节点通过才执行业务写操作、
+ * 任一级拒绝直接终止、已过第一级不能撤回、待我审批按当前节点候选人过滤
+ * （master-data-approval-workflow spec.md）。
  */
 @ExtendWith(MockitoExtension.class)
 class ApprovalRequestServiceImplTest {
+
+    /** 待审批申请关联的流程实例 id。 */
+    private static final Long PROCESS_INSTANCE_ID = 100L;
+
+    /** 待处理审批任务 id。 */
+    private static final Long TASK_ID = 555L;
 
     @Mock
     private ApprovalRequestMapper mapper;
 
     @Mock
-    private ApprovalProcessService processService;
+    private ApprovalProcessService approvalProcessService;
+
+    @Mock
+    private ApprovalTaskMapper approvalTaskMapper;
+
+    @Mock
+    private ProcessInstanceMapper processInstanceMapper;
+
+    @Mock
+    private ApprovalRecordMapper approvalRecordMapper;
+
+    @Mock
+    private TaskAuthorizationService taskAuthorizationService;
+
+    @Mock
+    private UserPositionMapper userPositionMapper;
 
     @Mock
     private OrgService orgService;
@@ -106,12 +145,22 @@ class ApprovalRequestServiceImplTest {
 
     private ApprovalRequestServiceImpl service;
 
-    /** 初始化 MyBatis-Plus Lambda 列缓存。 */
+    /** 初始化 MyBatis-Plus Lambda 列缓存，覆盖本类实现中构造 {@code LambdaQueryWrapper}/
+     *  {@code LambdaUpdateWrapper} 涉及的全部实体类型。 */
     @BeforeAll
     static void primeLambdaColumnCache() {
+        primeEntity(ApprovalRequestEntity.class);
+        primeEntity(ApprovalTaskEntity.class);
+        primeEntity(ProcessInstanceEntity.class);
+        primeEntity(ApprovalRecordEntity.class);
+        primeEntity(UserPositionEntity.class);
+    }
+
+    /** 为单个实体类初始化 Lambda 列缓存。 */
+    private static void primeEntity(Class<?> entityClass) {
         MapperBuilderAssistant assistant = new MapperBuilderAssistant(new Configuration(), "approvalRequestTest");
-        assistant.setCurrentNamespace(ApprovalRequestEntity.class.getName());
-        TableInfoHelper.initTableInfo(assistant, ApprovalRequestEntity.class);
+        assistant.setCurrentNamespace(entityClass.getName());
+        TableInfoHelper.initTableInfo(assistant, entityClass);
     }
 
     /** 构造被测服务与通用桩。 */
@@ -119,7 +168,12 @@ class ApprovalRequestServiceImplTest {
     void setUp() {
         service = new ApprovalRequestServiceImpl(
                 mapper,
-                processService,
+                approvalProcessService,
+                approvalTaskMapper,
+                processInstanceMapper,
+                approvalRecordMapper,
+                taskAuthorizationService,
+                userPositionMapper,
                 orgService,
                 userService,
                 positionService,
@@ -147,7 +201,8 @@ class ApprovalRequestServiceImplTest {
             invocation.<ApprovalRequestEntity>getArgument(0).setId(10L);
             return 1;
         }).when(mapper).insert(any(ApprovalRequestEntity.class));
-        when(processService.start(10L)).thenReturn(new ApprovalProcessInstance("process-1", "task-1"));
+        when(approvalProcessService.start(eq(10L), eq(FormFieldBizType.APP), eq(1L), any()))
+                .thenReturn(new WorkflowInstanceResult(PROCESS_INSTANCE_ID, "flow-1", "deptLeaderApprove", "部门负责人审批"));
 
         WriteOperationResultVO<?> result = service.submit(
                 FormFieldBizType.APP,
@@ -157,8 +212,9 @@ class ApprovalRequestServiceImplTest {
 
         assertThat(result.isApprovalEnabled()).isTrue();
         assertThat(result.getApprovalRequest().getId()).isEqualTo(10L);
+        assertThat(result.getApprovalRequest().getCurrentNodeName()).isEqualTo("部门负责人审批");
         verify(appService, never()).create(any());
-        verify(processService).start(10L);
+        verify(approvalProcessService).start(10L, FormFieldBizType.APP, 1L, null);
     }
 
     /**
@@ -181,7 +237,7 @@ class ApprovalRequestServiceImplTest {
                 .hasMessageContaining("应用名称不能为空");
 
         verify(mapper, never()).insert(any(ApprovalRequestEntity.class));
-        verify(processService, never()).start(any());
+        verify(approvalProcessService, never()).start(any(), any(), any(), any());
     }
 
     /**
@@ -201,7 +257,7 @@ class ApprovalRequestServiceImplTest {
                 .hasMessageContaining("管辖范围");
 
         verify(mapper, never()).insert(any(ApprovalRequestEntity.class));
-        verify(processService, never()).start(any());
+        verify(approvalProcessService, never()).start(any(), any(), any(), any());
     }
 
     /**
@@ -224,21 +280,47 @@ class ApprovalRequestServiceImplTest {
             invocation.<ApprovalRequestEntity>getArgument(0).setId(10L);
             return 1;
         }).when(mapper).insert(any(ApprovalRequestEntity.class));
-        when(processService.start(10L)).thenReturn(new ApprovalProcessInstance("process-1", "task-1"));
+        when(approvalProcessService.start(eq(10L), eq(bizType), anyLong(), any()))
+                .thenReturn(new WorkflowInstanceResult(PROCESS_INSTANCE_ID, "flow-1", "deptLeaderApprove", "部门负责人审批"));
 
         WriteOperationResultVO<?> result = service.submit(bizType, operationType, targetId, payload);
 
         assertThat(result.isApprovalEnabled()).isTrue();
         assertThat(result.getApprovalRequest().getId()).isEqualTo(10L);
-        verify(processService).start(10L);
+        verify(approvalProcessService).start(eq(10L), eq(bizType), eq(1L), any());
     }
 
-    /** 审批通过时应以提交人身份校验范围并执行业务方法，然后完成流程任务。 */
+    /** 非最终节点通过时应仅推进流程、更新当前节点名称，不执行任何业务写操作。 */
     @Test
-    void approve_shouldExecuteAsSubmitterAndCompleteTask() {
+    void approve_shouldOnlyAdvanceNode_whenNotFinalNode() {
+        ApprovalRequestEntity entity = buildPendingEntity();
+        when(mapper.selectById(10L)).thenReturn(entity);
+        when(approvalTaskMapper.selectOne(any(LambdaQueryWrapper.class)))
+                .thenReturn(ApprovalTaskEntity.builder().id(TASK_ID).processInstanceId(PROCESS_INSTANCE_ID)
+                        .status(TaskStatus.PENDING).build());
+        when(processInstanceMapper.selectById(PROCESS_INSTANCE_ID)).thenReturn(ProcessInstanceEntity.builder()
+                .id(PROCESS_INSTANCE_ID).status(ProcessInstanceStatus.RUNNING).currentNodeName("安全管理员审批").build());
+        when(mapper.update(eq(null), any(LambdaUpdateWrapper.class))).thenReturn(1);
+        CurrentUserContext.setUserId(2L);
+
+        service.approve(10L, "同意");
+
+        verify(approvalProcessService).approve(TASK_ID, 2L, "同意");
+        verify(appService, never()).create(any());
+        verify(orgScopeService, never()).isOrgIdAllowed(any(), any());
+        ArgumentCaptor<LambdaUpdateWrapper<ApprovalRequestEntity>> captor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(mapper).update(eq(null), captor.capture());
+        assertThat(captor.getValue().getSqlSet()).contains("currentNodeName");
+        assertThat(captor.getValue().getSqlSet()).doesNotContain("status");
+    }
+
+    /** 审批到最终节点通过时应以提交人身份校验范围并执行业务方法，申请状态置为已通过。 */
+    @Test
+    void approve_shouldExecuteAsSubmitterAndFinalizeApproval_whenFinalNode() {
         ApprovalRequestEntity entity = buildPendingEntity();
         AppVO created = AppVO.builder().id(20L).name("应用").build();
         when(mapper.selectById(10L)).thenReturn(entity);
+        stubOpenTaskAndFinalInstance();
         when(mapper.update(eq(null), any(LambdaUpdateWrapper.class))).thenReturn(1);
         when(orgScopeService.isOrgIdAllowed(1L, 100L)).thenReturn(true);
         when(appService.create(any(AppCreateRequest.class))).thenReturn(created);
@@ -248,12 +330,12 @@ class ApprovalRequestServiceImplTest {
 
         verify(orgScopeService).isOrgIdAllowed(1L, 100L);
         verify(appService).create(any(AppCreateRequest.class));
-        verify(processService).complete("task-1", 2L, true);
+        verify(approvalProcessService).approve(TASK_ID, 2L, "同意");
         assertThat(CurrentUserContext.getUserId()).isEqualTo(2L);
     }
 
     /**
-     * 四类业务对象的创建申请审批通过后均应调用对应的既有业务 Service。
+     * 四类业务对象的创建申请在最终节点审批通过后均应调用对应的既有业务 Service。
      *
      * @param bizType 业务对象类型
      */
@@ -263,6 +345,7 @@ class ApprovalRequestServiceImplTest {
         Object payload = buildPayload(bizType, ApprovalOperationType.CREATE);
         ApprovalRequestEntity entity = buildPendingEntity(bizType, payload);
         when(mapper.selectById(10L)).thenReturn(entity);
+        stubOpenTaskAndFinalInstance();
         when(mapper.update(eq(null), any(LambdaUpdateWrapper.class))).thenReturn(1);
         lenient().when(orgScopeService.isOrgIdAllowed(1L, 100L)).thenReturn(true);
         prepareCreateResult(bizType);
@@ -271,12 +354,12 @@ class ApprovalRequestServiceImplTest {
         service.approve(10L, "同意");
 
         verifyCreateCalled(bizType);
-        verify(processService).complete("task-1", 2L, true);
+        verify(approvalProcessService).approve(TASK_ID, 2L, "同意");
         assertThat(CurrentUserContext.getUserId()).isEqualTo(2L);
     }
 
     /**
-     * 审批时提交人的管辖范围已收紧，应拒绝执行业务写操作并保留流程任务。
+     * 最终节点审批时提交人的管辖范围已收紧，应拒绝执行业务写操作，且不应写入已通过状态。
      */
     @Test
     void approve_shouldReject_whenSubmitterScopeWasTightened() {
@@ -284,7 +367,7 @@ class ApprovalRequestServiceImplTest {
                 FormFieldBizType.ORG,
                 ApprovalOperationType.CREATE);
         when(mapper.selectById(10L)).thenReturn(buildPendingEntity(FormFieldBizType.ORG, payload));
-        when(mapper.update(eq(null), any(LambdaUpdateWrapper.class))).thenReturn(1);
+        stubOpenTaskAndFinalInstance();
         when(orgScopeService.isOrgIdAllowed(1L, 100L)).thenReturn(false);
         CurrentUserContext.setUserId(2L);
 
@@ -293,12 +376,12 @@ class ApprovalRequestServiceImplTest {
                 .hasMessageContaining("管辖范围");
 
         verify(orgService, never()).create(any());
-        verify(processService, never()).complete(any(), any(), eq(true));
+        verify(mapper, never()).update(any(), any(LambdaUpdateWrapper.class));
         assertThat(CurrentUserContext.getUserId()).isEqualTo(2L);
     }
 
     /**
-     * 用户更新申请审批通过时应完整反序列化任职数组并调用既有 diff 更新逻辑入口。
+     * 用户更新申请在最终节点审批通过后应完整反序列化任职数组并调用既有 diff 更新逻辑入口。
      */
     @Test
     void approve_shouldPreserveUserPositions_forUpdateRequest() {
@@ -317,12 +400,12 @@ class ApprovalRequestServiceImplTest {
                 .targetId(30L)
                 .requestPayload(JacksonUtils.toJson(payload))
                 .status(ApprovalRequestStatus.PENDING)
-                .flowableProcessInstanceId("process-1")
-                .flowableTaskId("task-1")
+                .processInstanceId(PROCESS_INSTANCE_ID)
                 .createBy("1")
                 .createTime(LocalDateTime.now())
                 .build();
         when(mapper.selectById(10L)).thenReturn(entity);
+        stubOpenTaskAndFinalInstance();
         when(mapper.update(eq(null), any(LambdaUpdateWrapper.class))).thenReturn(1);
         when(userService.update(eq(30L), any(UserUpdateRequest.class)))
                 .thenReturn(UserVO.builder().id(30L).build());
@@ -337,12 +420,12 @@ class ApprovalRequestServiceImplTest {
         assertThat(requestCaptor.getValue().getPositions().get(0).getOrgId()).isEqualTo(100L);
     }
 
-    /** 业务规则失败时不应完成 Flowable 任务。 */
+    /** 最终节点业务规则校验失败时不应写入已通过状态，也不应创建业务记录。 */
     @Test
-    void approve_shouldNotCompleteTask_whenBusinessValidationFails() {
+    void approve_shouldNotFinalize_whenBusinessValidationFails() {
         ApprovalRequestEntity entity = buildPendingEntity();
         when(mapper.selectById(10L)).thenReturn(entity);
-        when(mapper.update(eq(null), any(LambdaUpdateWrapper.class))).thenReturn(1);
+        stubOpenTaskAndFinalInstance();
         when(orgScopeService.isOrgIdAllowed(1L, 100L)).thenReturn(true);
         when(appService.create(any(AppCreateRequest.class))).thenThrow(new BusinessException("应用编码已存在"));
         CurrentUserContext.setUserId(2L);
@@ -350,7 +433,20 @@ class ApprovalRequestServiceImplTest {
         assertThatThrownBy(() -> service.approve(10L, null))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("编码已存在");
-        verify(processService, never()).complete(any(), any(), eq(true));
+        verify(mapper, never()).update(any(), any(LambdaUpdateWrapper.class));
+    }
+
+    /** 已被处理（非待审批状态）的申请不能再次审批通过。 */
+    @Test
+    void approve_shouldReject_whenRequestAlreadyProcessed() {
+        ApprovalRequestEntity entity = buildPendingEntity();
+        entity.setStatus(ApprovalRequestStatus.APPROVED);
+        when(mapper.selectById(10L)).thenReturn(entity);
+
+        assertThatThrownBy(() -> service.approve(10L, "同意"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("已被处理");
+        verify(approvalProcessService, never()).approve(any(), any(), any());
     }
 
     /** 拒绝时必须提供非空意见。 */
@@ -361,16 +457,19 @@ class ApprovalRequestServiceImplTest {
                 .hasMessageContaining("拒绝意见");
     }
 
-    /** 拒绝成功时应完成 Flowable 任务且不执行任何业务写方法。 */
+    /** 拒绝成功时（无论处于第几级）应直接终止流程且不执行任何业务写方法。 */
     @Test
-    void reject_shouldCompleteTaskWithoutBusinessWrite() {
+    void reject_shouldTerminateWithoutBusinessWrite() {
         when(mapper.selectById(10L)).thenReturn(buildPendingEntity());
+        when(approvalTaskMapper.selectOne(any(LambdaQueryWrapper.class)))
+                .thenReturn(ApprovalTaskEntity.builder().id(TASK_ID).processInstanceId(PROCESS_INSTANCE_ID)
+                        .status(TaskStatus.PENDING).build());
         when(mapper.update(eq(null), any(LambdaUpdateWrapper.class))).thenReturn(1);
         CurrentUserContext.setUserId(2L);
 
         service.reject(10L, "信息不完整");
 
-        verify(processService).complete("task-1", 2L, false);
+        verify(approvalProcessService).reject(TASK_ID, 2L, "信息不完整");
         verify(appService, never()).create(any());
     }
 
@@ -383,10 +482,10 @@ class ApprovalRequestServiceImplTest {
         assertThatThrownBy(() -> service.cancel(10L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("本人");
-        verify(processService, never()).terminate(any());
+        verify(approvalProcessService, never()).withdraw(any(), any());
     }
 
-    /** 提交人应能撤回自己的待审批申请并终止流程。 */
+    /** 提交人应能撤回自己尚未有任何一级审批处理记录的待审批申请并终止流程。 */
     @Test
     void cancel_shouldTerminateProcessForSubmitter() {
         when(mapper.selectById(10L)).thenReturn(buildPendingEntity());
@@ -394,22 +493,36 @@ class ApprovalRequestServiceImplTest {
 
         service.cancel(10L);
 
-        verify(processService).terminate("process-1");
+        verify(approvalProcessService).withdraw(PROCESS_INSTANCE_ID, 1L);
     }
 
-    /** 已处理申请不能重复撤回。 */
+    /** 已处理（非待审批状态）的申请不能重复撤回。 */
     @Test
     void cancel_shouldRejectProcessedRequest() {
-        when(mapper.selectById(10L)).thenReturn(buildPendingEntity());
-        when(mapper.update(eq(null), any(LambdaUpdateWrapper.class))).thenReturn(0);
+        ApprovalRequestEntity entity = buildPendingEntity();
+        entity.setStatus(ApprovalRequestStatus.APPROVED);
+        when(mapper.selectById(10L)).thenReturn(entity);
 
         assertThatThrownBy(() -> service.cancel(10L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("待审批");
-        verify(processService, never()).terminate(any());
+        verify(approvalProcessService, never()).withdraw(any(), any());
     }
 
-    /** “我的申请”查询应包含提交人及三个可选过滤条件。 */
+    /** 已经过第一级审批、流转到第二级仍处于待审批状态的多级申请不能撤回。 */
+    @Test
+    void cancel_shouldRejectWhenAlreadyPassedFirstLevel() {
+        when(mapper.selectById(10L)).thenReturn(buildPendingEntity());
+        doThrow(new BusinessException("流程已存在审批记录，不能撤回"))
+                .when(approvalProcessService).withdraw(PROCESS_INSTANCE_ID, 1L);
+
+        assertThatThrownBy(() -> service.cancel(10L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("不能撤回");
+        verify(mapper, never()).update(any(), any(LambdaUpdateWrapper.class));
+    }
+
+    /** "我的申请"查询应包含提交人及三个可选过滤条件。 */
     @Test
     void pageMine_shouldFilterByCurrentUserAndConditions() {
         Page<ApprovalRequestEntity> resultPage = new Page<>(1, 10, 0L);
@@ -426,9 +539,26 @@ class ApprovalRequestServiceImplTest {
                 .contains("bizType", "operationType", "status", "createBy");
     }
 
-    /** “待我审批”查询应强制过滤待审批状态。 */
+    /** 无当前用户命中的开放任务时，"待我审批"应直接返回空分页，不触发主表查询。 */
     @Test
-    void pagePending_shouldFilterPendingStatus() {
+    void pagePending_shouldReturnEmpty_whenNoAuthorizedTask() {
+        PageResult<ApprovalRequestVO> result = service.pagePending(null, null, 1, 10);
+
+        assertThat(result.getTotal()).isZero();
+        assertThat(result.getRecords()).isEmpty();
+        verify(mapper, never()).selectPage(any(), any());
+    }
+
+    /** "待我审批"应仅返回当前用户在当前节点被解析为候选人的申请。 */
+    @Test
+    void pagePending_shouldFilterByAuthorizedCandidateProcessInstances() {
+        ApprovalTaskEntity openTask = ApprovalTaskEntity.builder()
+                .id(TASK_ID).processInstanceId(PROCESS_INSTANCE_ID).status(TaskStatus.PENDING).build();
+        when(approvalTaskMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(openTask));
+        when(taskAuthorizationService.isAuthorized(openTask, 1L)).thenReturn(true);
+        when(processInstanceMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(
+                ProcessInstanceEntity.builder().id(PROCESS_INSTANCE_ID).businessType(FormFieldBizType.APP)
+                        .businessId(77L).build()));
         Page<ApprovalRequestEntity> resultPage = new Page<>(1, 10, 0L);
         resultPage.setRecords(java.util.List.of());
         when(mapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(resultPage);
@@ -473,6 +603,15 @@ class ApprovalRequestServiceImplTest {
         assertThat(result.getRecords()).hasSize(1);
         assertThat(result.getRecords().get(0).getRequestPayload()).isInstanceOf(Map.class);
         assertThat(result.getRecords().get(0).getTargetSnapshot()).isSameAs(current);
+    }
+
+    /** 为审批相关测试统一桩出"命中开放任务 + 流程实例已到达最终已通过状态"。 */
+    private void stubOpenTaskAndFinalInstance() {
+        when(approvalTaskMapper.selectOne(any(LambdaQueryWrapper.class)))
+                .thenReturn(ApprovalTaskEntity.builder().id(TASK_ID).processInstanceId(PROCESS_INSTANCE_ID)
+                        .status(TaskStatus.PENDING).build());
+        when(processInstanceMapper.selectById(PROCESS_INSTANCE_ID)).thenReturn(ProcessInstanceEntity.builder()
+                .id(PROCESS_INSTANCE_ID).status(ProcessInstanceStatus.APPROVED).build());
     }
 
     /** 构造合法应用创建请求。 */
@@ -585,8 +724,7 @@ class ApprovalRequestServiceImplTest {
                 .operationType(ApprovalOperationType.CREATE)
                 .requestPayload(JacksonUtils.toJson(buildAppCreateRequest()))
                 .status(ApprovalRequestStatus.PENDING)
-                .flowableProcessInstanceId("process-1")
-                .flowableTaskId("task-1")
+                .processInstanceId(PROCESS_INSTANCE_ID)
                 .createBy("1")
                 .createTime(LocalDateTime.now())
                 .build();
@@ -606,8 +744,7 @@ class ApprovalRequestServiceImplTest {
                 .operationType(ApprovalOperationType.CREATE)
                 .requestPayload(JacksonUtils.toJson(payload))
                 .status(ApprovalRequestStatus.PENDING)
-                .flowableProcessInstanceId("process-1")
-                .flowableTaskId("task-1")
+                .processInstanceId(PROCESS_INSTANCE_ID)
                 .createBy("1")
                 .createTime(LocalDateTime.now())
                 .build();

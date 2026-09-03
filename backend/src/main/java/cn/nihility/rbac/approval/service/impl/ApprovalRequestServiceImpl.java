@@ -6,7 +6,6 @@ import cn.nihility.rbac.app.dto.AppVO;
 import cn.nihility.rbac.app.service.AppService;
 import cn.nihility.rbac.approval.constant.ApprovalOperationType;
 import cn.nihility.rbac.approval.constant.ApprovalRequestStatus;
-import cn.nihility.rbac.approval.dto.ApprovalProcessInstance;
 import cn.nihility.rbac.approval.dto.ApprovalRequestVO;
 import cn.nihility.rbac.approval.dto.ApprovalSubmitRequest;
 import cn.nihility.rbac.approval.dto.WriteOperationResultVO;
@@ -27,15 +26,29 @@ import cn.nihility.rbac.org.dto.OrgCreateRequest;
 import cn.nihility.rbac.org.dto.OrgUpdateRequest;
 import cn.nihility.rbac.org.dto.OrgVO;
 import cn.nihility.rbac.org.service.OrgService;
+import cn.nihility.rbac.user.constant.PositionStatus;
 import cn.nihility.rbac.user.dto.PositionCreateRequest;
 import cn.nihility.rbac.user.dto.PositionUpdateRequest;
 import cn.nihility.rbac.user.dto.PositionVO;
 import cn.nihility.rbac.user.dto.UserCreateRequest;
 import cn.nihility.rbac.user.dto.UserUpdateRequest;
 import cn.nihility.rbac.user.dto.UserVO;
+import cn.nihility.rbac.user.entity.UserPositionEntity;
+import cn.nihility.rbac.user.mapper.UserPositionMapper;
 import cn.nihility.rbac.user.service.PositionService;
 import cn.nihility.rbac.user.service.UserDisplayService;
 import cn.nihility.rbac.user.service.UserService;
+import cn.nihility.rbac.workflow.assignee.support.TaskAuthorizationService;
+import cn.nihility.rbac.workflow.constant.ApprovalAction;
+import cn.nihility.rbac.workflow.constant.ProcessInstanceStatus;
+import cn.nihility.rbac.workflow.constant.TaskStatus;
+import cn.nihility.rbac.workflow.dto.WorkflowInstanceResult;
+import cn.nihility.rbac.workflow.entity.ApprovalRecordEntity;
+import cn.nihility.rbac.workflow.entity.ApprovalTaskEntity;
+import cn.nihility.rbac.workflow.entity.ProcessInstanceEntity;
+import cn.nihility.rbac.workflow.mapper.ApprovalRecordMapper;
+import cn.nihility.rbac.workflow.mapper.ApprovalTaskMapper;
+import cn.nihility.rbac.workflow.mapper.ProcessInstanceMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -56,24 +69,45 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 /**
- * 主数据变更审批申请业务实现。
+ * 主数据变更审批申请业务实现。多级审批相关逻辑通过 {@link ApprovalProcessService} 转调用通用
+ * 审批引擎 {@code WorkflowService}，本类不直接依赖 Flowable API（workflow-approval-engine
+ * change design.md Decision 8）。
  */
 @Service
 @RequiredArgsConstructor
 public class ApprovalRequestServiceImpl implements ApprovalRequestService {
 
-    /** 合法业务对象类型。 */
+    /** 合法业务对象类型，同时也是 {@code tab_wf_process_instance.business_type} 的合法取值范围。 */
     private static final Set<String> SUPPORTED_BIZ_TYPES = Set.of(
             FormFieldBizType.ORG,
             FormFieldBizType.USER,
             FormFieldBizType.POSITION,
             FormFieldBizType.APP);
 
+    /** 任职记录里表达"主职"的任职类型编码。 */
+    private static final String PRIMARY_POSITION_TYPE = "primary";
+
     /** 审批申请数据访问接口。 */
     private final ApprovalRequestMapper approvalRequestMapper;
 
-    /** Flowable 审批流程接口。 */
+    /** 主数据审批流程接口，内部委托通用审批引擎。 */
     private final ApprovalProcessService approvalProcessService;
+
+    /** 审批任务数据访问接口，用于定位申请当前所处节点的待处理任务。 */
+    private final ApprovalTaskMapper approvalTaskMapper;
+
+    /** 流程实例数据访问接口，用于判断本次审批后流程是否推进到最终状态。 */
+    private final ProcessInstanceMapper processInstanceMapper;
+
+    /** 审批轨迹数据访问接口，用于读取系统终止场景的具体原因说明。 */
+    private final ApprovalRecordMapper approvalRecordMapper;
+
+    /** 任务处理越权校验服务，复用引擎内部的 assignee/candidateUser/candidateGroup 判定逻辑，
+     *  用于"待我审批"过滤当前用户在当前节点是否命中。 */
+    private final TaskAuthorizationService taskAuthorizationService;
+
+    /** 用户任职记录数据访问接口，用于提交申请时解析发起人所属组织。 */
+    private final UserPositionMapper userPositionMapper;
 
     /** 组织业务接口。 */
     private final OrgService orgService;
@@ -127,7 +161,8 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
 
         validateScope(bizType, operationType, targetId, typedPayload);
         LocalDateTime now = LocalDateTime.now();
-        String currentUserId = requireCurrentUserId().toString();
+        Long applicantId = requireCurrentUserId();
+        String currentUserId = applicantId.toString();
         ApprovalRequestEntity entity = ApprovalRequestEntity.builder()
                 .bizType(bizType)
                 .operationType(operationType)
@@ -141,9 +176,15 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
                 .build();
         approvalRequestMapper.insert(entity);
 
-        ApprovalProcessInstance process = approvalProcessService.start(entity.getId());
-        entity.setFlowableProcessInstanceId(process.processInstanceId());
-        entity.setFlowableTaskId(process.taskId());
+        Long applicantOrgId = resolveApplicantOrgId(applicantId);
+        WorkflowInstanceResult process = approvalProcessService.start(entity.getId(), bizType, applicantId, applicantOrgId);
+        entity.setProcessInstanceId(process.processInstanceId());
+        entity.setFlowableProcessInstanceId(process.flowableProcessInstanceId());
+        entity.setCurrentNodeName(process.currentNodeName());
+        ApprovalTaskEntity openTask = findOpenTask(process.processInstanceId());
+        if (openTask != null) {
+            entity.setFlowableTaskId(openTask.getFlowableTaskId());
+        }
         approvalRequestMapper.updateById(entity);
         Map<String, String> displayNames = userDisplayService.resolveDisplayNames(Set.of(currentUserId));
         return WriteOperationResultVO.pending(toVO(entity, displayNames));
@@ -156,21 +197,44 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
     @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public void approve(Long id, String opinion) {
         ApprovalRequestEntity entity = getExisting(id);
-        Long approverId = requireCurrentUserId();
-        LocalDateTime now = LocalDateTime.now();
-        int updated = approvalRequestMapper.update(null, new LambdaUpdateWrapper<ApprovalRequestEntity>()
-                .eq(ApprovalRequestEntity::getId, id)
-                .eq(ApprovalRequestEntity::getStatus, ApprovalRequestStatus.PENDING)
-                .set(ApprovalRequestEntity::getStatus, ApprovalRequestStatus.APPROVED)
-                .set(ApprovalRequestEntity::getApproverId, approverId)
-                .set(ApprovalRequestEntity::getApproveTime, now)
-                .set(ApprovalRequestEntity::getOpinion, opinion)
-                .set(ApprovalRequestEntity::getUpdateBy, approverId.toString())
-                .set(ApprovalRequestEntity::getUpdateTime, now));
-        if (updated != 1) {
+        if (!Objects.equals(entity.getStatus(), ApprovalRequestStatus.PENDING)) {
             throw new BusinessException("审批申请已被处理");
         }
+        Long approverId = requireCurrentUserId();
+        ApprovalTaskEntity task = requireCurrentTask(entity.getProcessInstanceId());
 
+        approvalProcessService.approve(task.getId(), approverId, opinion);
+
+        ProcessInstanceEntity instance = processInstanceMapper.selectById(entity.getProcessInstanceId());
+        if (instance == null) {
+            throw new BusinessException("流程实例不存在");
+        }
+        switch (instance.getStatus()) {
+            case ProcessInstanceStatus.RUNNING -> advanceNode(entity, instance, approverId);
+            case ProcessInstanceStatus.APPROVED -> finalizeApproval(entity, approverId, opinion);
+            case ProcessInstanceStatus.TERMINATED -> terminateAsRejected(entity, approverId, instance);
+            default -> throw new BusinessException("流程实例状态异常：" + instance.getStatus());
+        }
+    }
+
+    /**
+     * 非最终节点通过：仅推进流程，更新当前节点名称，申请状态保持待审批。
+     */
+    private void advanceNode(ApprovalRequestEntity entity, ProcessInstanceEntity instance, Long approverId) {
+        LocalDateTime now = LocalDateTime.now();
+        approvalRequestMapper.update(null, new LambdaUpdateWrapper<ApprovalRequestEntity>()
+                .eq(ApprovalRequestEntity::getId, entity.getId())
+                .set(ApprovalRequestEntity::getCurrentNodeName, instance.getCurrentNodeName())
+                .set(ApprovalRequestEntity::getUpdateBy, approverId.toString())
+                .set(ApprovalRequestEntity::getUpdateTime, now));
+    }
+
+    /**
+     * 最终节点通过：以提交人身份重新校验管辖范围并执行既有业务写操作，成功后申请置为已通过；
+     * 与 {@link ApprovalProcessService#approve} 处于同一数据库事务内，业务写操作失败会连同流程
+     * 推进一并回滚（本项目 Flowable 与业务表共用同一 DataSource/事务管理器，见最终报告说明）。
+     */
+    private void finalizeApproval(ApprovalRequestEntity entity, Long approverId, String opinion) {
         Object payload = convertPayload(entity.getBizType(), entity.getOperationType(), entity.getRequestPayload());
         Long submitterId = parseUserId(entity.getCreateBy());
         Object result;
@@ -183,13 +247,52 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
         }
 
         Long resultTargetId = extractTargetId(result);
+        LocalDateTime now = LocalDateTime.now();
+        LambdaUpdateWrapper<ApprovalRequestEntity> wrapper = new LambdaUpdateWrapper<ApprovalRequestEntity>()
+                .eq(ApprovalRequestEntity::getId, entity.getId())
+                .set(ApprovalRequestEntity::getStatus, ApprovalRequestStatus.APPROVED)
+                .set(ApprovalRequestEntity::getApproverId, approverId)
+                .set(ApprovalRequestEntity::getApproveTime, now)
+                .set(ApprovalRequestEntity::getOpinion, opinion)
+                .set(ApprovalRequestEntity::getCurrentNodeName, null)
+                .set(ApprovalRequestEntity::getUpdateBy, approverId.toString())
+                .set(ApprovalRequestEntity::getUpdateTime, now);
         if (Objects.equals(entity.getOperationType(), ApprovalOperationType.CREATE)) {
-            approvalRequestMapper.update(null, new LambdaUpdateWrapper<ApprovalRequestEntity>()
-                    .eq(ApprovalRequestEntity::getId, id)
-                    .set(ApprovalRequestEntity::getResultTargetId, resultTargetId));
+            wrapper.set(ApprovalRequestEntity::getResultTargetId, resultTargetId);
         }
-        approvalProcessService.complete(entity.getFlowableTaskId(), approverId, true);
+        approvalRequestMapper.update(null, wrapper);
         recordRequestStatusChange(entity, ApprovalRequestStatus.APPROVED, approverId, opinion);
+    }
+
+    /**
+     * 空审批人策略为 {@code REJECT} 触发的系统终止：等同于"已拒绝"处理。
+     */
+    private void terminateAsRejected(ApprovalRequestEntity entity, Long approverId, ProcessInstanceEntity instance) {
+        String reason = latestTerminateReason(instance.getId());
+        String finalOpinion = "系统终止：" + reason;
+        LocalDateTime now = LocalDateTime.now();
+        approvalRequestMapper.update(null, new LambdaUpdateWrapper<ApprovalRequestEntity>()
+                .eq(ApprovalRequestEntity::getId, entity.getId())
+                .set(ApprovalRequestEntity::getStatus, ApprovalRequestStatus.REJECTED)
+                .set(ApprovalRequestEntity::getApproverId, approverId)
+                .set(ApprovalRequestEntity::getApproveTime, now)
+                .set(ApprovalRequestEntity::getOpinion, finalOpinion)
+                .set(ApprovalRequestEntity::getCurrentNodeName, null)
+                .set(ApprovalRequestEntity::getUpdateBy, approverId.toString())
+                .set(ApprovalRequestEntity::getUpdateTime, now));
+        recordRequestStatusChange(entity, ApprovalRequestStatus.REJECTED, approverId, finalOpinion);
+    }
+
+    /**
+     * 读取流程实例最近一条系统终止轨迹的说明文字。
+     */
+    private String latestTerminateReason(Long processInstanceId) {
+        ApprovalRecordEntity record = approvalRecordMapper.selectOne(new LambdaQueryWrapper<ApprovalRecordEntity>()
+                .eq(ApprovalRecordEntity::getProcessInstanceId, processInstanceId)
+                .eq(ApprovalRecordEntity::getAction, ApprovalAction.TERMINATE)
+                .orderByDesc(ApprovalRecordEntity::getId)
+                .last("LIMIT 1"));
+        return record != null && StringUtils.hasText(record.getRemark()) ? record.getRemark() : "无审批人自动终止";
     }
 
     /**
@@ -202,21 +305,24 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
             throw new BusinessException("拒绝意见不能为空");
         }
         ApprovalRequestEntity entity = getExisting(id);
+        if (!Objects.equals(entity.getStatus(), ApprovalRequestStatus.PENDING)) {
+            throw new BusinessException("审批申请已被处理");
+        }
         Long approverId = requireCurrentUserId();
+        ApprovalTaskEntity task = requireCurrentTask(entity.getProcessInstanceId());
+
+        approvalProcessService.reject(task.getId(), approverId, opinion);
+
         LocalDateTime now = LocalDateTime.now();
-        int updated = approvalRequestMapper.update(null, new LambdaUpdateWrapper<ApprovalRequestEntity>()
+        approvalRequestMapper.update(null, new LambdaUpdateWrapper<ApprovalRequestEntity>()
                 .eq(ApprovalRequestEntity::getId, id)
-                .eq(ApprovalRequestEntity::getStatus, ApprovalRequestStatus.PENDING)
                 .set(ApprovalRequestEntity::getStatus, ApprovalRequestStatus.REJECTED)
                 .set(ApprovalRequestEntity::getApproverId, approverId)
                 .set(ApprovalRequestEntity::getApproveTime, now)
                 .set(ApprovalRequestEntity::getOpinion, opinion)
+                .set(ApprovalRequestEntity::getCurrentNodeName, null)
                 .set(ApprovalRequestEntity::getUpdateBy, approverId.toString())
                 .set(ApprovalRequestEntity::getUpdateTime, now));
-        if (updated != 1) {
-            throw new BusinessException("审批申请已被处理");
-        }
-        approvalProcessService.complete(entity.getFlowableTaskId(), approverId, false);
         recordRequestStatusChange(entity, ApprovalRequestStatus.REJECTED, approverId, opinion);
     }
 
@@ -231,17 +337,22 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
         if (!Objects.equals(entity.getCreateBy(), currentUserId.toString())) {
             throw new BusinessException("只能撤回本人提交的审批申请");
         }
+        if (!Objects.equals(entity.getStatus(), ApprovalRequestStatus.PENDING)) {
+            throw new BusinessException("只有待审批申请可以撤回");
+        }
+        approvalProcessService.withdraw(entity.getProcessInstanceId(), currentUserId);
+
         LocalDateTime now = LocalDateTime.now();
         int updated = approvalRequestMapper.update(null, new LambdaUpdateWrapper<ApprovalRequestEntity>()
                 .eq(ApprovalRequestEntity::getId, id)
                 .eq(ApprovalRequestEntity::getStatus, ApprovalRequestStatus.PENDING)
                 .set(ApprovalRequestEntity::getStatus, ApprovalRequestStatus.CANCELLED)
+                .set(ApprovalRequestEntity::getCurrentNodeName, null)
                 .set(ApprovalRequestEntity::getUpdateBy, currentUserId.toString())
                 .set(ApprovalRequestEntity::getUpdateTime, now));
         if (updated != 1) {
             throw new BusinessException("只有待审批申请可以撤回");
         }
-        approvalProcessService.terminate(entity.getFlowableProcessInstanceId());
         recordRequestStatusChange(entity, ApprovalRequestStatus.CANCELLED, currentUserId, null);
     }
 
@@ -264,6 +375,10 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
 
     /**
      * {@inheritDoc}
+     * <p>
+     * 不再是"仅持有 {@code ApprovalManagement:request:approve} 权限点即可看到全部待审批申请"，
+     * 而是限定为"当前用户在该申请当前所处节点被解析为指定处理人或候选人（用户/角色维度）"
+     * （master-data-approval-workflow spec.md "审批申请查询" Requirement）。
      */
     @Override
     public PageResult<ApprovalRequestVO> pagePending(
@@ -271,13 +386,50 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
             String operationType,
             Integer page,
             Integer pageSize) {
+        int effectivePage = page != null && page > 0 ? page : 1;
+        int effectivePageSize = pageSize != null && pageSize > 0 ? pageSize : 10;
+        Set<Long> candidateIds = resolvePendingCandidateRequestIds(requireCurrentUserId());
+        if (candidateIds.isEmpty()) {
+            return new PageResult<>(List.of(), 0L, effectivePage, effectivePageSize);
+        }
         LambdaQueryWrapper<ApprovalRequestEntity> wrapper = buildQuery(
                 bizType,
                 operationType,
                 ApprovalRequestStatus.PENDING)
+                .in(ApprovalRequestEntity::getId, candidateIds)
                 .orderByAsc(ApprovalRequestEntity::getCreateTime)
                 .orderByAsc(ApprovalRequestEntity::getId);
         return queryPage(wrapper, page, pageSize);
+    }
+
+    /**
+     * 解析当前用户在通用审批引擎里命中的待处理任务，反查这些任务所属流程实例关联的
+     * {@code tab_approval_request.id} 候选集合。命中判定复用
+     * {@link TaskAuthorizationService#isAuthorized}，与引擎内部 {@code approve}/{@code reject}
+     * 的越权校验保持完全一致的口径。
+     */
+    private Set<Long> resolvePendingCandidateRequestIds(Long currentUserId) {
+        List<ApprovalTaskEntity> openTasks = approvalTaskMapper.selectList(new LambdaQueryWrapper<ApprovalTaskEntity>()
+                .in(ApprovalTaskEntity::getStatus, TaskStatus.PENDING, TaskStatus.CLAIMED));
+        if (openTasks.isEmpty()) {
+            return Set.of();
+        }
+        Set<Long> matchedProcessInstanceIds = openTasks.stream()
+                .filter(task -> taskAuthorizationService.isAuthorized(task, currentUserId))
+                .map(ApprovalTaskEntity::getProcessInstanceId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (matchedProcessInstanceIds.isEmpty()) {
+            return Set.of();
+        }
+        List<ProcessInstanceEntity> instances = processInstanceMapper.selectList(
+                new LambdaQueryWrapper<ProcessInstanceEntity>()
+                        .in(ProcessInstanceEntity::getId, matchedProcessInstanceIds)
+                        .in(ProcessInstanceEntity::getBusinessType, SUPPORTED_BIZ_TYPES));
+        return instances.stream()
+                .map(ProcessInstanceEntity::getBusinessId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
     }
 
     /**
@@ -562,6 +714,52 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
             throw new BusinessException("审批申请不存在");
         }
         return entity;
+    }
+
+    /**
+     * 查询申请当前所处节点下、状态仍为待处理（{@code PENDING}/{@code CLAIMED}）的审批任务。
+     * 正常情况下同一时刻一条申请只对应唯一一条开放任务；查不到说明任务已被处理或申请尚未
+     * 成功接入引擎。
+     */
+    private ApprovalTaskEntity requireCurrentTask(Long processInstanceId) {
+        ApprovalTaskEntity task = findOpenTask(processInstanceId);
+        if (task == null) {
+            throw new BusinessException("审批任务已被处理");
+        }
+        return task;
+    }
+
+    /**
+     * 查询流程实例当前开放（{@code PENDING}/{@code CLAIMED}）的审批任务，不存在时返回
+     * {@code null}。
+     */
+    private ApprovalTaskEntity findOpenTask(Long processInstanceId) {
+        if (processInstanceId == null) {
+            return null;
+        }
+        return approvalTaskMapper.selectOne(new LambdaQueryWrapper<ApprovalTaskEntity>()
+                .eq(ApprovalTaskEntity::getProcessInstanceId, processInstanceId)
+                .in(ApprovalTaskEntity::getStatus, TaskStatus.PENDING, TaskStatus.CLAIMED)
+                .last("LIMIT 1"));
+    }
+
+    /**
+     * 解析发起人所属组织 id：优先取状态启用、任职类型为"主职"的任职记录所属组织，取不到时
+     * 退化为任一状态启用的任职记录所属组织，均无任职记录时返回 {@code null}（组织负责人类
+     * {@link cn.nihility.rbac.workflow.assignee.AssigneeResolver} 会按空审批人策略处理）。
+     */
+    private Long resolveApplicantOrgId(Long userId) {
+        List<UserPositionEntity> positions = userPositionMapper.selectList(new LambdaQueryWrapper<UserPositionEntity>()
+                .eq(UserPositionEntity::getUserId, userId)
+                .eq(UserPositionEntity::getStatus, PositionStatus.ENABLED));
+        if (positions.isEmpty()) {
+            return null;
+        }
+        return positions.stream()
+                .filter(position -> PRIMARY_POSITION_TYPE.equals(position.getPositionType()))
+                .map(UserPositionEntity::getOrgId)
+                .findFirst()
+                .orElseGet(() -> positions.get(0).getOrgId());
     }
 
     /**

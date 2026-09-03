@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  测试专用三级单人审批流程夹具，供 workflow-approval-engine change tasks.md 13.3 的集成测试
+  对着真实 Flowable 引擎验证转办（Transfer）/委派（Delegate）/退回（Return）操作，不随应用
+  启动部署（仅测试类通过 RepositoryService.createDeployment().addClasspathResource(...) 动态
+  部署，见 cn.nihility.rbac.workflow.integration.TaskOperationsIntegrationTest）。
+
+  三个用户任务均为 approval_mode=SINGLE、assignee_type=USER 的固定审批人节点，均挂
+  flowable:taskListener event="create" 指向 WorkflowAssigneeTaskListener（与生产环境
+  approval-process.bpmn20.xml 的写法完全一致）：
+  - levelOne：对应 tab_wf_node_assignee_rule.allow_transfer=1、allow_delegate=1、
+    allow_return=0，用于验证"转办变更处理人""委派后受托人完成任务再归还原处理人"两个场景，
+    以及"退回目标节点未配置 allow_return=true 时被拒绝"场景（把 levelOne 当退回目标）。
+  - levelTwo：allow_transfer=0、allow_delegate=0、allow_return=1，用于验证"转办不允许的
+    节点被拒绝"场景，以及作为退回的合法目标节点。
+  - levelThree：allow_transfer=0、allow_delegate=0、allow_return=0，用于验证"审批人对
+    配置 allow_return=true 的历史节点执行退回，该节点重新解析审批人"场景的退回发起方。
+-->
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:flowable="http://flowable.org/bpmn"
+             targetNamespace="cn.nihility.rbac.workflow.test">
+
+    <process id="testTransferDelegateReturnProcess" name="测试-转办委派退回" isExecutable="true">
+
+        <startEvent id="startEvent" name="提交审批申请" />
+
+        <userTask id="levelOne" name="第一级审批">
+            <extensionElements>
+                <flowable:taskListener event="create"
+                                        class="cn.nihility.rbac.workflow.engine.flowable.WorkflowAssigneeTaskListener" />
+            </extensionElements>
+        </userTask>
+
+        <userTask id="levelTwo" name="第二级审批">
+            <extensionElements>
+                <flowable:taskListener event="create"
+                                        class="cn.nihility.rbac.workflow.engine.flowable.WorkflowAssigneeTaskListener" />
+            </extensionElements>
+        </userTask>
+
+        <userTask id="levelThree" name="第三级审批">
+            <extensionElements>
+                <flowable:taskListener event="create"
+                                        class="cn.nihility.rbac.workflow.engine.flowable.WorkflowAssigneeTaskListener" />
+            </extensionElements>
+        </userTask>
+
+        <exclusiveGateway id="approveGateway" name="审批结果判断" />
+
+        <endEvent id="approvedEndEvent" name="已通过" />
+        <endEvent id="rejectedEndEvent" name="已拒绝" />
+
+        <sequenceFlow id="flowStartToLevelOne" sourceRef="startEvent" targetRef="levelOne" />
+        <sequenceFlow id="flowLevelOneToTwo" sourceRef="levelOne" targetRef="levelTwo" />
+        <sequenceFlow id="flowLevelTwoToThree" sourceRef="levelTwo" targetRef="levelThree" />
+        <sequenceFlow id="flowLevelThreeToGateway" sourceRef="levelThree" targetRef="approveGateway" />
+
+        <sequenceFlow id="flowApprovedEnd" sourceRef="approveGateway" targetRef="approvedEndEvent">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${approved == true}]]></conditionExpression>
+        </sequenceFlow>
+        <sequenceFlow id="flowRejectedEnd" sourceRef="approveGateway" targetRef="rejectedEndEvent">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${approved == false}]]></conditionExpression>
+        </sequenceFlow>
+
+    </process>
+</definitions>

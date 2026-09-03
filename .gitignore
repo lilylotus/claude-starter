@@ -1,5 +1,7 @@
 **/generated/**
 frontend/node_modules/**
+.gradle-user-home/**
+backend/.gradle-user-home/**
 
 HELP.md
 .gradle

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  测试专用会签（Multi-Instance，OR 模式）流程夹具，结构与
+  test-multi-instance-and.bpmn20.xml 完全一致，仅 completionCondition 换成与
+  MultiInstanceCompletionEvaluator.buildCompletionCondition(ApprovalMode.OR, null)
+  一致的表达式（任一候选人通过即完成）。详细约定说明见 AND 版本文件头注释。
+-->
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:flowable="http://flowable.org/bpmn"
+             targetNamespace="cn.nihility.rbac.workflow.test">
+
+    <process id="testMultiInstanceOrProcess" name="测试-会签OR模式" isExecutable="true">
+
+        <startEvent id="startEvent" name="提交审批申请" />
+
+        <userTask id="miApprove" name="会签审批(OR)" flowable:assignee="${approver}">
+            <extensionElements>
+                <flowable:executionListener event="start"
+                                             class="cn.nihility.rbac.workflow.engine.flowable.WorkflowMultiInstanceExecutionListener" />
+                <flowable:taskListener event="create"
+                                        class="cn.nihility.rbac.workflow.engine.flowable.WorkflowMultiInstanceTaskListener" />
+                <flowable:taskListener event="complete"
+                                        class="cn.nihility.rbac.workflow.engine.flowable.WorkflowMultiInstanceTaskListener" />
+            </extensionElements>
+            <multiInstanceLoopCharacteristics isSequential="false"
+                                               flowable:collection="approvers_miApprove"
+                                               flowable:elementVariable="approver">
+                <completionCondition><![CDATA[${miVeto == true || (nrOfCompletedInstances >= 1)}]]></completionCondition>
+            </multiInstanceLoopCharacteristics>
+        </userTask>
+
+        <exclusiveGateway id="approveGateway" name="审批结果判断" />
+
+        <endEvent id="approvedEndEvent" name="已通过" />
+        <endEvent id="rejectedEndEvent" name="已拒绝" />
+
+        <sequenceFlow id="flowStartToApprove" sourceRef="startEvent" targetRef="miApprove" />
+        <sequenceFlow id="flowApproveToGateway" sourceRef="miApprove" targetRef="approveGateway" />
+
+        <sequenceFlow id="flowApprovedEnd" sourceRef="approveGateway" targetRef="approvedEndEvent">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${approved == true}]]></conditionExpression>
+        </sequenceFlow>
+        <sequenceFlow id="flowRejectedEnd" sourceRef="approveGateway" targetRef="rejectedEndEvent">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${approved == false}]]></conditionExpression>
+        </sequenceFlow>
+
+    </process>
+</definitions>

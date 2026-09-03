@@ -2,9 +2,9 @@ package cn.nihility.rbac;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import cn.nihility.rbac.approval.dto.ApprovalProcessInstance;
 import cn.nihility.rbac.approval.service.ApprovalProcessService;
 import cn.nihility.rbac.plugin.config.PluginProperties;
+import cn.nihility.rbac.workflow.dto.WorkflowInstanceResult;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -39,15 +39,16 @@ class RbacApplicationTests {
 	}
 
     /**
-     * 验证审批 BPMN 已部署，且可启动并终止一个最小流程实例。
+     * 验证审批 BPMN 已部署，且可启动并撤回一个最小流程实例（两级默认审批流程，
+     * workflow-approval-engine change design.md Decision 8）。
      */
     @Test
     void approvalProcess_shouldStartAndTerminate() {
-        ApprovalProcessInstance processInstance = approvalProcessService.start(10001L);
+        WorkflowInstanceResult result = approvalProcessService.start(10001L, "ORG", 1L, null);
 
-        assertThat(processInstance.processInstanceId()).isNotBlank();
-        assertThat(processInstance.taskId()).isNotBlank();
-        approvalProcessService.terminate(processInstance.processInstanceId());
+        assertThat(result.processInstanceId()).isNotNull();
+        assertThat(result.flowableProcessInstanceId()).isNotBlank();
+        approvalProcessService.withdraw(result.processInstanceId(), 1L);
     }
 
 }
