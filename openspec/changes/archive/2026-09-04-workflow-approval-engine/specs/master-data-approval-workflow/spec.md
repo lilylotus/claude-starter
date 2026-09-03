@@ -1,44 +1,4 @@
-# master-data-approval-workflow Specification
-
-## Purpose
-
-为组织、用户、任职、应用四类主数据的新增、编辑、启用、停用、删除操作提供统一的审批流程：操作提交后生成一条待审批的变更申请，不立即修改业务数据，仅当拥有审批权限的用户批准后才执行原有的创建/更新/状态切换/删除逻辑；基于 Flowable 流程引擎驱动申请状态流转，为后续演进到多级审批预留空间；是否对某类业务对象启用审批可按业务对象类型独立开关配置。
-
-## Requirements
-
-### Requirement: 审批开关
-系统 SHALL 提供 `tab_approval_switch` 表，为组织（ORG）、用户（USER）、任职（POSITION）、应用（APP）四类业务对象类型各维护一条独立的审批开关记录（`bizType` 唯一，`enabled` 布尔），数据库迁移时 SHALL 为四类业务对象类型均预置 `enabled=false`（默认全部关闭审批，系统初始化后四个模块的写接口直接生效，需管理员手动开启）。系统 SHALL 提供查询当前四类开关状态的接口（需要 `ApprovalManagement:switch:view` 权限点）与修改指定 `bizType` 开关状态的接口（需要 `ApprovalManagement:switch:edit` 权限点）。关闭某个 `bizType` 的开关 SHALL NOT 影响该 `bizType` 下已存在的"待审批"申请——这些申请仍可正常被批准、拒绝或撤回；关闭/开启开关本身不回溯处理开关变更前后已经生效或待处理的申请。
-
-#### Scenario: 迁移完成后四类业务对象默认关闭审批
-- **WHEN** 系统完成数据库迁移
-- **THEN** 组织、用户、任职、应用四个 `bizType` 的审批开关均为关闭状态，四个模块的写接口直接生效
-
-#### Scenario: 开启组织的审批开关
-- **WHEN** 拥有 `ApprovalManagement:switch:edit` 权限的用户将默认关闭的 `bizType=ORG` 开关修改为开启
-- **THEN** 系统保存该状态，此后组织的新增/编辑/启用/停用/删除接口调用改为生成待审批申请，不立即修改业务数据
-
-#### Scenario: 关闭组织的审批开关
-- **WHEN** 拥有 `ApprovalManagement:switch:edit` 权限的用户将已开启的 `bizType=ORG` 开关修改为关闭
-- **THEN** 系统保存该状态，此后组织的新增/编辑/启用/停用/删除接口调用立即生效，不再生成审批申请
-
-#### Scenario: 无权限修改开关被拒绝
-- **WHEN** 不拥有 `ApprovalManagement:switch:edit` 权限的用户调用修改开关接口
-- **THEN** 系统拒绝该次调用，返回无权限错误，开关状态不变
-
-#### Scenario: 关闭开关不影响已存在的待审批申请
-- **WHEN** `bizType=APP` 存在一条"待审批"状态的申请，随后该 `bizType` 的审批开关被关闭
-- **THEN** 该条"待审批"申请仍然可以被正常批准、拒绝或撤回，不因开关关闭而被自动处理或失效
-
-### Requirement: 提交时按开关状态分流为审批或直接生效
-四个模块的新增/更新/启用/停用/删除接口被调用时，系统 SHALL 先查询该 `bizType` 当前的审批开关状态：开关开启时，按"提交审批申请"需求生成待审批的变更申请，不立即修改业务数据；开关关闭时，SHALL NOT 生成审批申请、SHALL NOT 启动 Flowable 流程实例，直接调用该模块既有的创建/更新/状态切换/删除方法立即执行，行为与未接入审批流程之前完全一致。四个模块的写接口 SHALL 统一返回一个"写操作结果"包装对象，包含：`approvalEnabled`（本次调用时该 `bizType` 的开关状态）、`approvalRequest`（开关开启时非空，审批申请信息）、`data`（开关关闭时非空，创建/更新后的业务数据）。
-
-#### Scenario: 开关开启时提交生成待审批申请
-- **WHEN** 某个 `bizType` 的审批开关为开启状态，客户端调用该 `bizType` 的新增接口
-- **THEN** 响应的 `approvalEnabled` 为 `true`，`approvalRequest` 非空，`data` 为空，不创建真实业务记录
-
-#### Scenario: 开关关闭时提交直接生效
-- **WHEN** 某个 `bizType` 的审批开关为关闭状态，客户端调用该 `bizType` 的新增接口，携带的字段满足全部结构与业务规则校验
-- **THEN** 系统直接创建该业务记录，响应的 `approvalEnabled` 为 `false`，`data` 非空且为创建后的业务数据，`approvalRequest` 为空，不生成审批申请、不启动流程实例
+## MODIFIED Requirements
 
 ### Requirement: 审批申请数据模型
 系统 SHALL 提供 `tab_approval_request` 表统一记录组织（ORG）、用户（USER）、任职（POSITION）、应用（APP）四类业务对象的新增（CREATE）、更新（UPDATE）、启用（ENABLE）、停用（DISABLE）、删除（DELETE）审批申请，每条申请包含：业务对象类型（`bizType`）、操作类型（`operationType`）、目标记录 id（`targetId`，CREATE 申请为空，其余操作类型必填）、审批通过后实际生效的记录 id（`resultTargetId`，仅 CREATE 申请审批通过后回填）、原始请求内容（`requestPayload`，JSON 序列化的创建/更新请求体，ENABLE/DISABLE/DELETE 申请为空）、状态（`status`：`1000`=待审批、`2000`=已通过、`3000`=已拒绝、`4000`=已撤回）、提交人（`createBy`）、提交时间（`createTime`）、审批人（`approverId`）、审批时间（`approveTime`）、审批意见（`opinion`）、关联的 Flowable 流程实例 id（`flowableProcessInstanceId`）与用户任务 id（`flowableTaskId`）、当前所处审批节点名称（`currentNodeName`，流程结束后为空）。审批流程 SHALL 支持多级审批：申请从"待审批"到"已通过"/"已拒绝"之间可能经过多个审批节点，`approverId`/`approveTime`/`opinion` 记录的是最终产生该状态变化（通过或拒绝）的那一级审批人；每一级的完整处理轨迹由通用审批引擎的审批记录能力维护，不在 `tab_approval_request` 表内逐级记录。
@@ -54,25 +14,6 @@
 #### Scenario: 多级审批流转中更新当前节点名称
 - **WHEN** 一条申请从第一级审批节点通过，流转到第二级审批节点
 - **THEN** 系统将该申请的 `currentNodeName` 更新为第二级节点的名称，申请状态仍为"待审批"
-
-### Requirement: 提交审批申请
-本需求描述的是"审批开关"开启状态下的提交行为（开关关闭时的直接生效行为见"提交时按开关状态分流为审批或直接生效"需求）。系统 SHALL 提供按 `bizType`（ORG/USER/POSITION/APP）与 `operationType`（CREATE/UPDATE/ENABLE/DISABLE/DELETE）提交审批申请的接口。提交时系统 SHALL 执行：请求体的结构校验（`@Valid`，必填/格式/长度等，与该 `bizType` 对应模块既有创建/更新请求体的校验规则一致）；管辖组织范围校验（复用"解析当前登录用户管辖组织范围"能力，规则与该 `bizType` 现有写接口的管辖范围校验完全一致——受限时目标组织/所属组织必须落在允许集合内，不落在范围内时拒绝提交，不生成申请记录）。系统 SHALL NOT 在提交阶段执行依赖当前数据库状态的业务规则校验（如编码唯一性、父子关系约束），这类校验延后到审批通过时执行。提交成功后，系统 SHALL 启动一个 Flowable 流程实例并创建对应的用户任务，申请状态置为"待审批"。
-
-#### Scenario: 提交创建组织申请成功
-- **WHEN** 客户端提交一条 `bizType=ORG`、`operationType=CREATE` 的申请，携带的组织名称、编码等字段满足结构校验，当前登录用户的管辖组织范围允许操作请求携带的 `parentId`
-- **THEN** 系统创建一条状态为"待审批"的申请记录，启动对应的 Flowable 流程实例，不创建真实的组织记录
-
-#### Scenario: 提交时结构校验不通过被拒绝
-- **WHEN** 客户端提交一条申请，请求体缺少必填字段或格式不合法
-- **THEN** 系统拒绝提交，返回参数校验错误，不生成申请记录，不启动流程实例
-
-#### Scenario: 提交时管辖组织范围校验不通过被拒绝
-- **WHEN** 当前登录用户的管辖组织范围解析结果为受限，客户端提交一条申请，请求携带的目标组织/所属组织不在管辖组织范围允许集合内
-- **THEN** 系统拒绝提交，返回业务错误，不生成申请记录
-
-#### Scenario: 提交时不校验编码唯一性等业务规则
-- **WHEN** 客户端提交一条 `bizType=APP`、`operationType=CREATE` 的申请，携带的应用编码与当前某条未删除应用的编码相同
-- **THEN** 系统仍然成功生成一条状态为"待审批"的申请记录，不在提交阶段因编码重复而拒绝
 
 ### Requirement: 审批通过后执行既有业务逻辑
 系统 SHALL 提供审批通过接口，仅 `ApprovalManagement:request:approve` 权限点持有者，且同时是该申请当前所处审批节点解析出的指定处理人或候选人（用户或角色维度命中）时，才允许调用；候选组节点未认领时系统 SHALL 自动先认领再完成。审批流程 SHALL 支持多级：当前节点通过后若流程尚未到达最终审批节点，系统 SHALL NOT 执行该 `bizType` 对应的创建/更新/启用/停用/删除逻辑，仅推进流程到下一节点、更新 `currentNodeName`，申请状态保持"待审批"；仅当流程到达最终审批节点并通过后，系统 SHALL 以该申请的**提交人**身份（而非当前调用审批接口的审批人身份）重新执行一次管辖组织范围校验，通过后调用该 `bizType` 对应模块既有的创建/更新/启用/停用/删除方法（`request_payload` 反序列化为该方法的请求参数），复用该方法内部已有的全部业务规则校验（如唯一性、父子关系约束）与操作日志记录；该方法执行的操作日志中"操作人"字段 SHALL 记录为提交人，而非审批人。若该方法执行时业务规则校验失败（如编码唯一性冲突），审批操作 SHALL 返回失败，该申请状态 SHALL 保持"待审批"不变，不自动转为"已拒绝"，也不创建/修改任何业务记录，流程也不会推进到已通过状态。审批通过执行成功后（最终节点），系统 SHALL 将该申请状态置为"已通过"，记录最终审批人与审批时间；`operationType=CREATE` 的申请 SHALL 回填 `resultTargetId` 为新创建记录的 id；系统 SHALL 完成该申请关联的 Flowable 用户任务。
@@ -157,26 +98,3 @@
 #### Scenario: 更新类申请查询结果包含新旧对照
 - **WHEN** 查询一条 `operationType=UPDATE` 的申请详情
 - **THEN** 返回结果同时包含目标记录当前的字段值与 `requestPayload` 中提交的新字段值
-
-### Requirement: 管理页面的审批入口
-系统 SHALL 提供"我的申请"、"待我审批"、"审批设置"三个前端页面；"待我审批"页面的访问与操作 SHALL 受 `ApprovalManagement:request:approve` 权限点门控，"审批设置"页面的访问 SHALL 受 `ApprovalManagement:switch:view` 权限点门控、修改开关操作 SHALL 受 `ApprovalManagement:switch:edit` 权限点门控，无对应权限的用户看不到相应菜单入口。组织、用户、任职、应用四个管理页面的新增/编辑/启用/停用/删除操作，调用对应接口成功后 SHALL 按响应的 `approvalEnabled` 字段分别展示提示：为 `true` 时展示"已提交审批，等待审批通过后生效"，不假定接口返回的是最终生效的业务数据；为 `false` 时展示与本 change 之前一致的直接生效提示（如"创建成功"），并使用响应的 `data` 更新页面展示。"我的申请""待我审批"两个页面共用的申请详情展示（含 `UPDATE` 类型申请的新旧字段对照）依赖字段渲染元数据接口（`GET /api/form-fields/render-schema`，见 `password-login-auth` 能力"表单字段渲染元数据接口豁免操作资源编码校验"）查询业务对象类型的字段展示名与控件配置，该查询 SHALL NOT 因当前查看者不持有被审批业务对象（组织/用户/任职/应用）对应的管理权限点而失败——审批详情的查看权限完全由用户能否看到"我的申请"（自助，任何登录用户）或"待我审批"（`ApprovalManagement:request:approve`）决定，不叠加被审批对象自身的管理权限点要求。
-
-#### Scenario: 无审批权限的用户看不到待我审批菜单
-- **WHEN** 当前登录用户的权限编码集合不包含 `ApprovalManagement:request:approve`
-- **THEN** 侧边导航不展示"待我审批"菜单项
-
-#### Scenario: 无审批开关查看权限的用户看不到审批设置菜单
-- **WHEN** 当前登录用户的权限编码集合不包含 `ApprovalManagement:switch:view`
-- **THEN** 侧边导航不展示"审批设置"菜单项
-
-#### Scenario: 开关开启时提交新增组织申请后展示待审批提示
-- **WHEN** 组织的审批开关为开启状态，用户在组织管理页面提交新增组织表单
-- **THEN** 页面展示"已提交审批，等待审批通过后生效"提示，不在列表中立即展示新组织
-
-#### Scenario: 查看更新类申请详情不要求被审批对象的管理权限点
-- **WHEN** 用户在"我的申请"或"待我审批"页面打开一条 `operationType=UPDATE` 的申请详情，该用户当前权限编码集合不包含该申请 `bizType` 对应的管理权限点（如 `OrgManagement:org:view`）
-- **THEN** 详情弹窗仍能正常拉取到该 `bizType` 的字段渲染元数据并展示新旧字段对照，不因缺少该业务管理权限点而报错或留空
-
-#### Scenario: 开关关闭时提交新增组织后直接展示新数据
-- **WHEN** 组织的审批开关为关闭状态，用户在组织管理页面提交新增组织表单
-- **THEN** 页面展示创建成功提示，并直接展示新创建的组织数据，行为与本 change 之前一致
