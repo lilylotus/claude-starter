@@ -182,15 +182,16 @@ public class AppAuthConfigServiceImpl implements AppAuthConfigService {
 
     /**
      * 校验并规范化提交的登录认证方式列表：每一项只能是 {@code PASSWORD}/{@code SMS}/
-     * {@code QRCODE}，出现取值范围外的字符串直接拒绝；{@code PASSWORD} 恒定包含，缺失时
-     * 自动补齐而不是拒绝请求（add-sso-login-methods change design.md Decision 1）。
+     * {@code QRCODE}，出现取值范围外的字符串直接拒绝；不再强制补齐 {@code PASSWORD}，
+     * 结果允许为空列表，代表该应用未单独配置认证方式（app-auth-method-config-refine
+     * change design.md Decision 1）。查询侧 {@link #parseLoginMethods} 会在未配置（含
+     * 从未保存过、以及显式保存为空列表）时统一回退为默认仅口令登录。
      *
      * @param loginMethods 原始登录认证方式列表，可能为 {@code null}
-     * @return 规范化后的登录认证方式列表，{@code PASSWORD} 固定排在首位
+     * @return 规范化后的登录认证方式列表，去重后按提交顺序排列，可能为空列表
      */
     private List<String> normalizeLoginMethods(List<String> loginMethods) {
         Set<String> result = new LinkedHashSet<>();
-        result.add(LoginMethod.PASSWORD);
         if (loginMethods != null) {
             for (String loginMethod : loginMethods) {
                 if (!StringUtils.hasText(loginMethod)) {

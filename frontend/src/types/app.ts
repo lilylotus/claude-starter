@@ -221,12 +221,13 @@ export const AUTH_PROTOCOL_OPTIONS: Array<{ value: AuthProtocol; label: string }
 ]
 
 // SSO 登录页允许展示的登录认证方式，与后端 AppAuthConfigEntity.loginMethods 取值对齐；
-// PASSWORD 恒定包含且不可关闭，SMS/QRCODE 是否出现代表是否为该应用启用
-// （见 openspec/changes/add-sso-login-methods）
+// PASSWORD 默认勾选但可以取消，SMS/QRCODE 是否出现代表是否为该应用启用；三者均可取消，
+// 未配置任何方式（空数组）时后端查询会回退为默认口令登录
+// （见 openspec/changes/add-sso-login-methods、openspec/changes/app-auth-method-config-refine）
 export type SsoLoginMethod = 'PASSWORD' | 'SMS' | 'QRCODE'
 
 export const SSO_LOGIN_METHOD_OPTIONS: Array<{ value: SsoLoginMethod; label: string; disabled?: boolean }> = [
-  { value: 'PASSWORD', label: '口令登录', disabled: true },
+  { value: 'PASSWORD', label: '口令登录' },
   { value: 'SMS', label: '短信登录' },
   { value: 'QRCODE', label: '扫码登录' },
 ]

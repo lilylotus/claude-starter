@@ -166,30 +166,34 @@ class AppAuthConfigServiceImplTest {
     }
 
     /**
-     * 提交的登录认证方式列表缺少 {@code PASSWORD} 时应自动补齐，而不是拒绝请求
-     * （design.md Decision 1）。
+     * 提交不含 {@code PASSWORD} 的非空登录认证方式组合时应原样保存，不再自动补齐口令
+     * （app-auth-method-config-refine change design.md Decision 1）。
      */
     @Test
-    void updateConfig_shouldAutoAddPassword_whenMissingFromLoginMethods() {
+    void updateConfig_shouldSaveLoginMethods_withoutAutoAddingPassword() {
         when(appMapper.selectById(10L)).thenReturn(buildAppEntity(10L, 100L));
         when(appAuthConfigMapper.selectOne(any())).thenReturn(buildEntity(10L, AuthProtocol.NONE, List.of()));
 
         AppAuthConfigUpdateRequest request = new AppAuthConfigUpdateRequest();
         request.setAuthProtocol(AuthProtocol.NONE);
-        request.setLoginMethods(List.of(LoginMethod.QRCODE));
+        request.setLoginMethods(List.of(LoginMethod.SMS));
 
         AppAuthConfigVO vo = service.updateConfig(10L, request);
 
-        assertThat(vo.getLoginMethods()).containsExactlyInAnyOrder(LoginMethod.PASSWORD, LoginMethod.QRCODE);
+        assertThat(vo.getLoginMethods()).containsExactly(LoginMethod.SMS);
     }
 
     /**
-     * 未提交任何登录认证方式（{@code null}）时应保存为仅含 {@code PASSWORD}。
+     * 未提交任何登录认证方式（{@code null}）时应保存为空列表（代表未配置），落库内容不再被
+     * 强制补齐为 {@code PASSWORD}；查询侧 {@code parseLoginMethods} 的兜底逻辑会把空列表
+     * 统一回退为仅 {@code PASSWORD}，因此视图对象仍展示为口令登录（app-auth-method-config-refine
+     * change design.md Decision 1）。
      */
     @Test
-    void updateConfig_shouldSavePasswordOnly_whenLoginMethodsNull() {
+    void updateConfig_shouldSaveEmptyLoginMethods_whenNull() {
         when(appMapper.selectById(10L)).thenReturn(buildAppEntity(10L, 100L));
-        when(appAuthConfigMapper.selectOne(any())).thenReturn(buildEntity(10L, AuthProtocol.NONE, List.of()));
+        AppAuthConfigEntity entity = buildEntity(10L, AuthProtocol.NONE, List.of());
+        when(appAuthConfigMapper.selectOne(any())).thenReturn(entity);
 
         AppAuthConfigUpdateRequest request = new AppAuthConfigUpdateRequest();
         request.setAuthProtocol(AuthProtocol.NONE);
@@ -197,6 +201,27 @@ class AppAuthConfigServiceImplTest {
 
         AppAuthConfigVO vo = service.updateConfig(10L, request);
 
+        assertThat(entity.getLoginMethods()).isEqualTo(JacksonUtils.toJson(List.of()));
+        assertThat(vo.getLoginMethods()).containsExactly(LoginMethod.PASSWORD);
+    }
+
+    /**
+     * 显式提交空数组时应保存成功、落库为空列表（不再拒绝"至少一项"），查询回退为默认仅
+     * {@code PASSWORD}，与未配置过 {@code loginMethods} 的存量场景表现一致（tasks.md 1.4）。
+     */
+    @Test
+    void updateConfig_shouldSaveEmptyLoginMethods_whenExplicitEmptyList() {
+        when(appMapper.selectById(10L)).thenReturn(buildAppEntity(10L, 100L));
+        AppAuthConfigEntity entity = buildEntity(10L, AuthProtocol.NONE, List.of());
+        when(appAuthConfigMapper.selectOne(any())).thenReturn(entity);
+
+        AppAuthConfigUpdateRequest request = new AppAuthConfigUpdateRequest();
+        request.setAuthProtocol(AuthProtocol.NONE);
+        request.setLoginMethods(List.of());
+
+        AppAuthConfigVO vo = service.updateConfig(10L, request);
+
+        assertThat(entity.getLoginMethods()).isEqualTo(JacksonUtils.toJson(List.of()));
         assertThat(vo.getLoginMethods()).containsExactly(LoginMethod.PASSWORD);
     }
 

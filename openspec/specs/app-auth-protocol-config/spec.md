@@ -17,8 +17,9 @@
 ### Requirement: 查询应用认证配置
 系统 SHALL 提供接口，按应用 id 查询该应用当前的认证配置：协议类型、回跳地址匹配列表
 （`servicePatterns`，CAS/OAuth2.0 等协议共用同一份存储）、登出通知回调地址
-（`logoutNotifyUrl`，未配置时返回空）、允许的登录认证方式列表（`loginMethods`，取值子集为
-`PASSWORD`/`SMS`/`QRCODE`，`PASSWORD` 恒定包含），以及基于该应用 `appId` 计算出的只读协议
+（`logoutNotifyUrl`，未配置时返回空）、认证方式配置（`loginMethods`，取值子集为
+`PASSWORD`/`SMS`/`QRCODE`，未配置——含从未修改过、以及显式保存为空列表——时统一返回
+仅含 `PASSWORD` 的默认值），以及基于该应用 `appId` 计算出的只读协议
 接口地址（CAS 登录/票据验证/登出三个地址，OAuth2 授权/Access Token/用户信息三个地址），无论
 当前协议类型是"无"、"CAS"还是"OAuth2.0"，接口地址均一并返回。
 
@@ -36,11 +37,16 @@
 - **WHEN** 调用方查询一个从未修改过登录认证方式配置的应用（含存量应用）
 - **THEN** 系统返回的 `loginMethods` 为 `["PASSWORD"]`
 
+#### Scenario: 显式保存为空列表时查询仍返回仅口令
+- **WHEN** 调用方查询一个此前被管理员显式把 `loginMethods` 全部取消勾选并保存过的应用
+- **THEN** 系统返回的 `loginMethods` 为 `["PASSWORD"]`，与"从未配置过"的查询结果一致
+
 ### Requirement: 修改应用认证配置
 系统 SHALL 提供接口，修改指定应用的协议类型、回跳地址匹配列表（`servicePatterns`）、登出
-通知回调地址（`logoutNotifyUrl`，可选字段，允许留空），以及允许的登录认证方式列表
-（`loginMethods`，取值子集为 `PASSWORD`/`SMS`/`QRCODE`），且只有当前登录用户对该应用所属
-组织具备管辖权限时才允许修改，否则 SHALL 拒绝该次请求。修改成功后 SHALL 记录一条操作日志。
+通知回调地址（`logoutNotifyUrl`，可选字段，允许留空），以及认证方式配置（`loginMethods`，
+取值子集为 `PASSWORD`/`SMS`/`QRCODE`，允许提交空列表代表不单独配置），且只有当前登录用户
+对该应用所属组织具备管辖权限时才允许修改，否则 SHALL 拒绝该次请求。修改成功后 SHALL 记录
+一条操作日志。
 
 #### Scenario: 无管辖权限时修改被拒绝
 - **WHEN** 当前登录用户对目标应用所属组织不具备管辖权限，仍调用修改认证配置接口
@@ -57,10 +63,15 @@
 - **THEN** 系统正常保存本次修改，该应用的登出通知回调地址为空，登出时系统跳过该应用的
   回调通知
 
-#### Scenario: 提交的登录认证方式不含口令时服务端自动补齐
+#### Scenario: 提交不含口令的认证方式组合按原样保存
 - **WHEN** 管理员提交的 `loginMethods` 只包含 `SMS`/`QRCODE`，不包含 `PASSWORD`
-- **THEN** 系统保存时自动补齐 `PASSWORD`，保存结果中的 `loginMethods` 恒定包含 `PASSWORD`，
-  不因管理员遗漏而导致该应用彻底无法登录
+- **THEN** 系统按提交内容原样保存，不自动补齐 `PASSWORD`；该应用此后的 SSO 登录页仅展示
+  `SMS`/`QRCODE` 对应的登录方式入口，不展示口令登录
+
+#### Scenario: 提交空列表代表不单独配置认证方式
+- **WHEN** 管理员把某应用的 `loginMethods` 全部取消勾选，提交空列表并保存
+- **THEN** 系统正常保存本次修改（不拒绝、不报错），该应用此后按"未配置"处理，查询与 SSO
+  登录页展示均回退为默认仅口令登录，不会导致该应用彻底无法登录
 
 #### Scenario: 启用短信/扫码登录
 - **WHEN** 管理员把某应用的 `loginMethods` 从 `["PASSWORD"]` 改为

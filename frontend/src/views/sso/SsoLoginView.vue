@@ -397,7 +397,7 @@ onBeforeUnmount(() => {
         <template v-else>
           <!-- 仅允许口令登录时，保持原有无标签页样式 -->
           <el-form
-            v-if="loginMethods.length <= 1"
+            v-if="loginMethods.length <= 1 && loginMethods.includes('PASSWORD')"
             ref="formRef"
             :model="form"
             :rules="rules"
@@ -503,7 +503,10 @@ onBeforeUnmount(() => {
         </template>
 
         <p v-if="isPasswordChange" class="sso-login__hint">修改成功后将继续原 CAS/OAuth2.0 登录流程</p>
-        <p v-else-if="loginMethods.length <= 1 || activeTab === 'PASSWORD'" class="sso-login__hint">
+        <p
+          v-else-if="(loginMethods.length <= 1 && loginMethods.includes('PASSWORD')) || activeTab === 'PASSWORD'"
+          class="sso-login__hint"
+        >
           用户名为分配的用户编码，密码为初始密码或管理员重置后的默认密码
         </p>
       </div>

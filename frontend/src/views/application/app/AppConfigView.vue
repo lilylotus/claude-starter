@@ -538,8 +538,8 @@ const authProtocol = ref<AuthProtocol>('NONE')
 const servicePatternRows = ref<string[]>([])
 // 登出通知回调地址：随协议类型/匹配列表一并读写，不区分协议类型都可填写，留空表示不通知
 const logoutNotifyUrl = ref('')
-// 允许的登录认证方式：口令固定选中且禁用取消勾选（SSO_LOGIN_METHOD_OPTIONS 里
-// PASSWORD 一项 disabled: true），短信/扫码可勾选；随协议类型/匹配列表一并读写
+// 认证方式配置：口令默认勾选但可以取消，短信/扫码同样可自由勾选/取消，三者均可为空
+// （未配置/全部取消时后端查询会回退为默认口令登录）；随协议类型/匹配列表一并读写
 const loginMethods = ref<SsoLoginMethod[]>(['PASSWORD'])
 // 6 个只读协议接口地址（路径部分），由后端按当前应用的 AppId 计算返回
 const authUrls = reactive({
@@ -631,9 +631,9 @@ async function saveAuthConfig() {
       authProtocol: authProtocol.value,
       servicePatterns: servicePatternRows.value.map((row) => row.trim()).filter(Boolean),
       logoutNotifyUrl: logoutNotifyUrl.value.trim(),
-      // 口令恒定必选，即便前端 el-checkbox disabled 已阻止用户取消勾选，这里再兜底一次，
-      // 避免任何异常路径下提交出不含 PASSWORD 的列表（后端也会自动补齐，双重保险）
-      loginMethods: loginMethods.value.includes('PASSWORD') ? loginMethods.value : ['PASSWORD', ...loginMethods.value],
+      // 按勾选框当前值原样提交，允许为空数组（代表未配置认证方式）；不做"至少一项"的
+      // 前端拦截，未配置/全部取消时由后端查询侧回退为默认口令登录
+      loginMethods: loginMethods.value,
     })
     applyAuthConfig(data)
     ElMessage.success('保存成功')
@@ -1364,7 +1364,7 @@ function handlePullLogSizeChange(newSize: number) {
               />
             </el-form-item>
 
-            <el-form-item label="允许的登录认证方式">
+            <el-form-item label="认证方式配置">
               <el-checkbox-group v-model="loginMethods">
                 <el-checkbox
                   v-for="option in SSO_LOGIN_METHOD_OPTIONS"
@@ -1376,7 +1376,7 @@ function handlePullLogSizeChange(newSize: number) {
                 </el-checkbox>
               </el-checkbox-group>
               <div class="app-config__form-item-hint">
-                SSO 登录页仅展示这里勾选的认证方式；口令登录固定必选，不可取消。
+                认证方式可以不配置，未配置时默认使用口令登录。
               </div>
             </el-form-item>
 
