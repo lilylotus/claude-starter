@@ -1,6 +1,11 @@
 package cn.nihility.rbac.admin.service.impl;
 
 import cn.nihility.rbac.admin.constant.AdminStatus;
+import cn.nihility.rbac.admin.dto.AdminAppendRoleCandidateVO;
+import cn.nihility.rbac.admin.dto.AdminBatchPromoteByRolePreviewVO;
+import cn.nihility.rbac.admin.dto.AdminBatchPromoteByRoleResult;
+import cn.nihility.rbac.admin.dto.AdminBatchPromoteCandidateVO;
+import cn.nihility.rbac.admin.dto.AdminBatchPromoteSkippedVO;
 import cn.nihility.rbac.admin.dto.AdminCreateRequest;
 import cn.nihility.rbac.admin.dto.AdminOrgScopeRequest;
 import cn.nihility.rbac.admin.dto.AdminOrgScopeVO;
@@ -20,28 +25,43 @@ import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.role.constant.RoleStatus;
+import cn.nihility.rbac.role.entity.RoleEntity;
+import cn.nihility.rbac.role.mapper.RoleMapper;
+import cn.nihility.rbac.user.constant.UserStatus;
 import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import cn.nihility.rbac.user.service.UserDisplayService;
+import cn.nihility.rbac.userrole.mapper.UserRoleRuleGrantMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 /**
  * 管理员管理业务逻辑实现。角色关联（{@code tab_admin_role}）与组织管辖范围
  * （{@code tab_admin_org_scope}）在每次创建/更新时采用"先删后插"的整体同步策略，
  * 不做按行 diff（两张关联表都是纯关联/配置行，没有独立业务详情需要跨版本保留）。
+ * {@link #previewBatchPromoteByRole}/{@link #batchPromoteByRole} 是例外：以
+ * {@code user-role-assignment} 能力维护的规则执行结果表 {@code tab_user_role_rule_grant}
+ * 为匹配来源，对"将补充角色"分组只做追加式的单条插入，不走整体替换语义，避免误删既有角色/
+ * 组织管辖范围；"将新建管理员"分组创建的管理员记录会打上 {@code autoCreatedRoleId} 标记，
+ * 供角色被规则收回时联动停用（add-user-role-batch-assignment change design.md
+ * Decision 5/7，二次设计版本）。
  */
 @Service
 @RequiredArgsConstructor
@@ -67,6 +87,14 @@ public class AdminServiceImpl implements AdminService {
 
     /** 审计字段（{@code createBy}/{@code updateBy}）展示名批量解析服务。 */
     private final UserDisplayService userDisplayService;
+
+    /** 角色数据访问接口，校验按角色批量设置管理员时目标角色存在且未删除。 */
+    private final RoleMapper roleMapper;
+
+    /** 用户角色规则计算结果数据访问接口，按角色批量设置管理员的候选用户匹配来源
+     *  （add-user-role-batch-assignment change design.md Decision 5，二次设计版本：数据
+     *  来源从已废弃的 {@code tab_user_role} 切换为规则执行结果表）。 */
+    private final UserRoleRuleGrantMapper userRoleRuleGrantMapper;
 
     /**
      * {@inheritDoc}
@@ -168,6 +196,192 @@ public class AdminServiceImpl implements AdminService {
         adminMapper.updateById(entity);
 
         operationLogRecorder.recordDelete(OperationLogResourceType.ADMIN, id, entity.getName(), beforeSnapshot);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public AdminBatchPromoteByRolePreviewVO previewBatchPromoteByRole(Long roleId) {
+        getExistingRole(roleId);
+        Set<Long> candidateUserIds = resolveEnabledCandidateUserIds(roleId);
+        if (candidateUserIds.isEmpty()) {
+            return AdminBatchPromoteByRolePreviewVO.builder()
+                    .newAdmins(List.of()).newAdminCount(0)
+                    .appendRoleAdmins(List.of()).appendRoleCount(0)
+                    .build();
+        }
+
+        Map<Long, UserEntity> userById = userMapper.selectList(new LambdaQueryWrapper<UserEntity>()
+                        .in(UserEntity::getId, candidateUserIds))
+                .stream()
+                .collect(Collectors.toMap(UserEntity::getId, Function.identity()));
+
+        List<AdminEntity> existingAdmins = adminMapper.selectList(new LambdaQueryWrapper<AdminEntity>()
+                .in(AdminEntity::getUserId, candidateUserIds)
+                .ne(AdminEntity::getStatus, AdminStatus.DELETED));
+        Map<Long, AdminEntity> adminByUserId = existingAdmins.stream()
+                .collect(Collectors.toMap(AdminEntity::getUserId, Function.identity()));
+
+        Set<Long> existingAdminIds = existingAdmins.stream().map(AdminEntity::getId).collect(Collectors.toSet());
+        Set<Long> adminIdsAlreadyHavingRole = existingAdminIds.isEmpty() ? Set.of()
+                : adminRoleMapper.selectList(new LambdaQueryWrapper<AdminRoleEntity>()
+                        .in(AdminRoleEntity::getAdminId, existingAdminIds)
+                        .eq(AdminRoleEntity::getRoleId, roleId))
+                    .stream().map(AdminRoleEntity::getAdminId).collect(Collectors.toSet());
+
+        List<AdminBatchPromoteCandidateVO> newAdmins = new ArrayList<>();
+        List<AdminAppendRoleCandidateVO> appendRoleAdmins = new ArrayList<>();
+        for (Long userId : candidateUserIds) {
+            UserEntity user = userById.get(userId);
+            if (user == null) {
+                continue;
+            }
+            AdminEntity admin = adminByUserId.get(userId);
+            if (admin == null) {
+                newAdmins.add(AdminBatchPromoteCandidateVO.builder()
+                        .userId(userId).userName(user.getName()).userCode(user.getCode()).build());
+            } else if (!adminIdsAlreadyHavingRole.contains(admin.getId())) {
+                appendRoleAdmins.add(AdminAppendRoleCandidateVO.builder()
+                        .adminId(admin.getId()).adminName(admin.getName()).adminCode(admin.getCode())
+                        .userId(userId).userName(user.getName()).build());
+            }
+        }
+
+        return AdminBatchPromoteByRolePreviewVO.builder()
+                .newAdmins(newAdmins).newAdminCount(newAdmins.size())
+                .appendRoleAdmins(appendRoleAdmins).appendRoleCount(appendRoleAdmins.size())
+                .build();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
+    public AdminBatchPromoteByRoleResult batchPromoteByRole(Long roleId, List<AdminOrgScopeRequest> orgScopes) {
+        getExistingRole(roleId);
+        AdminBatchPromoteByRolePreviewVO preview = previewBatchPromoteByRole(roleId);
+        String operator = Objects.toString(currentOperatorService.resolveUserId(), null);
+
+        List<AdminBatchPromoteSkippedVO> skipped = new ArrayList<>();
+        int newAdminCount = 0;
+        for (AdminBatchPromoteCandidateVO candidate : preview.getNewAdmins()) {
+            if (isCodeOccupiedByAnotherAdmin(candidate.getUserCode())) {
+                skipped.add(AdminBatchPromoteSkippedVO.builder()
+                        .userId(candidate.getUserId())
+                        .userName(candidate.getUserName())
+                        .userCode(candidate.getUserCode())
+                        .reason("管理员编码[" + candidate.getUserCode() + "]已被占用")
+                        .build());
+                continue;
+            }
+
+            LocalDateTime now = LocalDateTime.now();
+            AdminEntity entity = AdminEntity.builder()
+                    .name(candidate.getUserName())
+                    .code(candidate.getUserCode())
+                    .userId(candidate.getUserId())
+                    .autoCreatedRoleId(roleId)
+                    .showOrder(0)
+                    .remark(null)
+                    .status(AdminStatus.ENABLED)
+                    .createBy(operator)
+                    .createTime(now)
+                    .updateBy(operator)
+                    .updateTime(now)
+                    .build();
+            adminMapper.insert(entity);
+            syncRoles(entity.getId(), List.of(roleId), operator);
+            syncOrgScopes(entity.getId(), orgScopes, operator);
+            newAdminCount++;
+        }
+
+        int appendRoleCount = 0;
+        for (AdminAppendRoleCandidateVO candidate : preview.getAppendRoleAdmins()) {
+            appendRoleIfMissing(candidate.getAdminId(), roleId, operator);
+            appendRoleCount++;
+        }
+
+        return AdminBatchPromoteByRoleResult.builder()
+                .newAdminCount(newAdminCount)
+                .appendRoleCount(appendRoleCount)
+                .skipped(skipped)
+                .build();
+    }
+
+    /**
+     * 查询一个未被逻辑删除的角色，不存在时抛出业务异常。
+     *
+     * @param roleId 角色 id
+     * @return 角色实体
+     */
+    private RoleEntity getExistingRole(Long roleId) {
+        RoleEntity entity = roleMapper.selectById(roleId);
+        if (entity == null || Objects.equals(entity.getStatus(), RoleStatus.DELETED)) {
+            throw new BusinessException("角色不存在");
+        }
+        return entity;
+    }
+
+    /**
+     * 查询当前持有目标角色、且状态启用的候选用户 id 集合：先按 {@code tab_user_role_rule_grant}
+     * 查出持有该角色的用户 id（去重），再按 {@code tab_user.status = ENABLED} 收窄。
+     *
+     * @param roleId 目标角色 id
+     * @return 候选用户 id 集合
+     */
+    private Set<Long> resolveEnabledCandidateUserIds(Long roleId) {
+        List<Long> userIds = userRoleRuleGrantMapper.selectUserIdsByRoleId(roleId);
+        if (userIds.isEmpty()) {
+            return Set.of();
+        }
+
+        List<UserEntity> enabledUsers = userMapper.selectList(new LambdaQueryWrapper<UserEntity>()
+                .in(UserEntity::getId, userIds)
+                .eq(UserEntity::getStatus, UserStatus.ENABLED));
+        return enabledUsers.stream().map(UserEntity::getId).collect(Collectors.toSet());
+    }
+
+    /**
+     * 判断给定编码是否已被某个未删除的管理员占用（不排除任何自身 id，仅用于批量创建新管理员
+     * 前的冲突检查，冲突场景下跳过该用户、不创建，见 {@link #batchPromoteByRole}）。
+     *
+     * @param code 待校验的管理员编码
+     * @return 是否已被占用
+     */
+    private boolean isCodeOccupiedByAnotherAdmin(String code) {
+        Long count = adminMapper.selectCount(new LambdaQueryWrapper<AdminEntity>()
+                .eq(AdminEntity::getCode, code)
+                .ne(AdminEntity::getStatus, AdminStatus.DELETED));
+        return count != null && count > 0;
+    }
+
+    /**
+     * 仅向既有管理员追加一条角色关联（如果尚未持有该角色），不经过"编辑管理员"的整体替换
+     * 语义，不触碰该管理员的其他字段、其他已有角色、已有管辖组织范围。
+     *
+     * @param adminId  既有管理员 id
+     * @param roleId   待追加的角色 id
+     * @param operator 操作人用户 id 文本
+     */
+    private void appendRoleIfMissing(Long adminId, Long roleId, String operator) {
+        Long count = adminRoleMapper.selectCount(new LambdaQueryWrapper<AdminRoleEntity>()
+                .eq(AdminRoleEntity::getAdminId, adminId)
+                .eq(AdminRoleEntity::getRoleId, roleId));
+        if (count != null && count > 0) {
+            return;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        adminRoleMapper.insert(AdminRoleEntity.builder()
+                .adminId(adminId)
+                .roleId(roleId)
+                .createBy(operator)
+                .createTime(now)
+                .updateBy(operator)
+                .updateTime(now)
+                .build());
     }
 
     /**

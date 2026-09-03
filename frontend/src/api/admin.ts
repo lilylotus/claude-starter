@@ -1,5 +1,12 @@
 import request from './request'
-import type { AdminFormRequest, AdminRow, PageResult } from '@/types/admin'
+import type {
+  AdminBatchPromoteByRoleConditions,
+  AdminBatchPromoteExecuteResult,
+  AdminBatchPromotePreviewResult,
+  AdminFormRequest,
+  AdminRow,
+  PageResult,
+} from '@/types/admin'
 
 // 管理员管理接口封装，组件/store 不直接调用 axios。
 
@@ -36,4 +43,54 @@ export function disableAdmin(id: number): Promise<void> {
 // 删除管理员（逻辑删除，不级联清理其名下的角色/组织管辖范围关联行）
 export function deleteAdmin(id: number): Promise<void> {
   return request.delete(`/admins/${id}`)
+}
+
+// 后端 POST /admins/batch-promote-by-role 统一响应外壳：{ preview, previewResult, executeResult }；
+// previewResult 分组字段命名为 newAdmins/newAdminCount/appendRoleAdmins/appendRoleCount，
+// executeResult 计数字段命名为 newAdminCount/appendRoleCount，这里转换成本模块
+// AdminBatchPromotePreviewResult/AdminBatchPromoteExecuteResult 的 toCreate/toAppendRole、
+// createdCount/appendedRoleCount 命名
+interface AdminBatchPromoteByRoleResponseRaw {
+  preview: boolean
+  previewResult?: {
+    newAdmins: AdminBatchPromotePreviewResult['toCreate']
+    appendRoleAdmins: AdminBatchPromotePreviewResult['toAppendRole']
+  }
+  executeResult?: {
+    newAdminCount: number
+    appendRoleCount: number
+    skipped: AdminBatchPromoteExecuteResult['skipped']
+  }
+}
+
+// 按角色批量设置管理员 - 预览：持有该角色的用户中，分"将新建管理员"/"将补充角色"两组返回
+export function previewBatchPromoteByRole(
+  conditions: AdminBatchPromoteByRoleConditions,
+): Promise<AdminBatchPromotePreviewResult> {
+  return request
+    .post<AdminBatchPromoteByRoleResponseRaw, AdminBatchPromoteByRoleResponseRaw>(
+      '/admins/batch-promote-by-role',
+      { ...conditions, preview: true },
+    )
+    .then((res) => ({
+      toCreate: res.previewResult?.newAdmins ?? [],
+      toAppendRole: res.previewResult?.appendRoleAdmins ?? [],
+    }))
+}
+
+// 按角色批量设置管理员 - 确认执行：批量新建管理员 + 为既有管理员补充角色，
+// 返回新建数、补充角色数及因编码冲突被跳过的明细
+export function executeBatchPromoteByRole(
+  conditions: AdminBatchPromoteByRoleConditions,
+): Promise<AdminBatchPromoteExecuteResult> {
+  return request
+    .post<AdminBatchPromoteByRoleResponseRaw, AdminBatchPromoteByRoleResponseRaw>(
+      '/admins/batch-promote-by-role',
+      { ...conditions, preview: false },
+    )
+    .then((res) => ({
+      createdCount: res.executeResult?.newAdminCount ?? 0,
+      appendedRoleCount: res.executeResult?.appendRoleCount ?? 0,
+      skipped: res.executeResult?.skipped ?? [],
+    }))
 }

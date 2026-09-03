@@ -11,6 +11,8 @@ import * as userApi from '@/api/user'
 import * as roleApi from '@/api/role'
 import {
   ADMIN_STATUS_ENABLED,
+  type AdminBatchPromoteByRoleConditions,
+  type AdminBatchPromotePreviewResult,
   type AdminFormRequest,
   type AdminOrgScopeFormItem,
   type AdminRow,
@@ -245,6 +247,104 @@ async function handleDelete(row: AdminRow) {
   ElMessage.success('删除成功')
   await adminStore.refreshAfterMutation()
 }
+
+// ---- 按角色批量设置管理员弹窗 ----
+// 参见 openspec/changes/add-user-role-batch-assignment/design.md Decision 5：匹配来源是
+// 已持有该角色的用户-角色关联，不是重新配置组织/属性条件；orgScopes 仅统一应用于本批次
+// "新建"的管理员，不影响"已是管理员、仅补角色"的用户的既有管辖组织范围。
+
+interface PromoteByRoleForm {
+  roleId: number | null
+  orgScopes: AdminOrgScopeFormItem[]
+}
+
+const promoteForm = reactive<PromoteByRoleForm>({
+  roleId: null,
+  orgScopes: [],
+})
+
+const promoteDialogVisible = ref(false)
+const promotePreviewing = ref(false)
+const promoteSubmitting = ref(false)
+const promotePreviewed = ref(false)
+const promotePreviewResult = ref<AdminBatchPromotePreviewResult>({ toCreate: [], toAppendRole: [] })
+
+async function openPromoteDialog() {
+  promoteForm.roleId = null
+  promoteForm.orgScopes = []
+  promotePreviewed.value = false
+  promotePreviewResult.value = { toCreate: [], toAppendRole: [] }
+  // 复用管理员新增/编辑弹窗同一份组织树数据源，与其相互独立，重复打开各自都会各拉一次
+  await fetchOrgTree()
+  promoteDialogVisible.value = true
+}
+
+function closePromoteDialog() {
+  promoteDialogVisible.value = false
+}
+
+function addPromoteOrgScopeRow() {
+  promoteForm.orgScopes.push(blankOrgScope())
+}
+
+function removePromoteOrgScopeRow(index: number) {
+  promoteForm.orgScopes.splice(index, 1)
+}
+
+function buildPromoteConditions(): AdminBatchPromoteByRoleConditions {
+  return {
+    roleId: promoteForm.roleId as number,
+    orgScopes: promoteForm.orgScopes.map((scope) => ({
+      orgId: scope.orgId as number,
+      includeChildren: scope.includeChildren,
+    })),
+  }
+}
+
+async function handlePromotePreview() {
+  if (!promoteForm.roleId) {
+    ElMessage.error('请选择角色')
+    return
+  }
+  if (promoteForm.orgScopes.some((scope) => scope.orgId === null)) {
+    ElMessage.error('存在未选择组织的管辖组织范围行，请补全或删除')
+    return
+  }
+  promotePreviewing.value = true
+  try {
+    promotePreviewResult.value = await adminApi.previewBatchPromoteByRole(buildPromoteConditions())
+    promotePreviewed.value = true
+  } finally {
+    promotePreviewing.value = false
+  }
+}
+
+async function handlePromoteExecute() {
+  if (!promoteForm.roleId) {
+    ElMessage.error('请选择角色')
+    return
+  }
+  promoteSubmitting.value = true
+  try {
+    const result = await adminApi.executeBatchPromoteByRole(buildPromoteConditions())
+    const summary = `成功新建 ${result.createdCount} 个管理员，为 ${result.appendedRoleCount} 个已有管理员补充该角色`
+    if (result.skipped.length > 0) {
+      await ElMessageBox.alert(
+        `${summary}。以下 ${result.skipped.length} 名用户因管理员编码冲突被跳过：${result.skipped
+          .map((item) => item.userName)
+          .join('、')}`,
+        '执行完成',
+        { type: 'warning', confirmButtonText: '知道了' },
+      )
+    } else {
+      ElMessage.success(summary)
+    }
+    closePromoteDialog()
+    await adminStore.refreshAfterMutation()
+  } finally {
+    promoteSubmitting.value = false
+  }
+}
 </script>
 
 <template>
@@ -252,7 +352,15 @@ async function handleDelete(row: AdminRow) {
     <section class="admin-panel">
       <header class="admin-panel__header">
         <h2 class="admin-panel__title">管理员管理</h2>
-        <el-button v-if="hasPermission('AdminManagement:admin:add')" type="primary" @click="openCreateDialog">新增</el-button>
+        <div class="admin-panel__actions">
+          <el-button
+            v-if="hasPermission('AdminManagement:admin:batchPromoteByRole')"
+            @click="openPromoteDialog"
+          >
+            按角色批量设置管理员
+          </el-button>
+          <el-button v-if="hasPermission('AdminManagement:admin:add')" type="primary" @click="openCreateDialog">新增</el-button>
+        </div>
       </header>
 
       <el-table v-loading="adminStore.listLoading" :data="adminStore.list" empty-text="暂无管理员">
@@ -380,6 +488,96 @@ async function handleDelete(row: AdminRow) {
       </template>
     </el-dialog>
 
+    <el-dialog
+      v-model="promoteDialogVisible"
+      title="按角色批量设置管理员"
+      width="760px"
+      @close="closePromoteDialog"
+    >
+      <el-form label-width="100px">
+        <el-form-item label="角色" required>
+          <el-select v-model="promoteForm.roleId" placeholder="请选择角色" style="width: 100%">
+            <el-option v-for="opt in roleOptions" :key="opt.id" :label="opt.name" :value="opt.id" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+
+      <div class="admin-org-scope-section">
+        <div class="admin-org-scope-section__header">
+          <span class="admin-org-scope-section__title">管辖组织范围（可选，仅应用于本批次新建管理员）</span>
+          <el-button link type="primary" @click="addPromoteOrgScopeRow">+ 添加组织</el-button>
+        </div>
+
+        <p v-if="promoteForm.orgScopes.length === 0" class="admin-org-scope-empty">暂无管辖组织范围（表示不限）</p>
+
+        <div v-else class="admin-org-scope-list">
+          <div v-for="(scope, index) in promoteForm.orgScopes" :key="index" class="admin-org-scope-row">
+            <div class="admin-org-scope-row__fields">
+              <el-tree-select
+                v-model="scope.orgId"
+                :data="orgTree"
+                :props="{ label: 'name', children: 'children' }"
+                node-key="id"
+                check-strictly
+                placeholder="请选择组织"
+                style="width: 100%"
+              />
+              <el-checkbox v-model="scope.includeChildren">含子组织</el-checkbox>
+            </div>
+            <el-button link type="danger" class="admin-org-scope-row__remove" @click="removePromoteOrgScopeRow(index)">
+              删除
+            </el-button>
+          </div>
+        </div>
+      </div>
+
+      <div class="promote-preview-actions">
+        <el-button
+          type="primary"
+          :disabled="!promoteForm.roleId"
+          :loading="promotePreviewing"
+          @click="handlePromotePreview"
+        >
+          预览
+        </el-button>
+        <span v-if="!promoteForm.roleId" class="promote-preview-hint">请先选择角色</span>
+      </div>
+
+      <div v-if="promotePreviewed" class="promote-preview-result">
+        <div class="promote-preview-group">
+          <h4 class="promote-preview-group__title">
+            将新建管理员（{{ promotePreviewResult.toCreate.length }} 人）
+          </h4>
+          <el-table :data="promotePreviewResult.toCreate" size="small" empty-text="无" max-height="200">
+            <el-table-column prop="userName" label="姓名" min-width="100" />
+            <el-table-column prop="userCode" label="编号" min-width="100" />
+          </el-table>
+        </div>
+        <div class="promote-preview-group">
+          <h4 class="promote-preview-group__title">
+            将补充角色（{{ promotePreviewResult.toAppendRole.length }} 人）
+          </h4>
+          <el-table :data="promotePreviewResult.toAppendRole" size="small" empty-text="无" max-height="200">
+            <el-table-column prop="adminName" label="管理员名称" min-width="100" />
+            <el-table-column prop="adminCode" label="管理员编码" min-width="100" />
+            <el-table-column prop="userName" label="关联用户" min-width="100" />
+          </el-table>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="promoteDialogVisible = false">取消</el-button>
+        <el-button
+          v-if="promotePreviewed"
+          type="primary"
+          :loading="promoteSubmitting"
+          @click="handlePromoteExecute"
+        >
+          确认执行
+        </el-button>
+      </template>
+    </el-dialog>
+
   </div>
 </template>
 
@@ -397,6 +595,12 @@ async function handleDelete(row: AdminRow) {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
+}
+
+.admin-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .admin-panel__title {
@@ -489,5 +693,34 @@ async function handleDelete(row: AdminRow) {
 // 操作列（详情/编辑/启用停用/删除）相邻按钮间距收紧，比 Element Plus 默认更紧凑
 :deep(.el-table .el-button + .el-button) {
   margin-left: 6px;
+}
+
+// ---- 按角色批量设置管理员弹窗 ----
+
+.promote-preview-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0;
+  padding-top: 12px;
+  border-top: 1px dashed var(--color-border);
+}
+
+.promote-preview-hint {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+}
+
+.promote-preview-result {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.promote-preview-group__title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-ink);
 }
 </style>

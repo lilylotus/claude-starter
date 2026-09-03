@@ -8,6 +8,9 @@ import cn.nihility.rbac.appaccess.policy.service.PolicyExecutionService;
 import cn.nihility.rbac.sync.event.DomainChangeEvent;
 import cn.nihility.rbac.sync.notify.entity.AppNotifyRecordEntity;
 import cn.nihility.rbac.sync.notify.support.NotifySendCoordinator;
+import cn.nihility.rbac.userrole.entity.UserRoleRuleEntity;
+import cn.nihility.rbac.userrole.mapper.UserRoleRuleMapper;
+import cn.nihility.rbac.userrole.service.UserRoleRuleExecutionService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.util.List;
 import java.util.Set;
@@ -26,7 +29,10 @@ import org.springframework.stereotype.Component;
  * 兜底捞到它。不依赖 Disruptor API，供 {@link DomainChangeEventHandler}（Disruptor 消费者）
  * 与未来外部 MQ 消费者共同调用，切换消息载体时本类逻辑可直接复用。同时承担
  * "组织/用户/任职变更后策略自动重新执行"这一独立副作用（close-sso-log-and-policy-gaps
- * change design.md Decision 2），与流水/通知逻辑各自独立 try/catch，互不影响。
+ * change design.md Decision 2），与流水/通知逻辑各自独立 try/catch，互不影响；同时并列承担
+ * "组织/用户/任职变更后用户角色规则自动重新执行"这一独立副作用
+ * （add-user-role-batch-assignment change design.md Decision 3，二次设计版本），三者各自
+ * 独立 try/catch，互不影响。
  */
 @Slf4j
 @Component
@@ -35,6 +41,10 @@ public class DomainChangeEventProcessor {
 
     /** 触发策略自动重新执行的数据域：组织/用户/任职，任意操作类型均触发。 */
     private static final Set<String> POLICY_RE_EXECUTE_DATA_TYPES = Set.of(SyncDomain.ORG, SyncDomain.USER,
+            SyncDomain.POSITION);
+
+    /** 触发用户角色规则自动重新执行的数据域：与策略自动重新执行完全一致，组织/用户/任职。 */
+    private static final Set<String> USER_ROLE_RULE_RE_EXECUTE_DATA_TYPES = Set.of(SyncDomain.ORG, SyncDomain.USER,
             SyncDomain.POSITION);
 
     /** 领域变更事件的落库编排组件："流水 + 全部候选应用 PENDING 通知任务"同事务落库。 */
@@ -48,6 +58,12 @@ public class DomainChangeEventProcessor {
 
     /** 策略规则手动执行业务逻辑接口，事件驱动场景下复用其全量重建能力。 */
     private final PolicyExecutionService policyExecutionService;
+
+    /** 用户角色规则数据访问接口，查询全部规则 id（本能力没有暂停态，不做状态过滤）。 */
+    private final UserRoleRuleMapper userRoleRuleMapper;
+
+    /** 用户角色规则执行引擎业务逻辑接口，事件驱动场景下复用其"整体重建"执行能力。 */
+    private final UserRoleRuleExecutionService userRoleRuleExecutionService;
 
     /**
      * 处理一条领域变更事件：先落库（流水 + 候选应用 PENDING 通知任务同事务），落库失败时
@@ -83,6 +99,13 @@ public class DomainChangeEventProcessor {
             log.error("组织/用户/任职变更后策略自动重新执行失败：dataType={}, bizId={}, operationType={}",
                     event.getDataType(), event.getBizId(), event.getOperationType(), e);
         }
+
+        try {
+            reExecuteUserRoleRulesIfNeeded(event);
+        } catch (Exception e) {
+            log.error("组织/用户/任职变更后用户角色规则自动重新执行失败：dataType={}, bizId={}, operationType={}",
+                    event.getDataType(), event.getBizId(), event.getOperationType(), e);
+        }
     }
 
     /**
@@ -108,6 +131,33 @@ public class DomainChangeEventProcessor {
                 policyExecutionService.execute(policy.getId(), event.getOperator());
             } catch (Exception e) {
                 log.error("策略[{}]自动重新执行失败，跳过并继续处理其余策略：dataType={}, bizId={}", policy.getId(),
+                        event.getDataType(), event.getBizId(), e);
+            }
+        }
+    }
+
+    /**
+     * 当事件数据域属于组织/用户/任职时，对全部用户角色规则各自重新执行一次（本能力没有
+     * 启用/停用暂停态，不做状态过滤），单条规则执行失败仅记录日志、不影响其余规则继续重算，
+     * 写法与 {@link #reExecutePoliciesIfNeeded} 保持一致的风格（add-user-role-batch-assignment
+     * change design.md Decision 3，二次设计版本）。
+     *
+     * @param event 领域变更事件
+     */
+    private void reExecuteUserRoleRulesIfNeeded(DomainChangeEvent event) {
+        if (!USER_ROLE_RULE_RE_EXECUTE_DATA_TYPES.contains(event.getDataType())) {
+            return;
+        }
+        List<UserRoleRuleEntity> rules = userRoleRuleMapper.selectList(null);
+        for (UserRoleRuleEntity rule : rules) {
+            try {
+                // 同样不能依赖 CurrentOperatorService 解析当前登录用户（本方法运行在
+                // Disruptor 消费者线程上，不处于任何 HTTP 请求上下文中），必须显式传入
+                // event.getOperator()，理由同 reExecutePoliciesIfNeeded 上面的注释
+                // （close-sso-log-and-policy-gaps change design.md Decision 6 的历史教训）。
+                userRoleRuleExecutionService.execute(rule.getId(), event.getOperator());
+            } catch (Exception e) {
+                log.error("用户角色规则[{}]自动重新执行失败，跳过并继续处理其余规则：dataType={}, bizId={}", rule.getId(),
                         event.getDataType(), event.getBizId(), e);
             }
         }

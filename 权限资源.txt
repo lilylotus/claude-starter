@@ -122,6 +122,9 @@ RoleManagement（角色管理，/permission/roles）
 - RoleManagement:role:enable   启用角色
 - RoleManagement:role:disable  停用角色
 - RoleManagement:role:delete   删除角色
+- RoleManagement:role:batchAssignUser  维护批量添加用户角色的规则（按组织范围、用户属性
+  条件持久化配置规则，保存即执行，组织/用户/任职变更后自动重新计算命中结果并整体重建
+  用户-角色关联，与管理员角色关联相互独立，见 openspec/changes/add-user-role-batch-assignment）
 
 PermissionManagement（权限点管理，/permission/points）
 - PermissionManagement:permission:view     权限点管理页面访问
@@ -140,6 +143,10 @@ AdminManagement（管理员管理，/permission/admins）
 - AdminManagement:admin:enable   启用管理员
 - AdminManagement:admin:disable  停用管理员
 - AdminManagement:admin:delete   删除管理员
+- AdminManagement:admin:batchPromoteByRole  按角色批量设置管理员（对持有目标角色的用户，
+  尚未是管理员的批量新建（标记为该角色自动创建）、已是管理员但角色列表未含该角色的批量
+  补充该角色；该角色后续被规则自动收回时，因该角色被自动创建的管理员会联动停用，见
+  openspec/changes/add-user-role-batch-assignment）
 
 AppAccessManagement（应用访问授权，/permission/app-access，见 openspec/changes/app-access-authorization）
 - AppAccessManagement:appAccess:view     应用访问授权页面访问（含"最终生效权限查询"板块的只读查询，不单独设按钮权限点）

@@ -63,3 +63,51 @@ export interface PageResult<T> {
   page: number
   pageSize: number
 }
+
+// ---- 按角色批量设置管理员（管理员管理"按角色批量设置管理员"弹窗，
+// POST /api/admins/batch-promote-by-role） ----
+// 参见 openspec/changes/add-user-role-batch-assignment/design.md Decision 5：匹配来源是
+// 已持有该角色的用户-角色关联（tab_user_role），不是重新配置组织/属性条件；orgScopes
+// 仅统一应用于本批次"新建"的管理员，不影响"已是管理员、仅补角色"的用户的既有管辖组织范围。
+
+// 预览（preview=true）与执行（preview=false）共用的条件字段
+export interface AdminBatchPromoteByRoleConditions {
+  roleId: number
+  orgScopes: Array<{ orgId: number; includeChildren: boolean }>
+}
+
+// 预览分组一：持有该角色但尚未是管理员，本次执行将被新建为管理员的用户
+export interface AdminBatchPromoteToCreateRow {
+  userId: number
+  userName: string
+  userCode: string
+}
+
+// 预览分组二：已是管理员，但管理员角色列表当前不含该角色，本次执行将被补充该角色
+export interface AdminBatchPromoteToAppendRoleRow {
+  adminId: number
+  adminName: string
+  adminCode: string
+  userName: string
+}
+
+// preview=true 响应：两个分组名单，已是管理员且已持有该角色的用户不出现在任一分组（无变化）
+export interface AdminBatchPromotePreviewResult {
+  toCreate: AdminBatchPromoteToCreateRow[]
+  toAppendRole: AdminBatchPromoteToAppendRoleRow[]
+}
+
+// 因管理员编码（即用户编号）冲突被跳过的用户明细
+export interface AdminBatchPromoteSkippedRow {
+  userId: number
+  userName: string
+  userCode: string
+  reason: string
+}
+
+// preview=false 响应：本次实际新建管理员数、补充角色数，及因编码冲突被跳过的明细
+export interface AdminBatchPromoteExecuteResult {
+  createdCount: number
+  appendedRoleCount: number
+  skipped: AdminBatchPromoteSkippedRow[]
+}

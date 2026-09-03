@@ -102,4 +102,38 @@ public interface UserPositionMapper extends VersionedBaseMapper<UserPositionEnti
      */
     List<UserPositionEntity> selectDigestBatch(@Param("lastId") Long lastId, @Param("batchSize") int batchSize,
             @Param("allowedOrgIds") Set<Long> allowedOrgIds);
+
+    /**
+     * 按用户 id 集合查询各自任一条满足条件的未删除任职记录对应的组织名称，供
+     * {@code user-role-assignment} 能力预览命中用户时回填所属组织名称使用；同一用户可能
+     * 命中多条任职记录，调用方按 {@code userId} 取首条即可，不要求语义上的"代表性"
+     * （add-user-role-batch-assignment change tasks.md 2.4）。
+     *
+     * @param userIds       目标用户 id 集合，不能为空
+     * @param orgIds        组织 id 过滤集合，{@code null} 表示不限制（仅配置了用户属性条件、
+     *                      未配置组织范围条件的场景）；非 {@code null}（哪怕是空集合）表示
+     *                      按组织范围条件展开后的组织 id 全集过滤
+     * @param deletedStatus 逻辑删除状态值，用于在 SQL 里排除已删除记录
+     * @return 命中的任职记录列表（仅含 {@code userId}、{@code orgName}），同一用户可能出现多行
+     */
+    List<PositionVO> selectRepresentativeOrgNames(@Param("userIds") Set<Long> userIds,
+            @Param("orgIds") Set<Long> orgIds, @Param("deletedStatus") int deletedStatus);
+
+    /**
+     * 按动态列名与运算符匹配未被逻辑删除的任职记录，返回其 {@code user_id} 去重后的用户 id
+     * 列表，供 {@code user-role-assignment} 能力的用户属性条件（{@code bizType=POSITION}
+     * 元数据字段域）执行匹配使用，与 {@code UserMapper#selectIdsByAttrCondition} 同构
+     * （add-user-role-batch-assignment change design.md Decision 2）。{@code column} 只接受
+     * 调用方从 {@code tab_metadata_field} 目录解析得到、并经白名单校验（
+     * {@code table_name='tab_user_position'} 且列名仅含字母数字下划线）的合法列名，不接受
+     * 任意字符串拼接，避免 SQL 注入。
+     *
+     * @param column      目标列名，仅接受白名单内的合法列名
+     * @param operator    运算符：{@code EQ}/{@code NE}/{@code IN}
+     * @param singleValue {@code EQ}/{@code NE} 时的比较值，{@code IN} 时忽略
+     * @param values      {@code IN} 时的一组比较值，{@code EQ}/{@code NE} 时忽略
+     * @return 命中的用户 id 列表（已去重）
+     */
+    List<Long> selectIdsByAttrCondition(@Param("column") String column, @Param("operator") String operator,
+            @Param("singleValue") String singleValue, @Param("values") List<String> values);
 }

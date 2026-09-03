@@ -12,6 +12,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.admin.constant.AdminStatus;
+import cn.nihility.rbac.admin.dto.AdminBatchPromoteByRolePreviewVO;
+import cn.nihility.rbac.admin.dto.AdminBatchPromoteByRoleResult;
 import cn.nihility.rbac.admin.dto.AdminCreateRequest;
 import cn.nihility.rbac.admin.dto.AdminOrgScopeRequest;
 import cn.nihility.rbac.admin.dto.AdminUpdateRequest;
@@ -25,8 +27,14 @@ import cn.nihility.rbac.admin.mapper.AdminRoleMapper;
 import cn.nihility.rbac.auth.service.CurrentOperatorService;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.role.constant.RoleStatus;
+import cn.nihility.rbac.role.entity.RoleEntity;
+import cn.nihility.rbac.role.mapper.RoleMapper;
+import cn.nihility.rbac.user.constant.UserStatus;
+import cn.nihility.rbac.user.entity.UserEntity;
 import cn.nihility.rbac.user.mapper.UserMapper;
 import cn.nihility.rbac.user.service.UserDisplayService;
+import cn.nihility.rbac.userrole.mapper.UserRoleRuleGrantMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
@@ -75,6 +83,14 @@ class AdminServiceImplTest {
     @Mock
     private UserDisplayService userDisplayService;
 
+    /** 被测服务的角色数据访问依赖，用于校验按角色批量设置管理员时目标角色存在，使用 Mockito 打桩。 */
+    @Mock
+    private RoleMapper roleMapper;
+
+    /** 被测服务的用户角色规则计算结果数据访问依赖，按角色批量设置管理员的候选用户匹配来源，使用 Mockito 打桩。 */
+    @Mock
+    private UserRoleRuleGrantMapper userRoleRuleGrantMapper;
+
     /** 被测服务实例。 */
     private AdminServiceImpl adminService;
 
@@ -85,7 +101,7 @@ class AdminServiceImplTest {
     @BeforeEach
     void setUp() {
         adminService = new AdminServiceImpl(adminMapper, adminRoleMapper, adminOrgScopeMapper, userMapper,
-                operationLogRecorder, currentOperatorService, userDisplayService);
+                operationLogRecorder, currentOperatorService, userDisplayService, roleMapper, userRoleRuleGrantMapper);
         lenient().when(adminRoleMapper.selectRolesByAdminId(anyLong())).thenReturn(List.of());
         lenient().when(adminOrgScopeMapper.selectOrgScopesByAdminId(anyLong())).thenReturn(List.of());
         lenient().when(currentOperatorService.resolveUserId()).thenReturn(1L);
@@ -354,6 +370,121 @@ class AdminServiceImplTest {
         assertThat(result.getRoles().get(0).getRoleName()).isEqualTo("角色一");
         assertThat(result.getOrgScopes()).hasSize(1);
         assertThat(result.getOrgScopes().get(0).getOrgName()).isEqualTo("组织一");
+    }
+
+    /**
+     * 预览按角色批量设置管理员时，应按是否已关联未删除管理员、是否已持有目标角色，把候选
+     * 用户分别归入"将新建管理员"、"将补充角色"两个分组，已持有该角色的管理员不出现在任一
+     * 分组中。
+     */
+    @Test
+    void previewBatchPromoteByRole_shouldSplitIntoNewAdminsAndAppendRoleGroups() {
+        when(roleMapper.selectById(1L)).thenReturn(RoleEntity.builder().id(1L).status(RoleStatus.ENABLED).build());
+        when(userRoleRuleGrantMapper.selectUserIdsByRoleId(1L)).thenReturn(List.of(100L, 101L, 102L));
+        when(userMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(
+                UserEntity.builder().id(100L).name("新用户").code("u100").status(UserStatus.ENABLED).build(),
+                UserEntity.builder().id(101L).name("既有管理员用户").code("u101").status(UserStatus.ENABLED).build(),
+                UserEntity.builder().id(102L).name("已持有角色用户").code("u102").status(UserStatus.ENABLED).build()));
+        when(adminMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(
+                AdminEntity.builder().id(11L).userId(101L).name("管理员一").code("admin101")
+                        .status(AdminStatus.ENABLED).build(),
+                AdminEntity.builder().id(12L).userId(102L).name("管理员二").code("admin102")
+                        .status(AdminStatus.ENABLED).build()));
+        when(adminRoleMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(
+                AdminRoleEntity.builder().adminId(12L).roleId(1L).build()));
+
+        AdminBatchPromoteByRolePreviewVO preview = adminService.previewBatchPromoteByRole(1L);
+
+        assertThat(preview.getNewAdminCount()).isEqualTo(1);
+        assertThat(preview.getNewAdmins()).extracting(c -> c.getUserId()).containsExactly(100L);
+        assertThat(preview.getAppendRoleCount()).isEqualTo(1);
+        assertThat(preview.getAppendRoleAdmins()).extracting(c -> c.getAdminId()).containsExactly(11L);
+    }
+
+    /**
+     * 执行按角色批量设置管理员时，应为"将新建管理员"分组批量创建管理员记录（角色列表仅含
+     * 本次选择的角色、管辖组织范围取本批次统一配置的值），为"将补充角色"分组仅追加角色，
+     * 不触碰其既有的其他字段（不调用整体替换语义的 {@code updateById}），也不写入其组织
+     * 管辖范围。
+     */
+    @Test
+    void batchPromoteByRole_shouldCreateNewAdmin_andAppendRole_withoutTouchingExistingAdminFields() {
+        when(roleMapper.selectById(1L)).thenReturn(RoleEntity.builder().id(1L).status(RoleStatus.ENABLED).build());
+        when(userRoleRuleGrantMapper.selectUserIdsByRoleId(1L)).thenReturn(List.of(100L, 101L));
+        when(userMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(
+                UserEntity.builder().id(100L).name("新用户").code("u100").status(UserStatus.ENABLED).build(),
+                UserEntity.builder().id(101L).name("既有管理员用户").code("u101").status(UserStatus.ENABLED).build()));
+        when(adminMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(
+                AdminEntity.builder().id(11L).userId(101L).name("管理员一").code("admin101")
+                        .status(AdminStatus.ENABLED).build()));
+        when(adminRoleMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
+        when(adminMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+        when(adminRoleMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+        doAnswer(invocation -> {
+            AdminEntity entity = invocation.getArgument(0);
+            entity.setId(20L);
+            return 1;
+        }).when(adminMapper).insert(any(AdminEntity.class));
+
+        AdminOrgScopeRequest scopeRequest = new AdminOrgScopeRequest();
+        scopeRequest.setOrgId(300L);
+        scopeRequest.setIncludeChildren(false);
+
+        AdminBatchPromoteByRoleResult result = adminService.batchPromoteByRole(1L, List.of(scopeRequest));
+
+        assertThat(result.getNewAdminCount()).isEqualTo(1);
+        assertThat(result.getAppendRoleCount()).isEqualTo(1);
+        assertThat(result.getSkipped()).isEmpty();
+
+        ArgumentCaptor<AdminEntity> adminCaptor = ArgumentCaptor.forClass(AdminEntity.class);
+        verify(adminMapper).insert(adminCaptor.capture());
+        assertThat(adminCaptor.getValue().getCode()).isEqualTo("u100");
+        assertThat(adminCaptor.getValue().getUserId()).isEqualTo(100L);
+        assertThat(adminCaptor.getValue().getStatus()).isEqualTo(AdminStatus.ENABLED);
+        // 新建管理员记录应打上 autoCreatedRoleId 标记（design.md Decision 7），供角色被规则
+        // 收回时联动停用；补充角色分组不经过 adminMapper.insert/updateById，天然不会被设置。
+        assertThat(adminCaptor.getValue().getAutoCreatedRoleId()).isEqualTo(1L);
+
+        // 新建管理员自身的角色绑定 + 补充角色分组各插入一条，合计两条
+        ArgumentCaptor<AdminRoleEntity> roleCaptor = ArgumentCaptor.forClass(AdminRoleEntity.class);
+        verify(adminRoleMapper, times(2)).insert(roleCaptor.capture());
+        assertThat(roleCaptor.getAllValues()).extracting(AdminRoleEntity::getRoleId).containsOnly(1L);
+        assertThat(roleCaptor.getAllValues()).extracting(AdminRoleEntity::getAdminId).containsExactlyInAnyOrder(20L, 11L);
+
+        // 管辖组织范围只写入新建管理员一条，补充角色分组的既有管理员不受影响
+        ArgumentCaptor<AdminOrgScopeEntity> scopeCaptor = ArgumentCaptor.forClass(AdminOrgScopeEntity.class);
+        verify(adminOrgScopeMapper).insert(scopeCaptor.capture());
+        assertThat(scopeCaptor.getValue().getAdminId()).isEqualTo(20L);
+        assertThat(scopeCaptor.getValue().getOrgId()).isEqualTo(300L);
+
+        verify(adminMapper, never()).updateById(any(AdminEntity.class));
+    }
+
+    /**
+     * 执行按角色批量设置管理员时，若"将新建管理员"分组中某用户的编号已被另一个未删除管理员
+     * 占用为管理员编码，应跳过该用户、不创建管理员记录，并在结果中报告跳过明细，不影响本批次
+     * 其余用户的处理。
+     */
+    @Test
+    void batchPromoteByRole_shouldSkipUser_whenCodeConflictsWithAnotherAdmin() {
+        when(roleMapper.selectById(1L)).thenReturn(RoleEntity.builder().id(1L).status(RoleStatus.ENABLED).build());
+        when(userRoleRuleGrantMapper.selectUserIdsByRoleId(1L)).thenReturn(List.of(103L));
+        when(userMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(
+                UserEntity.builder().id(103L).name("冲突用户").code("u103").status(UserStatus.ENABLED).build()));
+        when(adminMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
+        when(adminMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(1L);
+
+        AdminBatchPromoteByRoleResult result = adminService.batchPromoteByRole(1L, List.of());
+
+        assertThat(result.getNewAdminCount()).isEqualTo(0);
+        assertThat(result.getAppendRoleCount()).isEqualTo(0);
+        assertThat(result.getSkipped()).hasSize(1);
+        assertThat(result.getSkipped().get(0).getUserId()).isEqualTo(103L);
+        assertThat(result.getSkipped().get(0).getUserName()).isEqualTo("冲突用户");
+
+        verify(adminMapper, never()).insert(any(AdminEntity.class));
+        verify(adminRoleMapper, never()).insert(any(AdminRoleEntity.class));
+        verify(adminOrgScopeMapper, never()).insert(any(AdminOrgScopeEntity.class));
     }
 
     /**

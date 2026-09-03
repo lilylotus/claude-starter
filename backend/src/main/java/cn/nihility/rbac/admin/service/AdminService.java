@@ -1,13 +1,18 @@
 package cn.nihility.rbac.admin.service;
 
+import cn.nihility.rbac.admin.dto.AdminBatchPromoteByRolePreviewVO;
+import cn.nihility.rbac.admin.dto.AdminBatchPromoteByRoleResult;
 import cn.nihility.rbac.admin.dto.AdminCreateRequest;
+import cn.nihility.rbac.admin.dto.AdminOrgScopeRequest;
 import cn.nihility.rbac.admin.dto.AdminUpdateRequest;
 import cn.nihility.rbac.admin.dto.AdminVO;
 import cn.nihility.rbac.common.result.PageResult;
+import java.util.List;
 
 /**
  * 管理员管理业务逻辑接口，提供管理员主数据的分页查询、维护、启停用、逻辑删除能力，
- * 以及随主数据一并整体同步的角色关联、组织管辖范围维护能力。
+ * 以及随主数据一并整体同步的角色关联、组织管辖范围维护能力，还有按角色批量创建/补充
+ * 管理员角色的能力（add-user-role-batch-assignment change design.md Decision 5）。
  */
 public interface AdminService {
 
@@ -69,4 +74,26 @@ public interface AdminService {
      * @param id 管理员 id
      */
     void delete(Long id);
+
+    /**
+     * 预览"按角色批量设置管理员"：以 {@code user-role-assignment} 能力维护的用户角色关联为
+     * 匹配来源，查出当前持有目标角色、状态启用的全部用户，按是否已关联未删除的管理员记录
+     * 分为"将新建管理员"、"将补充角色"两个分组返回；已是管理员且角色列表已包含目标角色的
+     * 用户不出现在预览结果中。
+     *
+     * @param roleId 目标角色 id
+     * @return 预览结果
+     */
+    AdminBatchPromoteByRolePreviewVO previewBatchPromoteByRole(Long roleId);
+
+    /**
+     * 执行"按角色批量设置管理员"：对预览得到的"将新建管理员"分组批量创建管理员记录（编码
+     * 冲突时跳过、计入结果，不中断整批操作），对"将补充角色"分组仅追加目标角色到既有管理员
+     * 的角色列表，不改动其他字段、其他已有角色、已有管辖组织范围。
+     *
+     * @param roleId    目标角色 id
+     * @param orgScopes 统一应用于本批次全部新建管理员的管辖组织范围，可为空表示不限
+     * @return 执行结果，含新建数量、补充角色数量、跳过明细
+     */
+    AdminBatchPromoteByRoleResult batchPromoteByRole(Long roleId, List<AdminOrgScopeRequest> orgScopes);
 }

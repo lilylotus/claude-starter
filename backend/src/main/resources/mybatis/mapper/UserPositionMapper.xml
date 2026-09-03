@@ -150,4 +150,48 @@
         LIMIT #{batchSize}
     </select>
 
+    <!-- 按用户 id 集合查询各自任一条满足条件的未删除任职记录对应的组织名称，供
+         user-role-assignment 能力预览命中用户时回填所属组织名称使用（
+         add-user-role-batch-assignment change tasks.md 2.4）；orgIds 为 null 表示不限制，
+         非 null（哪怕是空集合）表示按组织范围条件展开后的组织 id 全集过滤，空集合时用恒假
+         条件兜底，风格与 selectUserPage 等既有查询的 allowedOrgIds 处理保持一致。 -->
+    <select id="selectRepresentativeOrgNames" resultType="cn.nihility.rbac.user.dto.PositionVO">
+        SELECT up.user_id AS user_id, o.name AS org_name
+        FROM tab_user_position up
+        LEFT JOIN tab_org o ON o.id = up.org_id
+        WHERE up.status != #{deletedStatus}
+        AND up.user_id IN
+        <foreach collection="userIds" item="userId" open="(" separator="," close=")">#{userId}</foreach>
+        <if test="orgIds != null">
+            <if test="orgIds.isEmpty()">AND up.org_id = -1</if>
+            <if test="!orgIds.isEmpty()">
+                AND up.org_id IN
+                <foreach collection="orgIds" item="orgId" open="(" separator="," close=")">#{orgId}</foreach>
+            </if>
+        </if>
+    </select>
+
+    <!-- user-role-assignment 能力的用户属性条件匹配（bizType=POSITION 域）：column 只接受
+         调用方（UserMatchConditionResolver）从 tab_metadata_field 目录解析得到、并经白名单
+         校验（table_name='tab_user_position' 且列名仅含字母数字下划线）的合法列名，不接受
+         任意字符串拼接，避免 SQL 注入（add-user-role-batch-assignment change design.md
+         Decision 2）。同时排除已被逻辑删除的任职记录（-1000 为 PositionStatus.DELETED 的
+         字面量），并对 user_id 去重。 -->
+    <select id="selectIdsByAttrCondition" resultType="java.lang.Long">
+        SELECT DISTINCT user_id FROM tab_user_position
+        WHERE status != -1000
+        <choose>
+            <when test="operator == 'EQ'">
+                AND ${column} = #{singleValue}
+            </when>
+            <when test="operator == 'NE'">
+                AND ${column} != #{singleValue}
+            </when>
+            <when test="operator == 'IN'">
+                AND ${column} IN
+                <foreach collection="values" item="v" open="(" separator="," close=")">#{v}</foreach>
+            </when>
+        </choose>
+    </select>
+
 </mapper>

@@ -1,5 +1,7 @@
 package cn.nihility.rbac.admin.controller;
 
+import cn.nihility.rbac.admin.dto.AdminBatchPromoteByRoleRequest;
+import cn.nihility.rbac.admin.dto.AdminBatchPromoteByRoleResponse;
 import cn.nihility.rbac.admin.dto.AdminCreateRequest;
 import cn.nihility.rbac.admin.dto.AdminUpdateRequest;
 import cn.nihility.rbac.admin.dto.AdminVO;
@@ -124,5 +126,34 @@ public class AdminController {
     public Result<Void> delete(@PathVariable Long id) {
         adminService.delete(id);
         return Result.success();
+    }
+
+    /**
+     * 按条件预览"将新建管理员"/"将补充角色"两个分组，或执行按角色批量设置管理员，二者共用
+     * 同一套匹配逻辑，由 {@code preview} 标志区分。
+     *
+     * @param request 请求参数
+     * @return {@code preview=true} 时返回两个分组的预览结果；{@code preview=false} 时返回
+     *         本次实际新建管理员数量、补充角色数量、跳过明细
+     */
+    @Operation(summary = "按角色批量设置管理员",
+            description = "以 user-role-assignment 能力维护的用户角色关联为匹配来源，查出当前持有目标角色、"
+                    + "状态启用的全部用户，按是否已关联未删除的管理员记录分为将新建管理员/将补充角色两个分组；"
+                    + "preview=true 时只返回两个分组的预览列表与数量，preview=false 时执行：新建管理员分组"
+                    + "批量创建管理员记录（管理员编码与用户编号冲突时跳过、不中断整批操作），补充角色分组仅追加"
+                    + "目标角色到既有管理员的角色列表，不影响其已有的其他角色与管辖组织范围")
+    @PostMapping("/api/admins/batch-promote-by-role")
+    public AdminBatchPromoteByRoleResponse batchPromoteByRole(@Valid @RequestBody AdminBatchPromoteByRoleRequest request) {
+        if (Boolean.TRUE.equals(request.getPreview())) {
+            return AdminBatchPromoteByRoleResponse.builder()
+                    .preview(true)
+                    .previewResult(adminService.previewBatchPromoteByRole(request.getRoleId()))
+                    .build();
+        }
+
+        return AdminBatchPromoteByRoleResponse.builder()
+                .preview(false)
+                .executeResult(adminService.batchPromoteByRole(request.getRoleId(), request.getOrgScopes()))
+                .build();
     }
 }

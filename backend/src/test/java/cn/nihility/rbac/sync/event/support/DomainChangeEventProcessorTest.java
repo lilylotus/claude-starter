@@ -18,6 +18,9 @@ import cn.nihility.rbac.sync.changelog.entity.AppDataChangeLogEntity;
 import cn.nihility.rbac.sync.event.DomainChangeEvent;
 import cn.nihility.rbac.sync.notify.entity.AppNotifyRecordEntity;
 import cn.nihility.rbac.sync.notify.support.NotifySendCoordinator;
+import cn.nihility.rbac.userrole.entity.UserRoleRuleEntity;
+import cn.nihility.rbac.userrole.mapper.UserRoleRuleMapper;
+import cn.nihility.rbac.userrole.service.UserRoleRuleExecutionService;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -51,12 +54,21 @@ class DomainChangeEventProcessorTest {
     @Mock
     private PolicyExecutionService policyExecutionService;
 
+    @Mock
+    private UserRoleRuleMapper userRoleRuleMapper;
+
+    @Mock
+    private UserRoleRuleExecutionService userRoleRuleExecutionService;
+
     private DomainChangeEventProcessor processor;
 
     @BeforeEach
     void setUp() {
         processor = new DomainChangeEventProcessor(domainChangeRecorder, notifySendCoordinator, policyMapper,
-                policyExecutionService);
+                policyExecutionService, userRoleRuleMapper, userRoleRuleExecutionService);
+        // 默认打桩为查不到任何用户角色规则，聚焦其他分支的用例无需关心该分支的调用细节；
+        // 关注用户角色规则自动重新执行分支本身行为的用例（见下方）会用更具体的打桩覆盖。
+        lenient().when(userRoleRuleMapper.selectList(any())).thenReturn(List.of());
         // 默认打桩为落库成功但没有候选应用，聚焦策略重新执行分支的用例无需关心通知分支的
         // 调用细节，只需保证 result != null 从而不影响流程继续；关注落库/通知分支本身行为
         // 的用例（见下方）会用更具体的打桩覆盖这个默认值。
@@ -175,6 +187,97 @@ class DomainChangeEventProcessorTest {
         when(policyMapper.selectList(any())).thenThrow(new RuntimeException("db error"));
 
         assertThatCode(() -> processor.process(event)).doesNotThrowAnyException();
+    }
+
+    /**
+     * 数据域为 {@code ORG}/{@code USER}/{@code POSITION} 时，应查询全部用户角色规则（不做
+     * 状态过滤）并逐条重新执行，{@code operator} 必须来自 {@code event.getOperator()}，不能
+     * 依赖 {@code CurrentOperatorService}（本测试完全脱离登录上下文运行，验证调用参数即可
+     * 证明未走后者，否则会重现 close-sso-log-and-policy-gaps change 归档记录过的历史 bug）。
+     */
+    @Test
+    void process_shouldReExecuteAllUserRoleRules_whenDataTypeIsOrgUserOrPosition() {
+        for (String dataType : List.of(SyncDomain.ORG, SyncDomain.USER, SyncDomain.POSITION)) {
+            DomainChangeEvent event = DomainChangeEvent.builder()
+                    .dataType(dataType)
+                    .bizId(1L)
+                    .operationType(OperationType.CREATE)
+                    .operator("op-" + dataType)
+                    .occurredAt(LocalDateTime.now())
+                    .build();
+            when(userRoleRuleMapper.selectList(any())).thenReturn(List.of(
+                    UserRoleRuleEntity.builder().id(10L).roleId(1L).build(),
+                    UserRoleRuleEntity.builder().id(20L).roleId(2L).build()));
+
+            processor.process(event);
+
+            verify(userRoleRuleExecutionService).execute(10L, event.getOperator());
+            verify(userRoleRuleExecutionService).execute(20L, event.getOperator());
+        }
+    }
+
+    /**
+     * 数据域不属于组织/用户/任职时，不应触发任何用户角色规则执行。
+     */
+    @Test
+    void process_shouldNotReExecuteUserRoleRules_whenDataTypeNotEligible() {
+        DomainChangeEvent event = DomainChangeEvent.builder()
+                .dataType(SyncDomain.APP)
+                .bizId(1L)
+                .operationType(OperationType.CREATE)
+                .operator("1")
+                .occurredAt(LocalDateTime.now())
+                .build();
+
+        processor.process(event);
+
+        verify(userRoleRuleMapper, never()).selectList(any());
+        verify(userRoleRuleExecutionService, never()).execute(any(), any());
+    }
+
+    /**
+     * 其中一条用户角色规则重新执行失败时，不应影响其余规则继续重新执行，也不应向外传播
+     * 异常，且不影响策略自动重新执行分支已经完成的处理。
+     */
+    @Test
+    void process_shouldContinueOtherUserRoleRules_whenOneRuleExecutionFails() {
+        DomainChangeEvent event = userEvent();
+        when(userRoleRuleMapper.selectList(any())).thenReturn(List.of(
+                UserRoleRuleEntity.builder().id(10L).roleId(1L).build(),
+                UserRoleRuleEntity.builder().id(20L).roleId(2L).build()));
+        doThrow(new RuntimeException("execute error")).when(userRoleRuleExecutionService)
+                .execute(10L, event.getOperator());
+
+        assertThatCode(() -> processor.process(event)).doesNotThrowAnyException();
+        verify(userRoleRuleExecutionService).execute(20L, event.getOperator());
+    }
+
+    /**
+     * 用户角色规则重新执行分支整体异常（如查询规则列表失败）时，不应向外传播，也不影响
+     * 策略自动重新执行分支已经完成的处理。
+     */
+    @Test
+    void process_shouldNotPropagateException_whenUserRoleRuleQueryFails() {
+        DomainChangeEvent event = userEvent();
+        when(userRoleRuleMapper.selectList(any())).thenThrow(new RuntimeException("db error"));
+
+        assertThatCode(() -> processor.process(event)).doesNotThrowAnyException();
+    }
+
+    /**
+     * 用户角色规则自动重新执行分支异常不应影响策略自动重新执行分支：两者各自独立
+     * try/catch，一个分支失败不阻断另一个分支执行。
+     */
+    @Test
+    void process_shouldStillReExecutePolicies_whenUserRoleRuleBranchFails() {
+        DomainChangeEvent event = userEvent();
+        when(policyMapper.selectList(any())).thenReturn(List.of(
+                PolicyEntity.builder().id(10L).status(PolicyStatus.ENABLED).build()));
+        when(userRoleRuleMapper.selectList(any())).thenThrow(new RuntimeException("db error"));
+
+        processor.process(event);
+
+        verify(policyExecutionService).execute(10L, event.getOperator());
     }
 
     /**

@@ -48,13 +48,16 @@ public interface AdminConvert {
 
     /**
      * 创建请求转实体，id/状态/审计字段由服务层另行赋值，{@code roleIds}/{@code orgScopes}
-     * 由服务层另行处理（管理员实体本身没有这两个字段）。
+     * 由服务层另行处理（管理员实体本身没有这两个字段）；{@code autoCreatedRoleId} 不接受
+     * 普通创建请求写入——只有"按角色批量设置管理员"内部创建管理员时才会赋值
+     * （add-user-role-batch-assignment change design.md Decision 7），此处显式忽略。
      *
      * @param request 创建请求
      * @return 管理员实体
      */
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "status", ignore = true)
+    @Mapping(target = "autoCreatedRoleId", ignore = true)
     @Mapping(target = "createBy", ignore = true)
     @Mapping(target = "createTime", ignore = true)
     @Mapping(target = "updateBy", ignore = true)
@@ -62,13 +65,15 @@ public interface AdminConvert {
     AdminEntity toEntity(AdminCreateRequest request);
 
     /**
-     * 把更新请求的字段合并到已有管理员实体上，id/状态/审计字段不受影响。
+     * 把更新请求的字段合并到已有管理员实体上，id/状态/{@code autoCreatedRoleId}/审计字段
+     * 不受影响。
      *
      * @param request 更新请求
      * @param entity  待更新的管理员实体
      */
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "status", ignore = true)
+    @Mapping(target = "autoCreatedRoleId", ignore = true)
     @Mapping(target = "createBy", ignore = true)
     @Mapping(target = "createTime", ignore = true)
     @Mapping(target = "updateBy", ignore = true)

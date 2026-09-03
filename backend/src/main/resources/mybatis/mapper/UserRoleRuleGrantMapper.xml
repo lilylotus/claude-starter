@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 用户角色规则计算结果批量新增/按角色查询：单条多值 INSERT 语句一次性写入新增命中记录，
+     不逐条 insert（add-user-role-batch-assignment change design.md Decision 3）；
+     selectUserIdsByRoleId 按角色 id 去重查询当前持有该角色的用户 id，供
+     AdminService 按角色批量设置管理员复用（design.md Decision 5）。 -->
+<mapper namespace="cn.nihility.rbac.userrole.mapper.UserRoleRuleGrantMapper">
+
+    <insert id="insertBatch">
+        INSERT INTO tab_user_role_rule_grant
+        (rule_id, user_id, role_id, create_by, create_time, update_by, update_time)
+        VALUES
+        <foreach collection="entities" item="entity" separator=",">
+            (#{entity.ruleId}, #{entity.userId}, #{entity.roleId}, #{entity.createBy}, #{entity.createTime},
+            #{entity.updateBy}, #{entity.updateTime})
+        </foreach>
+    </insert>
+
+    <select id="selectUserIdsByRoleId" resultType="java.lang.Long">
+        SELECT DISTINCT user_id FROM tab_user_role_rule_grant WHERE role_id = #{roleId}
+    </select>
+
+</mapper>

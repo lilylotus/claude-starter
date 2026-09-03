@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 用户角色规则用户属性条件查询：tab_user_role_rule_user_attr 关联 tab_metadata_field
+     回填字段名称、字段编码。用 INNER JOIN 是有意为之：关联的元数据字段若已被删除，该条
+     属性条件失去展示与执行意义，不返回，风格对齐 PolicyUserAttrMapper.xml。 -->
+<mapper namespace="cn.nihility.rbac.userrole.mapper.UserRoleRuleUserAttrMapper">
+
+    <select id="selectByRuleId" resultType="cn.nihility.rbac.userrole.dto.UserRoleRuleUserAttrRow">
+        SELECT
+        a.metadata_field_id AS metadataFieldId,
+        mf.field_name AS fieldName,
+        mf.field_code AS fieldCode,
+        mf.biz_type AS bizType,
+        a.operator AS operator,
+        a.attr_value AS attrValue
+        FROM tab_user_role_rule_user_attr a
+        INNER JOIN tab_metadata_field mf ON mf.id = a.metadata_field_id
+        WHERE a.rule_id = #{ruleId}
+        ORDER BY a.id ASC
+    </select>
+
+</mapper>
