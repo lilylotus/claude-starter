@@ -174,6 +174,13 @@ public class WorkflowModelCompilerImpl implements WorkflowModelCompiler {
             return userTask;
         }
 
+        // 每个多实例分支的任务处理人须绑定到本轮循环变量 approver，否则编译产物部署后
+        // 的任务永远没有 assignee，WorkflowMultiInstanceTaskListener.onCreate() 解析
+        // delegateTask.getAssignee() 恒为空，无法落库 assignee_id、TaskAuthorizationService
+        // 也无法据此判定处理权限（对照手写的 test-multi-instance-*.bpmn20.xml 测试夹具固定
+        // 携带 flowable:assignee="${approver}"，此前动态编译器遗漏了这一行，是仅通过静态 XML
+        // 夹具测试、从未被"设计器编译 MI 节点后真实部署驱动"路径覆盖到的既有缺陷）。
+        userTask.setAssignee("${" + MULTI_INSTANCE_ELEMENT_VARIABLE + "}");
         userTask.setExecutionListeners(List.of(buildListener("start", MULTI_INSTANCE_EXECUTION_LISTENER_CLASS)));
         userTask.setTaskListeners(List.of(
                 buildListener("create", MULTI_INSTANCE_TASK_LISTENER_CLASS),
@@ -246,6 +253,7 @@ public class WorkflowModelCompilerImpl implements WorkflowModelCompiler {
                 approval.getApprovalMode() == null ? ApprovalMode.SINGLE : approval.getApprovalMode(),
                 approval.getApprovalPercent(),
                 approval.getEmptyAssigneeStrategy(),
+                null,
                 Boolean.TRUE.equals(approval.getAllowSelfApproval()),
                 Boolean.TRUE.equals(approval.getAllowTransfer()),
                 Boolean.TRUE.equals(approval.getAllowDelegate()),

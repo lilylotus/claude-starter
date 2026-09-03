@@ -127,7 +127,7 @@ class WorkflowProcessModelControllerIntegrationTest {
                         .header("menu", "WorkflowDesign:model:view"))
                 .andExpect(status().isOk());
 
-        verify(workflowProcessModelService).saveDraft(1L, "{}");
+        verify(workflowProcessModelService).saveDraft(1L, "{}", null);
         verify(workflowProcessModelService).publish(1L, 1L);
         verify(workflowProcessModelService).disable(1L);
         verify(workflowProcessModelService).enable(1L);

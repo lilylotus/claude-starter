@@ -9,6 +9,7 @@ import cn.nihility.rbac.workflow.entity.NodeAssigneeRuleEntity;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 /**
  * 节点审批人解析编排服务：组合 {@link AssigneeResolverRegistry} 的原始解析结果、"审批人为
@@ -61,6 +62,22 @@ public class NodeAssigneeResolutionService {
                     adminRoleLookupService.findUserIdsByRoleCode(WorkflowConstants.WORKFLOW_ADMIN_ROLE_CODE));
             case AUTO_SKIP -> ResolvedAssignees.autoSkip();
             case REJECT -> ResolvedAssignees.reject();
+            case BLOCK -> ResolvedAssignees.blocked();
+            case FALLBACK_ROLE -> applyFallbackRole(rule);
         };
+    }
+
+    /**
+     * {@code FALLBACK_ROLE} 策略：改用 {@code fallback_role_code} 指定的角色解析；兜底角色
+     * 解析结果仍为空时按 {@code BLOCK} 处理（DSL v2 专用，design.md Decision 5"兜底也为空时
+     * 仍阻塞"）。
+     */
+    private ResolvedAssignees applyFallbackRole(NodeAssigneeRuleEntity rule) {
+        if (!StringUtils.hasText(rule.getFallbackRoleCode())) {
+            return ResolvedAssignees.blocked();
+        }
+        Set<Long> fallbackUsers = resolverRegistry.resolve(AssigneeType.ROLE,
+                new AssigneeResolveContext(null, rule.getNodeId(), rule.getFallbackRoleCode(), null, null));
+        return fallbackUsers.isEmpty() ? ResolvedAssignees.blocked() : ResolvedAssignees.toWorkflowAdmin(fallbackUsers);
     }
 }

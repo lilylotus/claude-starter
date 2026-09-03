@@ -52,8 +52,12 @@ public class NodeAssigneeRuleEntity {
     /** 会签通过比例（百分比整数），仅 {@code approvalMode=PERCENT} 时使用。 */
     private Integer approvalPercent;
 
-    /** 空审批人处理策略：{@code TO_WORKFLOW_ADMIN}/{@code AUTO_SKIP}/{@code REJECT}。 */
+    /** 空审批人处理策略：{@code TO_WORKFLOW_ADMIN}/{@code AUTO_SKIP}/{@code REJECT}/
+     *  {@code BLOCK}/{@code FALLBACK_ROLE}（后两者 DSL v2 专用）。 */
     private String emptyAssigneeStrategy;
+
+    /** 兜底角色编码，仅 {@code emptyAssigneeStrategy=FALLBACK_ROLE} 时使用（DSL v2 专用）。 */
+    private String fallbackRoleCode;
 
     /** 是否允许审批人为发起人本人时仍保留候选人（自审）。 */
     private Boolean allowSelfApproval;

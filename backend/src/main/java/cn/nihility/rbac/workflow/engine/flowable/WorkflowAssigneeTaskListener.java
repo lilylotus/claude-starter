@@ -112,7 +112,25 @@ public class WorkflowAssigneeTaskListener implements TaskListener {
             case DIRECT, WORKFLOW_ADMIN -> applyAssignees(delegateTask, rule, resolved, instance);
             case AUTO_SKIP -> autoSkip(delegateTask, rule, instance);
             case REJECT -> autoReject(delegateTask, rule, instance);
+            case BLOCKED -> blockPendingAssignment(delegateTask, rule, instance);
         }
+    }
+
+    /**
+     * 空审批人策略 {@code BLOCK}/{@code FALLBACK_ROLE}（兜底仍为空）：任务照常创建但不设置
+     * 处理人/候选人，停在"待分配"状态，不自动通过、不终止流程；流程实例标记
+     * {@code exception_code=ASSIGNEE_EMPTY} 供运维异常队列展示，运维重分配后清除该标记
+     * （DSL v2 专用，production-approval-lifecycle change design.md Decision 5）。
+     */
+    private void blockPendingAssignment(DelegateTask delegateTask, NodeAssigneeRuleEntity rule, ProcessInstanceEntity instance) {
+        persistTask(delegateTask, rule, List.of(), instance);
+        if (instance != null) {
+            instance.setExceptionCode("ASSIGNEE_EMPTY");
+            instance.setUpdateTime(LocalDateTime.now());
+            WorkflowSpringContext.getBean(ProcessInstanceMapper.class).updateById(instance);
+        }
+        log.warn("流程定义 {} 节点 {} 空审批人策略 BLOCK 兜底后仍未解析出候选人，任务 {} 停在待分配状态",
+                rule.getProcessDefinitionId(), rule.getNodeId(), delegateTask.getId());
     }
 
     /**

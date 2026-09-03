@@ -20,6 +20,9 @@ public final class TaskStatus {
     /** 已退回。 */
     public static final String RETURNED = "RETURNED";
 
+    /** 已取消（如 DSL v2 会签哨兵分支被真实候选人替换后作废，不计入票数）。 */
+    public static final String CANCELLED = "CANCELLED";
+
     /**
      * 工具类不允许实例化。
      */

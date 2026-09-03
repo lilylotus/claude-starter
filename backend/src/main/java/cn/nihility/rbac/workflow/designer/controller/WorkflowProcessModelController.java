@@ -82,7 +82,7 @@ public class WorkflowProcessModelController {
     public Result<Void> saveDraft(
             @Parameter(description = "流程模型 id", required = true) @PathVariable Long id,
             @Valid @RequestBody SaveDraftRequest request) {
-        workflowProcessModelService.saveDraft(id, request.getModelJson());
+        workflowProcessModelService.saveDraft(id, request.getModelJson(), request.getExpectedRevision());
         return Result.success();
     }
 

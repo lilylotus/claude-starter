@@ -58,6 +58,9 @@ class WorkflowProcessModelServiceImplTest {
     private WorkflowModelCompiler workflowModelCompiler;
 
     @Mock
+    private cn.nihility.rbac.workflow.dslv2.compiler.WorkflowModelCompilerV2 workflowModelCompilerV2;
+
+    @Mock
     private RepositoryService repositoryService;
 
     @Mock
@@ -81,7 +84,7 @@ class WorkflowProcessModelServiceImplTest {
     void setUp() {
         service = new WorkflowProcessModelServiceImpl(
                 processModelMapper, processDefinitionMapper, nodeAssigneeRuleMapper, workflowModelCompiler,
-                repositoryService);
+                workflowModelCompilerV2, repositoryService);
     }
 
     /** 保存草稿只更新 {@code model_json}，不触碰 Flowable。 */
@@ -90,7 +93,7 @@ class WorkflowProcessModelServiceImplTest {
         ProcessModelEntity model = draftModel();
         when(processModelMapper.selectById(1L)).thenReturn(model);
 
-        service.saveDraft(1L, "{\"processCode\":\"DEMO\"}");
+        service.saveDraft(1L, "{\"processCode\":\"DEMO\"}", null);
 
         assertThat(model.getModelJson()).isEqualTo("{\"processCode\":\"DEMO\"}");
         assertThat(model.getStatus()).isEqualTo(ProcessModelStatus.PUBLISHED);
@@ -159,7 +162,7 @@ class WorkflowProcessModelServiceImplTest {
         when(processDefinitionMapper.selectList(any())).thenReturn(List.of(existingDefinition(1)));
 
         NodeAssigneeRuleDraft ruleDraft = new NodeAssigneeRuleDraft(
-                "deptLeaderApprove", "部门负责人审批", 1, null, null, null, null, null,
+                "deptLeaderApprove", "部门负责人审批", 1, null, null, null, null, null, null,
                 false, true, true, false, false);
         when(workflowModelCompiler.compile(any())).thenReturn(new CompiledProcess(new BpmnModel(), List.of(ruleDraft)));
 

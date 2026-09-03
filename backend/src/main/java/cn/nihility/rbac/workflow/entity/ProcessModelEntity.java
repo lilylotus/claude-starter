@@ -36,12 +36,21 @@ public class ProcessModelEntity {
      *  编辑覆盖，表示"下一次发布的候选内容"。 */
     private String modelJson;
 
+    /** 草稿修订号，乐观锁，每次保存草稿自增。 */
+    private Long draftRevision;
+
+    /** 草稿状态：{@code EDITING}/{@code IN_REVIEW}/{@code APPROVED_FOR_RELEASE}。 */
+    private String draftStatus;
+
     /** 状态：{@code DRAFT}/{@code PUBLISHED}/{@code DISABLED}。 */
     private String status;
 
     /** 当前生效的已发布版本，关联 {@code tab_wf_process_definition.id}；{@code DRAFT} 状态下
      *  为空或指向上一个仍在生效的版本。 */
     private Long currentDefinitionId;
+
+    /** 是否接受新发起，与草稿编辑/发布态解耦，保存草稿不影响该开关。 */
+    private Boolean enabled;
 
     /** 创建人。 */
     private String createBy;

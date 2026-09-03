@@ -18,6 +18,8 @@ import cn.nihility.rbac.workflow.constant.EmptyAssigneeStrategy;
  * @param approvalMode          审批模式
  * @param approvalPercent       会签通过比例，仅 {@code approvalMode=PERCENT} 使用
  * @param emptyAssigneeStrategy 空审批人处理策略
+ * @param fallbackRoleCode      兜底角色编码，仅 {@code emptyAssigneeStrategy=FALLBACK_ROLE}
+ *                              时使用（DSL v2 专用，v1 编译器恒传 {@code null}）
  * @param allowSelfApproval     是否允许自审
  * @param allowTransfer         是否允许转办
  * @param allowDelegate         是否允许委派
@@ -33,6 +35,7 @@ public record NodeAssigneeRuleDraft(
         ApprovalMode approvalMode,
         Integer approvalPercent,
         EmptyAssigneeStrategy emptyAssigneeStrategy,
+        String fallbackRoleCode,
         boolean allowSelfApproval,
         boolean allowTransfer,
         boolean allowDelegate,

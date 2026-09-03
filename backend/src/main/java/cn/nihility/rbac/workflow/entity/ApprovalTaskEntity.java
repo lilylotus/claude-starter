@@ -33,6 +33,9 @@ public class ApprovalTaskEntity {
     /** 所属流程实例 id，关联 {@code tab_wf_process_instance.id}。 */
     private Long processInstanceId;
 
+    /** 所属节点轮次 id，关联 {@code tab_wf_node_run.id}，DSL v2 专用，v1 任务为空。 */
+    private Long nodeRunId;
+
     /** 节点 id。 */
     private String nodeId;
 
@@ -46,8 +49,24 @@ public class ApprovalTaskEntity {
      *  {@code tab_wf_approval_task_candidate} 明细。 */
     private String candidateType;
 
-    /** 状态：{@code PENDING}/{@code CLAIMED}/{@code COMPLETED}/{@code TRANSFERRED}/{@code RETURNED}。 */
+    /** 委派场景下的原处理人（owner），受托人 resolve 后归还给该用户决策，DSL v2 专用。 */
+    private Long ownerId;
+
+    /** 委派状态：{@code DELEGATED}/{@code RESOLVED}，非委派场景为空，DSL v2 专用。 */
+    private String delegationStatus;
+
+    /** 状态：{@code PENDING}/{@code CLAIMED}/{@code COMPLETED}/{@code TRANSFERRED}/{@code RETURNED}/
+     *  {@code CANCELLED}。 */
     private String status;
+
+    /** 乐观锁修订号。 */
+    private Long revision;
+
+    /** 任务被取消（会签哨兵分支被替换/退回/终止）时的原因说明。 */
+    private String cancelReason;
+
+    /** 节点操作期限，超时提醒依据，DSL v2 专用，存储 UTC。 */
+    private LocalDateTime dueTime;
 
     /** 完成时间，未完成为空。 */
     private LocalDateTime finishedTime;

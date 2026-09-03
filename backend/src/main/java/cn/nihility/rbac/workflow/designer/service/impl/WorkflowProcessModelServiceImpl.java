@@ -11,6 +11,10 @@ import cn.nihility.rbac.workflow.designer.dto.ProcessModelVO;
 import cn.nihility.rbac.workflow.designer.dto.ProcessModelDsl;
 import cn.nihility.rbac.workflow.designer.dto.PublishResultVO;
 import cn.nihility.rbac.workflow.designer.service.WorkflowProcessModelService;
+import cn.nihility.rbac.workflow.dslv2.compiler.CompiledProcessV2;
+import cn.nihility.rbac.workflow.dslv2.dto.ProcessModelDslV2;
+import cn.nihility.rbac.workflow.dslv2.compiler.WorkflowModelCompilerV2;
+import cn.nihility.rbac.workflow.dslv2.util.DigestUtils;
 import cn.nihility.rbac.workflow.entity.NodeAssigneeRuleEntity;
 import cn.nihility.rbac.workflow.entity.ProcessDefinitionEntity;
 import cn.nihility.rbac.workflow.entity.ProcessModelEntity;
@@ -18,9 +22,13 @@ import cn.nihility.rbac.workflow.mapper.NodeAssigneeRuleMapper;
 import cn.nihility.rbac.workflow.mapper.ProcessDefinitionMapper;
 import cn.nihility.rbac.workflow.mapper.ProcessModelMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
+import org.flowable.bpmn.converter.BpmnXMLConverter;
+import org.flowable.bpmn.model.BpmnModel;
 import org.flowable.engine.RepositoryService;
 import org.flowable.engine.repository.Deployment;
 import org.flowable.engine.repository.ProcessDefinition;
@@ -46,11 +54,17 @@ public class WorkflowProcessModelServiceImpl implements WorkflowProcessModelServ
     /** 节点审批人规则数据访问接口。 */
     private final NodeAssigneeRuleMapper nodeAssigneeRuleMapper;
 
-    /** DSL → BPMN 编译器。 */
+    /** DSL v1 → BPMN 编译器。 */
     private final WorkflowModelCompiler workflowModelCompiler;
+
+    /** DSL v2 → BPMN 编译器。 */
+    private final WorkflowModelCompilerV2 workflowModelCompilerV2;
 
     /** Flowable 流程仓库服务。 */
     private final RepositoryService repositoryService;
+
+    /** BPMN 对象模型 → XML 转换器，用于持久化 v2 发布产物的只读 XML 快照，无状态可复用。 */
+    private final BpmnXMLConverter bpmnXmlConverter = new BpmnXMLConverter();
 
     /** {@inheritDoc} */
     @Override
@@ -106,9 +120,15 @@ public class WorkflowProcessModelServiceImpl implements WorkflowProcessModelServ
      */
     @Override
     @Transactional(rollbackFor = Exception.class, propagation = Propagation.REQUIRED)
-    public void saveDraft(Long modelId, String modelJson) {
+    public void saveDraft(Long modelId, String modelJson, Long expectedRevision) {
         ProcessModelEntity model = requireModel(modelId);
+        Long currentRevision = model.getDraftRevision() == null ? 1L : model.getDraftRevision();
+        if (expectedRevision != null && !expectedRevision.equals(currentRevision)) {
+            throw new BusinessException("草稿已被他人修改（当前修订号 " + currentRevision
+                    + "，提交的期望修订号 " + expectedRevision + "），请刷新后合并再保存");
+        }
         model.setModelJson(modelJson);
+        model.setDraftRevision(currentRevision + 1);
         model.setUpdateTime(LocalDateTime.now());
         processModelMapper.updateById(model);
     }
@@ -123,43 +143,15 @@ public class WorkflowProcessModelServiceImpl implements WorkflowProcessModelServ
         if (!StringUtils.hasText(model.getModelJson())) {
             throw new BusinessException("流程模型草稿为空，无法发布");
         }
-        ProcessModelDsl dsl = JacksonUtils.toObj(model.getModelJson(), ProcessModelDsl.class);
-        CompiledProcess compiled = workflowModelCompiler.compile(dsl);
 
         int nextVersion = nextVersion(modelId);
         String operatorText = operatorId == null ? null : operatorId.toString();
         LocalDateTime now = LocalDateTime.now();
-
         String resourceName = model.getProcessCode() + "-v" + nextVersion + ".bpmn20.xml";
-        Deployment deployment = repositoryService.createDeployment()
-                .name(model.getProcessCode() + " v" + nextVersion)
-                .addBpmnModel(resourceName, compiled.bpmnModel())
-                .deploy();
-        ProcessDefinition flowableDefinition = repositoryService.createProcessDefinitionQuery()
-                .deploymentId(deployment.getId())
-                .singleResult();
-        if (flowableDefinition == null) {
-            throw new BusinessException("流程发布失败：未能获取部署产生的流程定义");
-        }
 
-        ProcessDefinitionEntity definition = ProcessDefinitionEntity.builder()
-                .processModelId(modelId)
-                .processCode(model.getProcessCode())
-                .version(nextVersion)
-                .flowableDefinitionKey(flowableDefinition.getKey())
-                .flowableDefinitionId(flowableDefinition.getId())
-                .modelJsonSnapshot(model.getModelJson())
-                .status(ProcessModelStatus.PUBLISHED)
-                .publishedBy(operatorText)
-                .publishedTime(now)
-                .createBy(operatorText)
-                .createTime(now)
-                .updateBy(operatorText)
-                .updateTime(now)
-                .build();
-        processDefinitionMapper.insert(definition);
-
-        insertAssigneeRules(definition.getId(), compiled.assigneeRules(), operatorText, now);
+        ProcessDefinitionEntity definition = isSchemaV2(model.getModelJson())
+                ? publishV2(model, nextVersion, resourceName, operatorText, now)
+                : publishV1(model, nextVersion, resourceName, operatorText, now);
 
         model.setCurrentDefinitionId(definition.getId());
         model.setStatus(ProcessModelStatus.PUBLISHED);
@@ -170,11 +162,109 @@ public class WorkflowProcessModelServiceImpl implements WorkflowProcessModelServ
         return PublishResultVO.builder()
                 .processDefinitionId(definition.getId())
                 .version(nextVersion)
-                .flowableDefinitionKey(flowableDefinition.getKey())
-                .flowableDefinitionId(flowableDefinition.getId())
+                .flowableDefinitionKey(definition.getFlowableDefinitionKey())
+                .flowableDefinitionId(definition.getFlowableDefinitionId())
                 .publishedTime(now)
                 .build();
     }
+
+    /**
+     * 按 v1 DSL 编译、部署、落库；沿用 workflow-approval-engine change design.md Decision
+     * 10 既有实现，行为不变。
+     */
+    private ProcessDefinitionEntity publishV1(
+            ProcessModelEntity model, int nextVersion, String resourceName, String operatorText, LocalDateTime now) {
+        ProcessModelDsl dsl = JacksonUtils.toObj(model.getModelJson(), ProcessModelDsl.class);
+        CompiledProcess compiled = workflowModelCompiler.compile(dsl);
+        ProcessDefinition flowableDefinition = deploy(model, nextVersion, resourceName, compiled.bpmnModel());
+
+        ProcessDefinitionEntity definition = ProcessDefinitionEntity.builder()
+                .processModelId(model.getId())
+                .processCode(model.getProcessCode())
+                .version(nextVersion)
+                .schemaVersion(1)
+                .flowableDefinitionKey(flowableDefinition.getKey())
+                .flowableDefinitionId(flowableDefinition.getId())
+                .modelJsonSnapshot(model.getModelJson())
+                .status(ProcessModelStatus.PUBLISHED)
+                .publishedBy(operatorText)
+                .publishedTime(now)
+                .createBy(operatorText).createTime(now).updateBy(operatorText).updateTime(now)
+                .build();
+        processDefinitionMapper.insert(definition);
+        insertAssigneeRules(definition.getId(), compiled.assigneeRules(), operatorText, now);
+        return definition;
+    }
+
+    /**
+     * 按 DSL v2 编译、部署、落库，额外持久化编译产物摘要/XML 快照/节点映射
+     * （production-approval-lifecycle change design.md Decision 3/9）：`tasks.md` 3.7
+     * 中记录的"发布产物持久化留给第 4 节接入"在本方法完成闭环。
+     */
+    private ProcessDefinitionEntity publishV2(
+            ProcessModelEntity model, int nextVersion, String resourceName, String operatorText, LocalDateTime now) {
+        ProcessModelDslV2 dsl = JacksonUtils.toObj(model.getModelJson(), ProcessModelDslV2.class);
+        CompiledProcessV2 compiled = workflowModelCompilerV2.compile(dsl);
+        ProcessDefinition flowableDefinition = deploy(model, nextVersion, resourceName, compiled.bpmnModel());
+
+        String xmlSnapshot = new String(bpmnXmlConverter.convertToXML(compiled.bpmnModel()), StandardCharsets.UTF_8);
+        String nodeMappingJson = JacksonUtils.toJson(compiled.nodeMapping());
+
+        ProcessDefinitionEntity definition = ProcessDefinitionEntity.builder()
+                .processModelId(model.getId())
+                .processCode(model.getProcessCode())
+                .version(nextVersion)
+                .schemaVersion(2)
+                .compilerVersion("v2.1")
+                .flowableDefinitionKey(flowableDefinition.getKey())
+                .flowableDefinitionId(flowableDefinition.getId())
+                .modelJsonSnapshot(model.getModelJson())
+                .modelDigest(DigestUtils.sha256(model.getModelJson()))
+                .xmlSnapshot(xmlSnapshot)
+                .xmlDigest(DigestUtils.sha256(xmlSnapshot))
+                .nodeMappingJson(nodeMappingJson)
+                .ruleSnapshotJson(JacksonUtils.toJson(compiled.assigneeRules()))
+                .status(ProcessModelStatus.PUBLISHED)
+                .publishedBy(operatorText)
+                .publishedTime(now)
+                .createBy(operatorText).createTime(now).updateBy(operatorText).updateTime(now)
+                .build();
+        processDefinitionMapper.insert(definition);
+        insertAssigneeRules(definition.getId(), compiled.assigneeRules(), operatorText, now);
+        return definition;
+    }
+
+    /**
+     * 部署 BPMN 到 Flowable 引擎，v1/v2 共用。
+     */
+    private ProcessDefinition deploy(ProcessModelEntity model, int nextVersion, String resourceName, BpmnModel bpmnModel) {
+        Deployment deployment = repositoryService.createDeployment()
+                .name(model.getProcessCode() + " v" + nextVersion)
+                .addBpmnModel(resourceName, bpmnModel)
+                .deploy();
+        ProcessDefinition flowableDefinition = repositoryService.createProcessDefinitionQuery()
+                .deploymentId(deployment.getId())
+                .singleResult();
+        if (flowableDefinition == null) {
+            throw new BusinessException("流程发布失败：未能获取部署产生的流程定义");
+        }
+        return flowableDefinition;
+    }
+
+    /**
+     * 探测草稿 DSL 的 {@code schemaVersion} 是否为 2；探测失败（非法 JSON 等）时按 v1 处理，
+     * 交由 v1 校验器给出结构错误，不在这里重复解释 JSON 语法问题。
+     */
+    private boolean isSchemaV2(String modelJson) {
+        try {
+            Map<String, Object> peek = JacksonUtils.toObj(modelJson, JacksonUtils.MAP_OBJECT_TYPE_REFERENCE);
+            Object schemaVersion = peek == null ? null : peek.get("schemaVersion");
+            return schemaVersion != null && "2".equals(String.valueOf(schemaVersion).replace(".0", ""));
+        } catch (RuntimeException ex) {
+            return false;
+        }
+    }
+
 
     /**
      * {@inheritDoc}
@@ -268,6 +358,7 @@ public class WorkflowProcessModelServiceImpl implements WorkflowProcessModelServ
                     .approvalPercent(draft.approvalPercent())
                     .emptyAssigneeStrategy(
                             draft.emptyAssigneeStrategy() == null ? null : draft.emptyAssigneeStrategy().name())
+                    .fallbackRoleCode(draft.fallbackRoleCode())
                     .allowSelfApproval(draft.allowSelfApproval())
                     .allowTransfer(draft.allowTransfer())
                     .allowDelegate(draft.allowDelegate())

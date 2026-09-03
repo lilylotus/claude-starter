@@ -96,7 +96,34 @@ public class WorkflowMultiInstanceExecutionListener implements ExecutionListener
             case DIRECT, WORKFLOW_ADMIN -> applyCollection(execution, nodeId, resolved);
             case AUTO_SKIP -> autoSkip(execution, nodeId, rule, instance);
             case REJECT -> autoReject(execution, rule, instance);
+            case BLOCKED -> blockPendingAssignment(execution, nodeId, instance);
         }
+    }
+
+    /** 空审批人策略解析为空时使用的哨兵用户 id 文本，真实用户 id 从 1 开始自增，此值永不
+     *  对应真实账号，纯粹用于避免 Flowable 对空集合多实例节点"立即自动完成"这一已知行为
+     *  （design.md Decision 3/5"避免空集合 MI 直接跳过"）。{@link cn.nihility.rbac.workflow.dslv2.engine.WorkflowV2ReassignmentService}
+     *  据此识别待重分配的哨兵分支，故声明为 {@code public}。 */
+    public static final String EMPTY_SENTINEL_USER_ID = "0";
+
+    /**
+     * 空审批人策略 {@code BLOCK}/{@code FALLBACK_ROLE}（兜底仍为空）：会签节点候选人集合置为
+     * 单元素哨兵集合而非真正的空集合——Flowable 对 {@code nrOfInstances=0} 的多实例节点会在
+     * 活动开始阶段就直接跳过、根本不给 completionCondition 判定的机会，导致"零候选人却被当成
+     * 已完成"；哨兵产生的唯一任务无法被任何真实用户认领，流程实例标记
+     * {@code exception_code=ASSIGNEE_EMPTY}。运维重分配时通过
+     * {@code runtimeService.addMultiInstanceExecution} 为每个真实候选人新增实例、再删除哨兵
+     * 实例，使会签的 N/K 计算按补充后的真实候选人数量进行，不遗留哨兵占位票
+     * （DSL v2 专用，production-approval-lifecycle change design.md Decision 5/7）。
+     */
+    private void blockPendingAssignment(DelegateExecution execution, String nodeId, ProcessInstanceEntity instance) {
+        execution.setVariableLocal(collectionVariableName(nodeId), List.of(EMPTY_SENTINEL_USER_ID));
+        if (instance != null) {
+            instance.setExceptionCode("ASSIGNEE_EMPTY");
+            instance.setUpdateTime(LocalDateTime.now());
+            WorkflowSpringContext.getBean(ProcessInstanceMapper.class).updateById(instance);
+        }
+        log.warn("会签节点 {} 空审批人策略 BLOCK 兜底后仍未解析出候选人，使用哨兵候选人占位，等待运维重分配", nodeId);
     }
 
     /**

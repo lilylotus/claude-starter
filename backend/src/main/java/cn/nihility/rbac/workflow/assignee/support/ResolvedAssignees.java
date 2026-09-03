@@ -21,7 +21,11 @@ public record ResolvedAssignees(Set<Long> userIds, Kind kind) {
         /** 解析为空，按 {@code AUTO_SKIP} 策略自动完成该节点。 */
         AUTO_SKIP,
         /** 解析为空，按 {@code REJECT} 策略终止流程。 */
-        REJECT
+        REJECT,
+
+        /** 解析为空，按 {@code BLOCK}/{@code FALLBACK_ROLE}（兜底仍为空）策略阻塞待运维
+         *  重分配（DSL v2 专用）。 */
+        BLOCKED
     }
 
     /**
@@ -60,6 +64,15 @@ public record ResolvedAssignees(Set<Long> userIds, Kind kind) {
      */
     public static ResolvedAssignees reject() {
         return new ResolvedAssignees(Set.of(), Kind.REJECT);
+    }
+
+    /**
+     * 构造"阻塞待运维重分配"结果（DSL v2 专用）。
+     *
+     * @return 解析结果
+     */
+    public static ResolvedAssignees blocked() {
+        return new ResolvedAssignees(Set.of(), Kind.BLOCKED);
     }
 
     /**

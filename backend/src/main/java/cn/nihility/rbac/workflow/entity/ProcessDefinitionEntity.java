@@ -37,6 +37,30 @@ public class ProcessDefinitionEntity {
     /** 同一流程模型下的版本号，自增。 */
     private Integer version;
 
+    /** DSL schemaVersion，历史 v1 定义为 1，DSL v2 为 2。 */
+    private Integer schemaVersion;
+
+    /** 编译该版本时使用的编译器版本号。 */
+    private String compilerVersion;
+
+    /** DSL 快照摘要（如 SHA-256），供试运行报告/审核记录比对是否失效。 */
+    private String modelDigest;
+
+    /** 编译产物 BPMN XML 快照，只读导出用。 */
+    private String xmlSnapshot;
+
+    /** BPMN XML 快照摘要。 */
+    private String xmlDigest;
+
+    /** 节点 id 到 BPMN activityId 的映射快照（JSON）。 */
+    private String nodeMappingJson;
+
+    /** 发布时刻节点审批人规则的完整快照（JSON），审计与试运行报告比对用。 */
+    private String ruleSnapshotJson;
+
+    /** 绑定的表单版本 id，关联 {@code tab_wf_form_version.id}。 */
+    private Long formVersionId;
+
     /** Flowable 流程定义 key（BPMN {@code process} 的 {@code id}）。 */
     private String flowableDefinitionKey;
 

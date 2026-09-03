@@ -13,5 +13,15 @@ public enum EmptyAssigneeStrategy {
     AUTO_SKIP,
 
     /** 终止流程并记录失败原因。 */
-    REJECT
+    REJECT,
+
+    /** 阻塞：节点/会签实例停在无处理人的待分配状态，不自动通过，需运维重分配后才能继续
+     *  （production-approval-lifecycle change design.md Decision 5，DSL v2 专用，v1 编译器
+     *  从不产生该取值）。 */
+    BLOCK,
+
+    /** 兜底角色：解析结果为空时改用 {@code fallback_role_code} 指定的角色；仍为空按
+     *  {@link #BLOCK} 处理（production-approval-lifecycle change design.md Decision 5，
+     *  DSL v2 专用，v1 编译器从不产生该取值）。 */
+    FALLBACK_ROLE
 }

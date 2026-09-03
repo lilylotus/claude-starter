@@ -32,6 +32,9 @@ public final class ApprovalAction {
     /** 终止（如空审批人策略为 REJECT 时系统自动终止）。 */
     public static final String TERMINATE = "TERMINATE";
 
+    /** 运维重分配审批人（DSL v2 专用，空审批人 BLOCK 策略触发后的恢复操作）。 */
+    public static final String REASSIGN = "REASSIGN";
+
     /**
      * 工具类不允许实例化。
      */
