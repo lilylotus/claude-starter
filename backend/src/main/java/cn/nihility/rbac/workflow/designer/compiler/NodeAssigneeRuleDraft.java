@@ -25,6 +25,17 @@ import cn.nihility.rbac.workflow.constant.EmptyAssigneeStrategy;
  * @param allowDelegate         是否允许委派
  * @param allowAddSign          是否允许加签
  * @param allowReturn           是否允许退回到该节点
+ * @param fieldPermissionsJson  节点字段权限快照 JSON（DSL v2 专用，v1 编译器恒传 {@code null}）
+ * @param assigneeOrgSource     组织负责人类来源解析组织的方式：{@code APPLICANT_SNAPSHOT}/
+ *                              {@code FIXED_ORG}，仅 {@code assigneeType=ORG_LEADER} 时使用
+ *                              （DSL v2 专用，v1 编译器恒传 {@code null}）
+ * @param targetOrgId           {@code assigneeOrgSource=FIXED_ORG} 时的固定目标组织 id
+ *                              （DSL v2 专用，v1 编译器恒传 {@code null}）
+ * @param rejectPolicy          会签反对票处理策略字面量：{@code VETO}/{@code THRESHOLD}，仅
+ *                              {@code approvalMode} 为 {@code AND}/{@code OR}/{@code PERCENT}
+ *                              时有意义（DSL v2 专用，v1 编译器恒传 {@code null}，
+ *                              production-approval-lifecycle change design.md 第7节，
+ *                              tasks.md 6.3）
  */
 public record NodeAssigneeRuleDraft(
         String nodeId,
@@ -40,5 +51,9 @@ public record NodeAssigneeRuleDraft(
         boolean allowTransfer,
         boolean allowDelegate,
         boolean allowAddSign,
-        boolean allowReturn) {
+        boolean allowReturn,
+        String fieldPermissionsJson,
+        String assigneeOrgSource,
+        Long targetOrgId,
+        String rejectPolicy) {
 }

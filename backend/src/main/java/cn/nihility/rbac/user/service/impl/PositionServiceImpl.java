@@ -25,6 +25,7 @@ import cn.nihility.rbac.user.service.UserDisplayService;
 import cn.nihility.rbac.user.service.support.PositionDynamicFieldSupport;
 import cn.nihility.rbac.user.service.support.PositionLogSnapshotSupport;
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -148,6 +149,21 @@ public class PositionServiceImpl implements PositionService {
                 userPositionMapper.selectAllForExport(allowedOrgIds.orElse(null), PositionStatus.DELETED);
         fillAuditDisplayNames(records);
         return records;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public Set<Long> findActiveUserIdsByPositionType(String positionType) {
+        if (!StringUtils.hasText(positionType)) {
+            return Set.of();
+        }
+        List<UserPositionEntity> positions = userPositionMapper.selectList(
+                new LambdaQueryWrapper<UserPositionEntity>()
+                        .eq(UserPositionEntity::getPositionType, positionType)
+                        .eq(UserPositionEntity::getStatus, PositionStatus.ENABLED));
+        return positions.stream().map(UserPositionEntity::getUserId).collect(Collectors.toSet());
     }
 
     /**

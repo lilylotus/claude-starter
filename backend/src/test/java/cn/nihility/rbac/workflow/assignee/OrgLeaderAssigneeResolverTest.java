@@ -26,7 +26,7 @@ class OrgLeaderAssigneeResolverTest {
         OrgLeaderAssigneeResolver resolver = new OrgLeaderAssigneeResolver(adminRoleLookupService);
         when(adminRoleLookupService.findOrgLeaderUserIds(10L, "DEPT_LEADER")).thenReturn(Set.of(5L));
 
-        Set<Long> result = resolver.resolve(new AssigneeResolveContext(1L, "node1", "DEPT_LEADER", 100L, 10L));
+        Set<Long> result = resolver.resolve(new AssigneeResolveContext(1L, "node1", "DEPT_LEADER", 100L, 10L, null, null));
 
         assertThat(result).containsExactly(5L);
     }
@@ -38,7 +38,7 @@ class OrgLeaderAssigneeResolverTest {
         when(adminRoleLookupService.findOrgLeaderUserIds(10L, WorkflowConstants.DEFAULT_ORG_LEADER_ROLE_CODE))
                 .thenReturn(Set.of(6L));
 
-        Set<Long> result = resolver.resolve(new AssigneeResolveContext(1L, "node1", null, 100L, 10L));
+        Set<Long> result = resolver.resolve(new AssigneeResolveContext(1L, "node1", null, 100L, 10L, null, null));
 
         assertThat(result).containsExactly(6L);
     }
@@ -48,8 +48,20 @@ class OrgLeaderAssigneeResolverTest {
     void resolve_shouldReturnEmptyWhenApplicantOrgMissing() {
         OrgLeaderAssigneeResolver resolver = new OrgLeaderAssigneeResolver(adminRoleLookupService);
 
-        Set<Long> result = resolver.resolve(new AssigneeResolveContext(1L, "node1", "DEPT_LEADER", 100L, null));
+        Set<Long> result = resolver.resolve(new AssigneeResolveContext(1L, "node1", "DEPT_LEADER", 100L, null, null, null));
 
         assertThat(result).isEmpty();
+    }
+
+    /** orgSource=FIXED_ORG 时应使用节点规则配置的固定目标组织，而不是发起人所属组织。 */
+    @Test
+    void resolve_shouldUseFixedTargetOrgWhenOrgSourceIsFixedOrg() {
+        OrgLeaderAssigneeResolver resolver = new OrgLeaderAssigneeResolver(adminRoleLookupService);
+        when(adminRoleLookupService.findOrgLeaderUserIds(999L, "DEPT_LEADER")).thenReturn(Set.of(9L));
+
+        Set<Long> result = resolver.resolve(
+                new AssigneeResolveContext(1L, "node1", "DEPT_LEADER", 100L, 10L, "FIXED_ORG", 999L));
+
+        assertThat(result).containsExactly(9L);
     }
 }

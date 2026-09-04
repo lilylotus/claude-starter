@@ -9,6 +9,7 @@ import cn.nihility.rbac.workflow.designer.dto.CopyProcessModelRequest;
 import cn.nihility.rbac.workflow.designer.dto.ProcessModelVO;
 import cn.nihility.rbac.workflow.designer.dto.PublishResultVO;
 import cn.nihility.rbac.workflow.designer.dto.SaveDraftRequest;
+import cn.nihility.rbac.workflow.designer.dto.SetModelEnabledRequest;
 import cn.nihility.rbac.workflow.designer.service.WorkflowProcessModelService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -139,6 +140,26 @@ public class WorkflowProcessModelController {
     public Result<List<ProcessDefinitionVersionVO>> versions(
             @Parameter(description = "流程模型 id", required = true) @PathVariable Long id) {
         return Result.success(workflowProcessModelService.listVersions(id));
+    }
+
+    /**
+     * 独立设置流程模型是否接受新发起，与 {@link #disable}/{@link #enable}（版本级下线/重新
+     * 上线）语义解耦：本接口只影响"是否接受新发起"，不改动 {@code status}/
+     * {@code currentDefinitionId}，也不挂起/激活 Flowable 流程定义（tasks.md 4.6"模型级
+     * 启停"）。复用 {@code WorkflowDesign:model:disable} 权限点（同一批"能操作流程模型上下线
+     * 相关开关"的运维人员）。
+     *
+     * @param id      流程模型 id
+     * @param request 请求体，携带目标启用状态
+     * @return 无业务数据的成功响应
+     */
+    @Operation(summary = "设置流程模型是否接受新发起", description = "与版本级下线/重新上线语义解耦，仅控制 tab_wf_process_model.enabled")
+    @PostMapping("/api/workflow/process-models/{id}/enabled")
+    public Result<Void> setModelEnabled(
+            @Parameter(description = "流程模型 id", required = true) @PathVariable Long id,
+            @Valid @RequestBody SetModelEnabledRequest request) {
+        workflowProcessModelService.setModelEnabled(id, Boolean.TRUE.equals(request.getEnabled()), requireCurrentUserId());
+        return Result.success();
     }
 
     /**

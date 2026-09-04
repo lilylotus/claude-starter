@@ -70,4 +70,17 @@ public interface WorkflowProcessModelService {
      * @return 版本历史列表
      */
     List<ProcessDefinitionVersionVO> listVersions(Long modelId);
+
+    /**
+     * 独立设置流程模型是否接受新发起（{@code tab_wf_process_model.enabled}），与
+     * {@link #disable}/{@link #enable}（操作版本级 {@code status}，表示下线/重新上线某个
+     * 具体版本）语义解耦：本方法只影响"是否接受新发起"，不改动 {@code status}/
+     * {@code currentDefinitionId}，也不挂起/激活任何 Flowable 流程定义
+     * （production-approval-lifecycle change tasks.md 4.6"模型级启停"）。
+     *
+     * @param modelId    流程模型 id
+     * @param enabled    目标启用状态
+     * @param operatorId 操作人用户 id
+     */
+    void setModelEnabled(Long modelId, boolean enabled, Long operatorId);
 }

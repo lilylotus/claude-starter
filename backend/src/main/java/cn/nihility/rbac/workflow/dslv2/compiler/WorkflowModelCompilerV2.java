@@ -5,6 +5,7 @@ import cn.nihility.rbac.workflow.constant.AssigneeType;
 import cn.nihility.rbac.workflow.constant.EmptyAssigneeStrategy;
 import cn.nihility.rbac.workflow.designer.compiler.NodeAssigneeRuleDraft;
 import cn.nihility.rbac.workflow.dslv2.constant.EmptyPolicy;
+import cn.nihility.rbac.workflow.dslv2.constant.RejectPolicy;
 import cn.nihility.rbac.workflow.dslv2.constant.SelfPolicy;
 import cn.nihility.rbac.workflow.dslv2.constant.VoteExecution;
 import cn.nihility.rbac.workflow.dslv2.constant.VoteMode;
@@ -21,13 +22,17 @@ import cn.nihility.rbac.workflow.dslv2.dto.ProcessNodeDslV2;
 import cn.nihility.rbac.workflow.dslv2.dto.StartNodeDslV2;
 import cn.nihility.rbac.workflow.dslv2.engine.AutoServiceTaskDelegate;
 import cn.nihility.rbac.workflow.dslv2.engine.CcServiceTaskDelegate;
-import cn.nihility.rbac.workflow.engine.flowable.MultiInstanceCompletionEvaluator;
 import cn.nihility.rbac.workflow.exception.WorkflowModelValidationException;
+import cn.nihility.rbac.common.util.JacksonUtils;
+import cn.nihility.rbac.org.constant.OrgStatus;
+import cn.nihility.rbac.org.entity.OrgEntity;
+import cn.nihility.rbac.org.mapper.OrgMapper;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import org.flowable.bpmn.model.BpmnModel;
 import org.flowable.bpmn.model.EndEvent;
 import org.flowable.bpmn.model.ExclusiveGateway;
@@ -47,32 +52,52 @@ import org.flowable.bpmn.model.UserTask;
 import org.flowable.validation.ProcessValidator;
 import org.flowable.validation.ProcessValidatorFactory;
 import org.flowable.validation.ValidationError;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 /**
  * DSL v2 → BPMN 编译器，{@link cn.nihility.rbac.workflow.designer.compiler.WorkflowModelCompiler}
  * v1 实现的姊妹实现，彼此独立（production-approval-lifecycle change design.md Decision 3）。
- * 复用 v1 的 {@code WorkflowAssigneeTaskListener}/{@code WorkflowMultiInstanceExecutionListener}/
- * {@code WorkflowMultiInstanceTaskListener} 与 {@code tab_wf_node_assignee_rule} 持久化路径
- * ——DSL v2 审批节点编译产物落地为与 v1 完全同构的 {@link NodeAssigneeRuleDraft}，会签/单人
- * 节点的候选人解析、任务创建持久化、幂等、越权校验均直接复用既有运行时基础设施，本编译器只
- * 新增 v1 不支持的部分：并行分叉/汇合网关、抄送/自动任务服务任务、条件 AST 编译、会签串行
- * 执行方式、明确 outcome 的结束事件。
+ * 单人/候选组节点复用 v1 的 {@code WorkflowAssigneeTaskListener}；会签节点使用 v2 专用的
+ * {@link cn.nihility.rbac.workflow.dslv2.engine.WorkflowV2MultiInstanceExecutionListener}/
+ * {@link cn.nihility.rbac.workflow.dslv2.engine.WorkflowV2MultiInstanceTaskListener}（新建，
+ * 不复用/不改动 v1 的 {@code WorkflowMultiInstanceExecutionListener}/
+ * {@code WorkflowMultiInstanceTaskListener}，v1 存量流程行为不受影响），实现
+ * design.md 第7节 {@code rejectPolicy=VETO/THRESHOLD} 区分与 {@code tab_wf_node_run} 计票
+ * （production-approval-lifecycle change tasks.md 6.3）。DSL v2 审批节点编译产物统一落地为
+ * 与 v1 完全同构的 {@link NodeAssigneeRuleDraft}，任务创建持久化、幂等、越权校验均直接复用
+ * 既有运行时基础设施，本编译器只新增 v1 不支持的部分：并行分叉/汇合网关、抄送/自动任务服务
+ * 任务、条件 AST 编译、会签串行执行方式、明确 outcome 的结束事件、会签 N/A/R/U 计票。
  */
 @Component
+@RequiredArgsConstructor
 public class WorkflowModelCompilerV2 {
+
+    /** 组织数据访问接口，用于校验 {@code assignee.orgSource=FIXED_ORG} 场景下 {@code orgId}
+     *  是否真实存在且启用（production-approval-lifecycle change tasks.md 5.3）。 */
+    private final OrgMapper orgMapper;
 
     /** 单人/候选组节点挂载的任务监听器类名，复用 v1。 */
     private static final String ASSIGNEE_TASK_LISTENER_CLASS =
             "cn.nihility.rbac.workflow.engine.flowable.WorkflowAssigneeTaskListener";
 
-    /** 会签节点挂载的执行监听器类名，复用 v1。 */
+    /** 会签节点挂载的执行监听器类名，v2 专用，不复用 v1（tasks.md 6.3）。 */
     private static final String MULTI_INSTANCE_EXECUTION_LISTENER_CLASS =
-            "cn.nihility.rbac.workflow.engine.flowable.WorkflowMultiInstanceExecutionListener";
+            "cn.nihility.rbac.workflow.dslv2.engine.WorkflowV2MultiInstanceExecutionListener";
 
-    /** 会签节点单个实例任务监听器类名，复用 v1。 */
+    /** 会签节点单个实例任务监听器类名，v2 专用，只负责持久化任务行，不复用 v1（tasks.md 6.3）。 */
     private static final String MULTI_INSTANCE_TASK_LISTENER_CLASS =
-            "cn.nihility.rbac.workflow.engine.flowable.WorkflowMultiInstanceTaskListener";
+            "cn.nihility.rbac.workflow.dslv2.engine.WorkflowV2MultiInstanceTaskListener";
+
+    /** 会签完成条件表达式：{@code voteAgreeCount}/{@code voteThreshold} 是
+     *  {@link cn.nihility.rbac.workflow.dslv2.engine.WorkflowV2MultiInstanceExecutionListener}
+     *  在会签轮次开始时按整数公式计算并写入 miBody 执行作用域的局部变量（K 值计算与实际计票均
+     *  在 Java 端完成，此处只需判断是否已达到通过阈值，不在 UEL 表达式里做除法/百分比运算，
+     *  避免浮点误差）；反对票导致的节点终止（VETO 一票否决 / THRESHOLD 阈值不足）由
+     *  {@code FlowableWorkflowService.completeTask} 在决定计票结果后直接调用
+     *  {@code runtimeService.deleteProcessInstance} 终止整个流程实例，不依赖也不通过本完成
+     *  条件表达式表达"拒绝"语义（design.md 第7节，tasks.md 6.3）。 */
+    private static final String MULTI_INSTANCE_COMPLETION_CONDITION = "${voteAgreeCount >= voteThreshold}";
 
     /** 会签多实例元素变量名，须与 v1、{@code FlowableWorkflowService.doAddSign}、
      *  {@code WorkflowV2ReassignmentService} 保持完全一致。 */
@@ -88,7 +113,7 @@ public class WorkflowModelCompilerV2 {
      * @return 编译产物
      */
     public CompiledProcessV2 compile(ProcessModelDslV2 dsl) {
-        ProcessModelDslV2Validator.validate(dsl);
+        ProcessModelDslV2Validator.validate(dsl, this::orgExistsAndEnabled);
 
         BpmnModel bpmnModel = new BpmnModel();
         Process process = new Process();
@@ -227,8 +252,11 @@ public class WorkflowModelCompilerV2 {
 
     /**
      * 构建审批节点对应的 {@link UserTask}：无 {@code vote} 配置按单人/候选组编译，复用 v1
-     * {@code WorkflowAssigneeTaskListener}；有 {@code vote} 配置按会签编译，复用 v1
-     * {@code WorkflowMultiInstanceExecutionListener}/{@code WorkflowMultiInstanceTaskListener}，
+     * {@code WorkflowAssigneeTaskListener}；有 {@code vote} 配置按会签编译，挂 v2 专用的
+     * {@code WorkflowV2MultiInstanceExecutionListener}/{@code WorkflowV2MultiInstanceTaskListener}
+     * （只负责候选人集合准备/任务行持久化，不在 {@code complete} 事件挂任何监听器——计票与
+     * 完成/终止判定统一由 {@code FlowableWorkflowService.completeTask} 在调用
+     * {@code taskService.complete} 前后以 Java 代码完成，见 tasks.md 6.3），
      * {@code vote.execution=SEQUENTIAL} 时设置串行多实例（v1 恒为并行，是 v1 不具备的新能力）。
      */
     private UserTask buildApprovalUserTask(ApprovalNodeDslV2 approval) {
@@ -244,25 +272,25 @@ public class WorkflowModelCompilerV2 {
 
         userTask.setAssignee("${" + MULTI_INSTANCE_ELEMENT_VARIABLE + "}");
         userTask.setExecutionListeners(List.of(buildListener("start", MULTI_INSTANCE_EXECUTION_LISTENER_CLASS)));
-        userTask.setTaskListeners(List.of(
-                buildListener("create", MULTI_INSTANCE_TASK_LISTENER_CLASS),
-                buildListener("complete", MULTI_INSTANCE_TASK_LISTENER_CLASS)));
+        userTask.setTaskListeners(List.of(buildListener("create", MULTI_INSTANCE_TASK_LISTENER_CLASS)));
 
-        ApprovalMode mode = mapVoteMode(voteMode);
         MultiInstanceLoopCharacteristics loopCharacteristics = new MultiInstanceLoopCharacteristics();
         loopCharacteristics.setSequential(approval.getVote().getExecution() == VoteExecution.SEQUENTIAL);
         loopCharacteristics.setInputDataItem(collectionVariableName(approval.getId()));
         loopCharacteristics.setElementVariable(MULTI_INSTANCE_ELEMENT_VARIABLE);
-        loopCharacteristics.setCompletionCondition(
-                MultiInstanceCompletionEvaluator.buildCompletionCondition(mode, approval.getVote().getPercent()));
+        loopCharacteristics.setCompletionCondition(MULTI_INSTANCE_COMPLETION_CONDITION);
         userTask.setLoopCharacteristics(loopCharacteristics);
         return userTask;
     }
 
     /**
-     * {@link VoteMode} → v1 {@link ApprovalMode} 映射，复用既有的
-     * {@link MultiInstanceCompletionEvaluator} 计算完成条件（本轮 {@code rejectPolicy} 恒为
-     * {@code VETO} 语义，{@code THRESHOLD} 已在校验阶段拒绝发布）。
+     * {@link VoteMode} → v1 {@link ApprovalMode} 映射：{@code approvalMode}/{@code approvalPercent}
+     * 落库到 {@code tab_wf_node_assignee_rule} 后，由
+     * {@code WorkflowV2MultiInstanceExecutionListener} 在会签轮次开始时按整数公式换算通过阈值
+     * K（{@code ALL=N/ANY=1/PERCENT=ceil(N×percent/100)}），{@code rejectPolicy}
+     * （{@code VETO}/{@code THRESHOLD}）单独落库、单独在
+     * {@code FlowableWorkflowService.completeTask} 计票时读取，两者互不影响
+     * （production-approval-lifecycle change design.md 第7节，tasks.md 6.3）。
      */
     private ApprovalMode mapVoteMode(VoteMode voteMode) {
         return switch (voteMode) {
@@ -310,6 +338,15 @@ public class WorkflowModelCompilerV2 {
     }
 
     /**
+     * 判断组织 id 是否在 {@code tab_org} 中真实存在且状态启用，供
+     * {@code assignee.orgSource=FIXED_ORG} 场景的发布校验使用。
+     */
+    private boolean orgExistsAndEnabled(Long orgId) {
+        OrgEntity org = orgMapper.selectById(orgId);
+        return org != null && Objects.equals(org.getStatus(), OrgStatus.ENABLED);
+    }
+
+    /**
      * 把 {@link ApprovalNodeDslV2} 映射为与 v1 完全同构的 {@link NodeAssigneeRuleDraft}，
      * 复用既有的 {@code tab_wf_node_assignee_rule} 持久化路径与运行时解析基础设施。
      */
@@ -328,6 +365,17 @@ public class WorkflowModelCompilerV2 {
         boolean allowDelegate = approval.getActions() != null && Boolean.TRUE.equals(approval.getActions().getDelegate());
         boolean allowAddSign = approval.getActions() != null && Boolean.TRUE.equals(approval.getActions().getAddSign());
         boolean allowReturn = approval.getActions() != null && Boolean.TRUE.equals(approval.getActions().getReturnAllowed());
+        String fieldPermissionsJson = approval.getFieldPermissions() == null || approval.getFieldPermissions().isEmpty()
+                ? null
+                : JacksonUtils.toJson(approval.getFieldPermissions());
+        String assigneeOrgSource = approval.getAssignee() == null ? null : approval.getAssignee().getOrgSource();
+        Long targetOrgId = approval.getAssignee() == null ? null : approval.getAssignee().getOrgId();
+        // 会签节点反对票策略默认 VETO（design.md"v1 AND/OR/PERCENT 映射为默认一票否决的 v2
+        // 规则"），未配置 vote 的单人/候选组节点恒为 null——FlowableWorkflowService 据此区分
+        // 一个会签任务是否属于本轮新计票路径（tasks.md 6.3）。
+        String rejectPolicy = approval.getVote() == null
+                ? null
+                : (approval.getVote().getRejectPolicy() == null ? RejectPolicy.VETO : approval.getVote().getRejectPolicy()).name();
 
         return new NodeAssigneeRuleDraft(
                 approval.getId(),
@@ -343,7 +391,11 @@ public class WorkflowModelCompilerV2 {
                 allowTransfer,
                 allowDelegate,
                 allowAddSign,
-                allowReturn);
+                allowReturn,
+                fieldPermissionsJson,
+                assigneeOrgSource,
+                targetOrgId,
+                rejectPolicy);
     }
 
     /**

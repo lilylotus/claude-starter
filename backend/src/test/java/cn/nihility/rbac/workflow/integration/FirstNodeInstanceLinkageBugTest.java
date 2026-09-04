@@ -3,6 +3,7 @@ package cn.nihility.rbac.workflow.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import cn.nihility.rbac.workflow.constant.ApprovalMode;
+import cn.nihility.rbac.workflow.constant.ExecutionMode;
 import cn.nihility.rbac.workflow.dto.ApproveCommand;
 import cn.nihility.rbac.workflow.dto.StartProcessCommand;
 import cn.nihility.rbac.workflow.dto.WorkflowInstanceResult;
@@ -39,7 +40,8 @@ class FirstNodeInstanceLinkageBugTest extends AbstractWorkflowEngineIntegrationT
                                 false, false, false, false)));
 
         WorkflowInstanceResult started = workflowService.start(new StartProcessCommand(
-                fixture.processCode(), "TEST", 1L, "缺陷复现", 899999L, null, null, null));
+                fixture.processCode(), "TEST", 1L, "缺陷复现", 899999L, null, null, null,
+                fixture.processDefinitionId(), null, null, ExecutionMode.LEGACY_SYNC));
 
         List<ApprovalTaskEntity> levelOneTasks = tasksOf(started.processInstanceId(), "levelOne");
         assertThat(levelOneTasks).hasSize(1);

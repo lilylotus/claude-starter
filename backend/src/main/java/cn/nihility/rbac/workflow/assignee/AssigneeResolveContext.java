@@ -15,11 +15,19 @@ package cn.nihility.rbac.workflow.assignee;
  * @param assigneeValue      节点审批人规则的 {@code assignee_value}，按解析器类型解释，可为空
  * @param applicantId        发起人用户 id，可为空
  * @param applicantOrgId     发起人所属组织 id，可为空
+ * @param orgSource          组织负责人类来源解析组织的方式：{@code APPLICANT_SNAPSHOT}（默认，
+ *                           取 {@code applicantOrgId}）/{@code FIXED_ORG}（取
+ *                           {@code targetOrgId}），仅 {@code ORG_LEADER} 类型解析器读取，
+ *                           可为空（{@code production-approval-lifecycle} change tasks.md
+ *                           5.3"指定固定组织管理员审批"）
+ * @param targetOrgId        {@code orgSource=FIXED_ORG} 时的固定目标组织 id，可为空
  */
 public record AssigneeResolveContext(
         Long processInstanceId,
         String nodeId,
         String assigneeValue,
         Long applicantId,
-        Long applicantOrgId) {
+        Long applicantOrgId,
+        String orgSource,
+        Long targetOrgId) {
 }

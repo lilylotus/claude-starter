@@ -103,7 +103,9 @@ public class WorkflowAssigneeTaskListener implements TaskListener {
                 rule.getNodeId(),
                 rule.getAssigneeValue(),
                 instance == null ? null : instance.getApplicantId(),
-                instance == null ? null : instance.getApplicantOrgId());
+                instance == null ? null : instance.getApplicantOrgId(),
+                rule.getAssigneeOrgSource(),
+                rule.getTargetOrgId());
 
         NodeAssigneeResolutionService resolutionService = WorkflowSpringContext.getBean(NodeAssigneeResolutionService.class);
         ResolvedAssignees resolved = resolutionService.resolve(rule, context);
@@ -123,7 +125,7 @@ public class WorkflowAssigneeTaskListener implements TaskListener {
      * （DSL v2 专用，production-approval-lifecycle change design.md Decision 5）。
      */
     private void blockPendingAssignment(DelegateTask delegateTask, NodeAssigneeRuleEntity rule, ProcessInstanceEntity instance) {
-        persistTask(delegateTask, rule, List.of(), instance);
+        persistTask(delegateTask, rule, List.of(), instance, null);
         if (instance != null) {
             instance.setExceptionCode("ASSIGNEE_EMPTY");
             instance.setUpdateTime(LocalDateTime.now());
@@ -180,14 +182,14 @@ public class WorkflowAssigneeTaskListener implements TaskListener {
             log.error("流程定义 {} 节点 {} 空审批人策略 {} 兜底后仍未解析出候选人，任务暂无处理人",
                     rule.getProcessDefinitionId(), rule.getNodeId(), rule.getEmptyAssigneeStrategy());
         }
-        persistTask(delegateTask, rule, userIds, instance);
+        persistTask(delegateTask, rule, userIds, instance, resolved.resolveBasis());
     }
 
     /**
      * 空审批人策略 {@code AUTO_SKIP}：自动完成该节点并记录说明性审批轨迹。
      */
     private void autoSkip(DelegateTask delegateTask, NodeAssigneeRuleEntity rule, ProcessInstanceEntity instance) {
-        ApprovalTaskEntity task = persistTask(delegateTask, rule, List.of(), instance);
+        ApprovalTaskEntity task = persistTask(delegateTask, rule, List.of(), instance, null);
         task.setStatus(TaskStatus.COMPLETED);
         task.setFinishedTime(LocalDateTime.now());
         WorkflowSpringContext.getBean(ApprovalTaskMapper.class).updateById(task);
@@ -202,7 +204,7 @@ public class WorkflowAssigneeTaskListener implements TaskListener {
      * 空审批人策略 {@code REJECT}：终止流程并记录失败原因。
      */
     private void autoReject(DelegateTask delegateTask, NodeAssigneeRuleEntity rule, ProcessInstanceEntity instance) {
-        ApprovalTaskEntity task = persistTask(delegateTask, rule, List.of(), instance);
+        ApprovalTaskEntity task = persistTask(delegateTask, rule, List.of(), instance, null);
         task.setStatus(TaskStatus.COMPLETED);
         task.setFinishedTime(LocalDateTime.now());
         WorkflowSpringContext.getBean(ApprovalTaskMapper.class).updateById(task);
@@ -226,7 +228,8 @@ public class WorkflowAssigneeTaskListener implements TaskListener {
             DelegateTask delegateTask,
             NodeAssigneeRuleEntity rule,
             List<Long> userIds,
-            ProcessInstanceEntity instance) {
+            ProcessInstanceEntity instance,
+            String resolveBasis) {
         LocalDateTime now = LocalDateTime.now();
         ApprovalTaskEntity task = ApprovalTaskEntity.builder()
                 .flowableTaskId(delegateTask.getId())
@@ -248,6 +251,7 @@ public class WorkflowAssigneeTaskListener implements TaskListener {
                         .taskId(task.getId())
                         .candidateType(CandidateType.USER)
                         .candidateValue(userId.toString())
+                        .resolveBasis(resolveBasis)
                         .createTime(now)
                         .updateTime(now)
                         .build());

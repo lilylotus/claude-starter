@@ -10,15 +10,20 @@ import cn.nihility.rbac.workflow.dto.WorkflowInstanceResult;
 public interface ApprovalProcessService {
 
     /**
-     * 启动主数据审批流程。
+     * 启动主数据审批流程：不再硬编码固定流程编码，改为按
+     * {@code (bizType, operationType, applicantOrgId)} 经
+     * {@link cn.nihility.rbac.workflow.dslv2.binding.ProcessBindingResolutionService} 解析
+     * 出实际生效的业务绑定与流程定义后启动（production-approval-lifecycle change design.md
+     * Decision 4，tasks.md 4.5）。
      *
      * @param requestId      审批申请 id，作为流程实例的业务对象 id
      * @param bizType        业务对象类型：ORG/USER/POSITION/APP
+     * @param operationType  操作类型：CREATE/UPDATE/ENABLE/DISABLE/DELETE
      * @param applicantId    发起人用户 id
      * @param applicantOrgId 发起人所属组织 id，解析不到时传 {@code null}
      * @return 流程启动结果，含流程实例 id 与当前所在节点信息
      */
-    WorkflowInstanceResult start(Long requestId, String bizType, Long applicantId, Long applicantOrgId);
+    WorkflowInstanceResult start(Long requestId, String bizType, String operationType, Long applicantId, Long applicantOrgId);
 
     /**
      * 审批通过当前节点任务。

@@ -25,7 +25,7 @@ class RoleAssigneeResolverTest {
         RoleAssigneeResolver resolver = new RoleAssigneeResolver(adminRoleLookupService);
         when(adminRoleLookupService.findUserIdsByRoleCode("SECURITY_ADMIN")).thenReturn(Set.of(1L, 2L));
 
-        Set<Long> result = resolver.resolve(new AssigneeResolveContext(1L, "node1", "SECURITY_ADMIN", 100L, 10L));
+        Set<Long> result = resolver.resolve(new AssigneeResolveContext(1L, "node1", "SECURITY_ADMIN", 100L, 10L, null, null));
 
         assertThat(result).containsExactlyInAnyOrder(1L, 2L);
     }

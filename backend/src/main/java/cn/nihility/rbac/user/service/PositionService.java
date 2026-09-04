@@ -5,6 +5,7 @@ import cn.nihility.rbac.user.dto.PositionCreateRequest;
 import cn.nihility.rbac.user.dto.PositionUpdateRequest;
 import cn.nihility.rbac.user.dto.PositionVO;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 任职管理业务逻辑接口，以组织为导航维度对任职记录做独立查询与维护，
@@ -77,4 +78,16 @@ public interface PositionService {
      * @return 管辖范围内的任职记录详情列表
      */
     List<PositionVO> listAllForExport();
+
+    /**
+     * 按岗位类型编码查询当前状态启用的任职用户 id 集合，供审批引擎
+     * {@code PositionAssigneeResolver} 使用。本项目当前 schema 未落地独立的"岗位"主数据
+     * 表，"岗位编码"实际对应任职记录的任职类型编码（{@code positionType}，取自字典类型
+     * {@code position_type}，如 primary/part_time/temporary），同一岗位类型下可有多个用户
+     * 同时任职（production-approval-lifecycle change tasks.md 5.3）。
+     *
+     * @param positionType 岗位类型编码
+     * @return 状态启用的任职用户 id 集合，无匹配任职时返回空集合
+     */
+    Set<Long> findActiveUserIdsByPositionType(String positionType);
 }

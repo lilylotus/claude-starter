@@ -3,9 +3,9 @@ package cn.nihility.rbac.workflow.dslv2.compiler;
 import cn.nihility.rbac.workflow.dslv2.constant.AssigneeTypeV2;
 import cn.nihility.rbac.workflow.dslv2.constant.ConditionOperator;
 import cn.nihility.rbac.workflow.dslv2.constant.EmptyPolicy;
-import cn.nihility.rbac.workflow.dslv2.constant.RejectPolicy;
 import cn.nihility.rbac.workflow.dslv2.constant.VoteMode;
 import cn.nihility.rbac.workflow.dslv2.dto.ApprovalNodeDslV2;
+import cn.nihility.rbac.workflow.dslv2.dto.AssigneeConfigDsl;
 import cn.nihility.rbac.workflow.dslv2.dto.AutoNodeDslV2;
 import cn.nihility.rbac.workflow.dslv2.dto.CcNodeDslV2;
 import cn.nihility.rbac.workflow.dslv2.dto.ConditionAstDsl;
@@ -21,20 +21,22 @@ import cn.nihility.rbac.workflow.exception.WorkflowModelValidationException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 import org.springframework.util.StringUtils;
 
 /**
  * DSL v2 结构与业务规则校验器，v1 {@link cn.nihility.rbac.workflow.designer.compiler.ProcessModelDslValidator}
  * 的姊妹实现，规则更丰富（并行块配对、条件 AST、抄送/自动任务节点），彼此独立、互不调用
  * （production-approval-lifecycle change design.md Decision 3）。当前无数据来源的审批人类型
- * （{@code APP_ADMIN}/{@code FORM_REFERENCE_PERSON}）以及本轮未实现的
- * {@code rejectPolicy=THRESHOLD} 在此拒绝，而不是留到运行时才失败。
+ * （{@code APP_ADMIN}/{@code FORM_REFERENCE_PERSON}）在此拒绝，而不是留到运行时才失败；
+ * {@code rejectPolicy=VETO/THRESHOLD} 均已实现（tasks.md 6.3），不再在此拒绝 THRESHOLD。
  */
 public final class ProcessModelDslV2Validator {
 
@@ -47,19 +49,38 @@ public final class ProcessModelDslV2Validator {
     /** 当前无数据来源、发布即拒绝的审批人来源类型（design.md Decision 5"无数据来源的规则
      *  保持禁用"）。 */
     private static final Set<AssigneeTypeV2> NO_RESOLVER_TYPES = Set.of(
-            AssigneeTypeV2.APP_ADMIN, AssigneeTypeV2.FORM_REFERENCE_PERSON, AssigneeTypeV2.POSITION);
+            AssigneeTypeV2.APP_ADMIN, AssigneeTypeV2.FORM_REFERENCE_PERSON);
+
+    /** {@code orgSource} 合法取值：默认取申请人快照组织。 */
+    private static final String ORG_SOURCE_APPLICANT_SNAPSHOT = "APPLICANT_SNAPSHOT";
+
+    /** {@code orgSource} 合法取值：取 {@code assignee.orgId} 指定的固定目标组织
+     *  （production-approval-lifecycle change tasks.md 5.3"指定固定组织管理员审批"）。 */
+    private static final String ORG_SOURCE_FIXED_ORG = "FIXED_ORG";
 
     /** 工具类不允许实例化。 */
     private ProcessModelDslV2Validator() {
     }
 
     /**
-     * 校验流程模型 DSL v2，校验失败抛出携带全部错误明细的
-     * {@link WorkflowModelValidationException}。
+     * 校验流程模型 DSL v2（不校验 {@code FIXED_ORG} 场景下目标组织是否真实存在/启用），
+     * 校验失败抛出携带全部错误明细的 {@link WorkflowModelValidationException}。
      *
      * @param dsl 待校验的流程模型 DSL v2
      */
     public static void validate(ProcessModelDslV2 dsl) {
+        validate(dsl, orgId -> true);
+    }
+
+    /**
+     * 校验流程模型 DSL v2，{@code orgExistsAndEnabled} 用于校验 {@code assignee.orgSource=
+     * FIXED_ORG} 场景下 {@code assignee.orgId} 指向的组织是否在 {@code tab_org} 中真实存在且
+     * 状态启用（production-approval-lifecycle change tasks.md 5.3）。
+     *
+     * @param dsl                 待校验的流程模型 DSL v2
+     * @param orgExistsAndEnabled 组织 id 是否真实存在且启用的判定函数
+     */
+    public static void validate(ProcessModelDslV2 dsl, Predicate<Long> orgExistsAndEnabled) {
         List<String> errors = new ArrayList<>();
         if (dsl == null || dsl.getNodes() == null || dsl.getNodes().isEmpty()) {
             throw new WorkflowModelValidationException("流程模型 DSL 不能为空，至少需要包含节点定义");
@@ -129,7 +150,8 @@ public final class ProcessModelDslV2Validator {
             errors.addAll(validateReachability(nodes, nodeById, outgoing));
         }
         errors.addAll(validateConditionNodes(nodes, outgoing));
-        errors.addAll(validateApprovalNodes(nodes));
+        errors.addAll(validateApprovalNodes(nodes, orgExistsAndEnabled));
+        errors.addAll(validatePreviousApproverSourceNode(nodes, nodeById, outgoing));
         errors.addAll(validateCcNodes(nodes));
         errors.addAll(validateAutoNodes(nodes));
         errors.addAll(validateEndNodes(nodes));
@@ -259,10 +281,10 @@ public final class ProcessModelDslV2Validator {
 
     /**
      * 校验审批节点：审批人来源类型合法且必填取值完整；无数据来源类型直接拒绝；会签比例范围；
-     * 空审批人策略必填，{@code FALLBACK_ROLE} 须携带兜底角色编码；本轮
-     * {@code rejectPolicy=THRESHOLD} 未实现，明确拒绝而非静默按 VETO 处理。
+     * 空审批人策略必填，{@code FALLBACK_ROLE} 须携带兜底角色编码。
      */
-    private static List<String> validateApprovalNodes(List<ProcessNodeDslV2> nodes) {
+    private static List<String> validateApprovalNodes(
+            List<ProcessNodeDslV2> nodes, Predicate<Long> orgExistsAndEnabled) {
         List<String> errors = new ArrayList<>();
         for (ProcessNodeDslV2 node : nodes) {
             if (!(node instanceof ApprovalNodeDslV2 approval)) {
@@ -276,9 +298,11 @@ public final class ProcessModelDslV2Validator {
                 if (NO_RESOLVER_TYPES.contains(type)) {
                     errors.add(location + " 的审批人来源 " + type + " 当前无数据来源，禁止发布");
                 } else if ((type == AssigneeTypeV2.ROLE || type == AssigneeTypeV2.USER
-                        || type == AssigneeTypeV2.FORM_REFERENCE_PERSON)
+                        || type == AssigneeTypeV2.FORM_REFERENCE_PERSON || type == AssigneeTypeV2.POSITION)
                         && !StringUtils.hasText(approval.getAssignee().getValue())) {
                     errors.add(location + " 的审批人来源 " + type + " 缺少必填的 assignee.value");
+                } else if (type == AssigneeTypeV2.ORG_LEADER) {
+                    errors.addAll(validateFixedOrgSource(location, approval.getAssignee(), orgExistsAndEnabled));
                 }
             }
             if (approval.getVote() != null) {
@@ -288,13 +312,74 @@ public final class ProcessModelDslV2Validator {
                         errors.add(location + " 的会签比例 vote.percent 必须在 1~100 之间");
                     }
                 }
-                if (approval.getVote().getRejectPolicy() == RejectPolicy.THRESHOLD) {
-                    errors.add(location + " 的反对票策略 THRESHOLD 本轮未实现，请使用 VETO");
-                }
             }
             EmptyPolicy emptyPolicy = approval.getEmptyPolicy();
             if (emptyPolicy == EmptyPolicy.FALLBACK_ROLE && !StringUtils.hasText(approval.getFallbackRoleCode())) {
                 errors.add(location + " 空审批人策略为 FALLBACK_ROLE 时必须配置 fallbackRoleCode");
+            }
+        }
+        return errors;
+    }
+
+    /**
+     * 校验 {@code ORG_LEADER} 来源在 {@code orgSource=FIXED_ORG} 场景下的固定目标组织配置：
+     * {@code orgId} 必须非空且指向 {@code tab_org} 中真实存在、状态启用的组织；
+     * {@code orgSource} 未配置或为 {@code APPLICANT_SNAPSHOT} 时保持既有行为，不做该项校验
+     * （production-approval-lifecycle change tasks.md 5.3"指定固定组织管理员审批"）。
+     */
+    private static List<String> validateFixedOrgSource(
+            String location, AssigneeConfigDsl assignee, Predicate<Long> orgExistsAndEnabled) {
+        List<String> errors = new ArrayList<>();
+        String orgSource = assignee.getOrgSource();
+        if (StringUtils.hasText(orgSource) && !ORG_SOURCE_APPLICANT_SNAPSHOT.equals(orgSource)
+                && !ORG_SOURCE_FIXED_ORG.equals(orgSource)) {
+            errors.add(location + " 的 assignee.orgSource=" + orgSource + " 不是合法取值（APPLICANT_SNAPSHOT/FIXED_ORG）");
+            return errors;
+        }
+        if (!ORG_SOURCE_FIXED_ORG.equals(orgSource)) {
+            return errors;
+        }
+        if (assignee.getOrgId() == null) {
+            errors.add(location + " 的 assignee.orgSource=FIXED_ORG 时必须配置 assignee.orgId");
+        } else if (!orgExistsAndEnabled.test(assignee.getOrgId())) {
+            errors.add(location + " 的 assignee.orgId=" + assignee.getOrgId() + " 对应组织不存在或未启用");
+        }
+        return errors;
+    }
+
+    /**
+     * 校验 {@code PREVIOUS_APPROVER} 来源：并行汇合后存在多个来源（节点直接入边数量大于 1）
+     * 时必须显式指定 {@code assignee.sourceNodeId}，不允许系统猜一个；指定了
+     * {@code sourceNodeId} 时必须指向图中真实存在的审批节点（production-approval-lifecycle
+     * change tasks.md 5.3 第 4 项，design.md Decision 5"并行汇合后的'上一节点处理人'如有多个
+     * 来源，配置必须指定 sourceNodeId，不能猜一个"）。
+     */
+    private static List<String> validatePreviousApproverSourceNode(
+            List<ProcessNodeDslV2> nodes,
+            Map<String, ProcessNodeDslV2> nodeById,
+            Map<String, List<EdgeDslV2>> outgoing) {
+        List<String> errors = new ArrayList<>();
+        Map<String, Integer> incomingCount = new HashMap<>();
+        for (List<EdgeDslV2> edges : outgoing.values()) {
+            for (EdgeDslV2 edge : edges) {
+                incomingCount.merge(edge.getTarget(), 1, Integer::sum);
+            }
+        }
+        for (ProcessNodeDslV2 node : nodes) {
+            if (!(node instanceof ApprovalNodeDslV2 approval) || approval.getAssignee() == null
+                    || approval.getAssignee().getType() != AssigneeTypeV2.PREVIOUS_APPROVER) {
+                continue;
+            }
+            String location = "审批节点 " + node.getId();
+            String sourceNodeId = approval.getAssignee().getSourceNodeId();
+            boolean ambiguous = incomingCount.getOrDefault(node.getId(), 0) > 1;
+            if (ambiguous && !StringUtils.hasText(sourceNodeId)) {
+                errors.add(location + " 的审批人来源 PREVIOUS_APPROVER 在并行汇合后存在多个来源，"
+                        + "必须显式指定 assignee.sourceNodeId");
+                continue;
+            }
+            if (StringUtils.hasText(sourceNodeId) && !(nodeById.get(sourceNodeId) instanceof ApprovalNodeDslV2)) {
+                errors.add(location + " 的 assignee.sourceNodeId=" + sourceNodeId + " 未指向图中真实存在的审批节点");
             }
         }
         return errors;

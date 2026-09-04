@@ -37,7 +37,7 @@ class NodeAssigneeResolutionServiceTest {
     void resolve_shouldReturnDirectWhenNonEmptyAndNotSelfApproval() {
         service = new NodeAssigneeResolutionService(resolverRegistry, adminRoleLookupService);
         NodeAssigneeRuleEntity rule = buildRule(AssigneeType.ROLE, false, EmptyAssigneeStrategy.TO_WORKFLOW_ADMIN);
-        AssigneeResolveContext context = new AssigneeResolveContext(1L, "node1", "SECURITY_ADMIN", 100L, 10L);
+        AssigneeResolveContext context = new AssigneeResolveContext(1L, "node1", "SECURITY_ADMIN", 100L, 10L, null, null);
         when(resolverRegistry.resolve(eq(AssigneeType.ROLE), any())).thenReturn(Set.of(200L));
 
         ResolvedAssignees result = service.resolve(rule, context);
@@ -52,7 +52,7 @@ class NodeAssigneeResolutionServiceTest {
         service = new NodeAssigneeResolutionService(resolverRegistry, adminRoleLookupService);
         NodeAssigneeRuleEntity rule = buildRule(AssigneeType.APPLICANT_DEPT_LEADER, false,
                 EmptyAssigneeStrategy.TO_WORKFLOW_ADMIN);
-        AssigneeResolveContext context = new AssigneeResolveContext(1L, "node1", "DEPT_LEADER", 100L, 10L);
+        AssigneeResolveContext context = new AssigneeResolveContext(1L, "node1", "DEPT_LEADER", 100L, 10L, null, null);
         when(resolverRegistry.resolve(eq(AssigneeType.APPLICANT_DEPT_LEADER), any())).thenReturn(Set.of(100L));
         when(adminRoleLookupService.findUserIdsByRoleCode(WorkflowConstants.WORKFLOW_ADMIN_ROLE_CODE))
                 .thenReturn(Set.of(1L));
@@ -69,7 +69,7 @@ class NodeAssigneeResolutionServiceTest {
         service = new NodeAssigneeResolutionService(resolverRegistry, adminRoleLookupService);
         NodeAssigneeRuleEntity rule = buildRule(AssigneeType.APPLICANT_DEPT_LEADER, true,
                 EmptyAssigneeStrategy.TO_WORKFLOW_ADMIN);
-        AssigneeResolveContext context = new AssigneeResolveContext(1L, "node1", "DEPT_LEADER", 100L, 10L);
+        AssigneeResolveContext context = new AssigneeResolveContext(1L, "node1", "DEPT_LEADER", 100L, 10L, null, null);
         when(resolverRegistry.resolve(eq(AssigneeType.APPLICANT_DEPT_LEADER), any())).thenReturn(Set.of(100L));
 
         ResolvedAssignees result = service.resolve(rule, context);
@@ -83,7 +83,7 @@ class NodeAssigneeResolutionServiceTest {
     void resolve_shouldAutoSkipWhenEmptyAndStrategyIsAutoSkip() {
         service = new NodeAssigneeResolutionService(resolverRegistry, adminRoleLookupService);
         NodeAssigneeRuleEntity rule = buildRule(AssigneeType.POSITION, false, EmptyAssigneeStrategy.AUTO_SKIP);
-        AssigneeResolveContext context = new AssigneeResolveContext(1L, "node1", null, 100L, 10L);
+        AssigneeResolveContext context = new AssigneeResolveContext(1L, "node1", null, 100L, 10L, null, null);
         when(resolverRegistry.resolve(eq(AssigneeType.POSITION), any())).thenReturn(Set.of());
 
         ResolvedAssignees result = service.resolve(rule, context);
@@ -92,12 +92,28 @@ class NodeAssigneeResolutionServiceTest {
         assertThat(result.hasAssignees()).isFalse();
     }
 
+    /** 候选人集合包含多人且其中含发起人本人、不允许自审时，应仅剔除发起人本人，保留其余
+     *  候选人（此前实现仅在"唯一候选人恰为发起人"时才排除，多候选人场景未生效，
+     *  production-approval-lifecycle change tasks.md 5.4 修复）。 */
+    @Test
+    void resolve_shouldExcludeApplicantOnlyFromMultiCandidateSetWhenNotAllowed() {
+        service = new NodeAssigneeResolutionService(resolverRegistry, adminRoleLookupService);
+        NodeAssigneeRuleEntity rule = buildRule(AssigneeType.ROLE, false, EmptyAssigneeStrategy.TO_WORKFLOW_ADMIN);
+        AssigneeResolveContext context = new AssigneeResolveContext(1L, "node1", "SECURITY_ADMIN", 100L, 10L, null, null);
+        when(resolverRegistry.resolve(eq(AssigneeType.ROLE), any())).thenReturn(Set.of(100L, 200L, 300L));
+
+        ResolvedAssignees result = service.resolve(rule, context);
+
+        assertThat(result.kind()).isEqualTo(ResolvedAssignees.Kind.DIRECT);
+        assertThat(result.userIds()).containsExactlyInAnyOrder(200L, 300L);
+    }
+
     /** 解析为空、策略为 REJECT 时应返回 REJECT 结果。 */
     @Test
     void resolve_shouldRejectWhenEmptyAndStrategyIsReject() {
         service = new NodeAssigneeResolutionService(resolverRegistry, adminRoleLookupService);
         NodeAssigneeRuleEntity rule = buildRule(AssigneeType.POSITION, false, EmptyAssigneeStrategy.REJECT);
-        AssigneeResolveContext context = new AssigneeResolveContext(1L, "node1", null, 100L, 10L);
+        AssigneeResolveContext context = new AssigneeResolveContext(1L, "node1", null, 100L, 10L, null, null);
         when(resolverRegistry.resolve(eq(AssigneeType.POSITION), any())).thenReturn(Set.of());
 
         ResolvedAssignees result = service.resolve(rule, context);

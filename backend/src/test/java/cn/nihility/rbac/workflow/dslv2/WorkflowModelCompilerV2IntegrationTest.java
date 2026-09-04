@@ -2,6 +2,7 @@ package cn.nihility.rbac.workflow.dslv2;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import cn.nihility.rbac.workflow.constant.ExecutionMode;
 import cn.nihility.rbac.workflow.constant.ProcessModelStatus;
 import cn.nihility.rbac.workflow.designer.compiler.NodeAssigneeRuleDraft;
 import cn.nihility.rbac.workflow.dslv2.compiler.CompiledProcessV2;
@@ -124,7 +125,8 @@ class WorkflowModelCompilerV2IntegrationTest {
         var fixture = deployAndSeed(processCode, compiled);
 
         WorkflowInstanceResult started = workflowService.start(new StartProcessCommand(
-                processCode, "TEST", 1L, "v2 集成测试", 919999L, null, null, null));
+                processCode, "TEST", 1L, "v2 集成测试", 919999L, null, null, null,
+                fixture.definitionId(), null, null, ExecutionMode.LEGACY_SYNC));
 
         List<ApprovalTaskEntity> leaderTasks = tasksOf(started.processInstanceId(), "leader");
         assertThat(leaderTasks).hasSize(1);
@@ -165,7 +167,8 @@ class WorkflowModelCompilerV2IntegrationTest {
         var fixture = deployAndSeed(processCode, compiled);
 
         WorkflowInstanceResult started = workflowService.start(new StartProcessCommand(
-                processCode, "TEST", 1L, "v2 空人测试", 929999L, null, null, null));
+                processCode, "TEST", 1L, "v2 空人测试", 929999L, null, null, null,
+                fixture.definitionId(), null, null, ExecutionMode.LEGACY_SYNC));
 
         List<ApprovalTaskEntity> tasks = tasksOf(started.processInstanceId(), "approve");
         assertThat(tasks).hasSize(1);
@@ -206,7 +209,8 @@ class WorkflowModelCompilerV2IntegrationTest {
         var fixture = deployAndSeed(processCode, compiled);
 
         WorkflowInstanceResult started = workflowService.start(new StartProcessCommand(
-                processCode, "TEST", 1L, "v2 会签空人测试", 939999L, null, null, null));
+                processCode, "TEST", 1L, "v2 会签空人测试", 939999L, null, null, null,
+                fixture.definitionId(), null, null, ExecutionMode.LEGACY_SYNC));
 
         List<ApprovalTaskEntity> tasks = tasksOf(started.processInstanceId(), "miApprove");
         assertThat(tasks).hasSize(1);
@@ -267,7 +271,8 @@ class WorkflowModelCompilerV2IntegrationTest {
 
         WorkflowInstanceResult started = workflowService.start(new StartProcessCommand(
                 processCode, "TEST", 1L, "v2 条件测试", 949999L, null,
-                java.util.Map.of("riskLevel", "HIGH"), null));
+                java.util.Map.of("riskLevel", "HIGH"), null,
+                fixture.definitionId(), null, null, ExecutionMode.LEGACY_SYNC));
 
         List<ApprovalTaskEntity> leaderTasks = tasksOf(started.processInstanceId(), "leader");
         assertThat(leaderTasks).hasSize(1);
@@ -339,6 +344,7 @@ class WorkflowModelCompilerV2IntegrationTest {
                     .allowDelegate(draft.allowDelegate())
                     .allowAddSign(draft.allowAddSign())
                     .allowReturn(draft.allowReturn())
+                    .rejectPolicy(draft.rejectPolicy())
                     .createBy("test").createTime(now).updateBy("test").updateTime(now)
                     .build());
         }

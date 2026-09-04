@@ -43,6 +43,16 @@ public class OperationRequestEntity {
     /** 执行结果状态：{@code SUCCESS}/{@code FAILED}。 */
     private String status;
 
+    /** 本次请求规范化 payload（调用方传入的命令对象）的 SHA-256 摘要，同一幂等键重复提交时
+     *  用于判断是否为"同一请求的重试"还是"复用同一幂等键提交了不同内容"
+     *  （production-approval-lifecycle change design.md 第8节，tasks.md 6.2）。 */
+    private String payloadHash;
+
+    /** 首次执行成功后的返回结果 JSON 快照，命中同 key 同 payload 的重复请求时直接反序列化
+     *  返回，不重复执行业务逻辑。当前全部写操作均为 {@code void} 语义，落库值恒为 JSON
+     *  {@code null} 字面量，为未来非 void 操作预留。 */
+    private String resultText;
+
     /** 创建人。 */
     private String createBy;
 

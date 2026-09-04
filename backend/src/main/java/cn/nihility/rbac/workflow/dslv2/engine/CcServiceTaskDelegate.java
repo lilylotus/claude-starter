@@ -76,7 +76,8 @@ public class CcServiceTaskDelegate implements JavaDelegate {
         }
 
         AssigneeResolveContext context = new AssigneeResolveContext(
-                instance.getId(), execution.getCurrentActivityId(), value, instance.getApplicantId(), instance.getApplicantOrgId());
+                instance.getId(), execution.getCurrentActivityId(), value, instance.getApplicantId(),
+                instance.getApplicantOrgId(), null, null);
         Set<Long> recipients = WorkflowSpringContext.getBean(AssigneeResolverRegistry.class).resolve(type, context);
         if (recipients.isEmpty()) {
             log.warn("抄送节点 {} 未解析出任何接收人，跳过", execution.getCurrentActivityId());

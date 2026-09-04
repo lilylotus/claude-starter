@@ -2,19 +2,26 @@ package cn.nihility.rbac.workflow.dslv2.engine;
 
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.workflow.constant.ApprovalAction;
+import cn.nihility.rbac.workflow.constant.ApprovalMode;
 import cn.nihility.rbac.workflow.constant.CandidateType;
 import cn.nihility.rbac.workflow.constant.TaskStatus;
 import cn.nihility.rbac.workflow.engine.flowable.WorkflowMultiInstanceExecutionListener;
 import cn.nihility.rbac.workflow.entity.ApprovalRecordEntity;
 import cn.nihility.rbac.workflow.entity.ApprovalTaskCandidateEntity;
 import cn.nihility.rbac.workflow.entity.ApprovalTaskEntity;
+import cn.nihility.rbac.workflow.entity.NodeAssigneeRuleEntity;
+import cn.nihility.rbac.workflow.entity.NodeRunEntity;
 import cn.nihility.rbac.workflow.entity.ProcessInstanceEntity;
 import cn.nihility.rbac.workflow.mapper.ApprovalRecordMapper;
 import cn.nihility.rbac.workflow.mapper.ApprovalTaskCandidateMapper;
 import cn.nihility.rbac.workflow.mapper.ApprovalTaskMapper;
+import cn.nihility.rbac.workflow.mapper.NodeAssigneeRuleMapper;
+import cn.nihility.rbac.workflow.mapper.NodeRunMapper;
 import cn.nihility.rbac.workflow.mapper.ProcessInstanceMapper;
 import cn.nihility.rbac.workflow.service.IdempotencyService;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +31,7 @@ import org.flowable.task.api.Task;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 /**
  * 运维重分配服务：为 DSL v2 空审批人 {@code BLOCK}/{@code FALLBACK_ROLE}（兜底仍为空）策略
@@ -46,6 +54,14 @@ public class WorkflowV2ReassignmentService {
 
     /** 审批任务候选人明细数据访问接口。 */
     private final ApprovalTaskCandidateMapper approvalTaskCandidateMapper;
+
+    /** 节点轮次数据访问接口，用于会签哨兵分支被真实候选人替换后同步总票数 N 与通过阈值 K
+     *  （production-approval-lifecycle change tasks.md 6.3）。 */
+    private final NodeRunMapper nodeRunMapper;
+
+    /** 节点审批人规则数据访问接口，重算通过阈值 K 需要读取 {@code approvalMode}/
+     *  {@code approvalPercent}。 */
+    private final NodeAssigneeRuleMapper nodeAssigneeRuleMapper;
 
     /** 流程实例数据访问接口。 */
     private final ProcessInstanceMapper processInstanceMapper;
@@ -73,7 +89,10 @@ public class WorkflowV2ReassignmentService {
      */
     @Transactional(rollbackFor = Exception.class, propagation = Propagation.REQUIRED)
     public void reassign(Long taskId, List<Long> newUserIds, Long operatorId, String requestKey, String remark) {
-        idempotencyService.executeOnce(requestKey, ApprovalAction.REASSIGN, operatorId, taskId, () -> {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("newUserIds", newUserIds);
+        payload.put("remark", remark);
+        idempotencyService.executeOnce(requestKey, ApprovalAction.REASSIGN, operatorId, taskId, payload, () -> {
             doReassign(taskId, newUserIds, operatorId, remark);
             return null;
         });
@@ -96,6 +115,7 @@ public class WorkflowV2ReassignmentService {
 
         Long sentinelUserId = Long.valueOf(WorkflowMultiInstanceExecutionListener.EMPTY_SENTINEL_USER_ID);
         boolean isMultiInstanceSentinel = sentinelUserId.equals(task.getAssigneeId());
+        String originalCandidatesDescription = describeOriginalCandidates(task, isMultiInstanceSentinel);
         if (isMultiInstanceSentinel) {
             reassignMultiInstance(task, newUserIds);
         } else {
@@ -123,13 +143,28 @@ public class WorkflowV2ReassignmentService {
                     .nodeName(task.getNodeName())
                     .operatorId(operatorId)
                     .action(ApprovalAction.REASSIGN)
-                    .remark("重分配候选人：" + newUserIds + (remark == null ? "" : "；" + remark))
+                    .remark("原候选人：" + originalCandidatesDescription + "；执行人：" + operatorText
+                            + "；新候选人：" + newUserIds + (remark == null ? "" : "；原因：" + remark))
                     .createBy(operatorText)
                     .createTime(now)
                     .updateBy(operatorText)
                     .updateTime(now)
                     .build());
         }
+    }
+
+    /**
+     * 描述重分配前的原候选人状态，供审计轨迹记录"原候选人、原因、执行者、新候选人"完整对比
+     * （production-approval-lifecycle change tasks.md 5.4"重分配审计"）。停在待分配状态的任务
+     * 本就没有真实候选人（单人/候选组节点空审批人时不写候选人行，会签节点用哨兵占位），
+     * 因此原候选人描述恒为"空审批人待分配"/"会签哨兵占位"两种固定文案之一，而不是查询一份
+     * 空列表。
+     */
+    private String describeOriginalCandidates(ApprovalTaskEntity task, boolean isMultiInstanceSentinel) {
+        if (isMultiInstanceSentinel) {
+            return "会签节点空审批人哨兵占位（无真实候选人）";
+        }
+        return "单人/候选组节点空审批人待分配（无真实候选人）";
     }
 
     /**
@@ -181,5 +216,46 @@ public class WorkflowV2ReassignmentService {
         task.setFinishedTime(LocalDateTime.now());
         task.setUpdateTime(LocalDateTime.now());
         approvalTaskMapper.updateById(task);
+
+        syncNodeRunAfterReassignment(task, newUserIds.size());
+    }
+
+    /**
+     * 哨兵分支替换为真实候选人后，同步 {@code tab_wf_node_run} 的总票数 N（由哨兵的 1 改为
+     * 真实候选人数量）与重算的通过阈值 K，并把新阈值写回 miBody 执行作用域局部变量
+     * {@code voteThreshold}，供后续投票的完成条件表达式正确判定（production-approval-lifecycle
+     * change tasks.md 6.3）。v1 遗留会签节点或本轮未使用 {@code tab_wf_node_run} 机制的历史
+     * 任务（{@code nodeRunId} 为空）静默跳过，不影响其既有行为。
+     */
+    private void syncNodeRunAfterReassignment(ApprovalTaskEntity task, int newTotalCount) {
+        if (task.getNodeRunId() == null) {
+            return;
+        }
+        NodeRunEntity nodeRun = nodeRunMapper.selectOne(new LambdaQueryWrapper<NodeRunEntity>()
+                .eq(NodeRunEntity::getId, task.getNodeRunId())
+                .last("FOR UPDATE"));
+        if (nodeRun == null || task.getProcessInstanceId() == null) {
+            return;
+        }
+        ProcessInstanceEntity instance = processInstanceMapper.selectById(task.getProcessInstanceId());
+        if (instance == null) {
+            return;
+        }
+        NodeAssigneeRuleEntity rule = nodeAssigneeRuleMapper.selectOne(new LambdaQueryWrapper<NodeAssigneeRuleEntity>()
+                .eq(NodeAssigneeRuleEntity::getProcessDefinitionId, instance.getProcessDefinitionId())
+                .eq(NodeAssigneeRuleEntity::getNodeId, task.getNodeId())
+                .last("LIMIT 1"));
+        if (rule == null) {
+            return;
+        }
+        int threshold = VoteThresholdCalculator.threshold(
+                ApprovalMode.valueOf(rule.getApprovalMode()), rule.getApprovalPercent(), newTotalCount);
+        nodeRun.setTotalCount(newTotalCount);
+        nodeRun.setRevision(nodeRun.getRevision() == null ? 1L : nodeRun.getRevision() + 1);
+        nodeRun.setUpdateTime(LocalDateTime.now());
+        nodeRunMapper.updateById(nodeRun);
+        if (StringUtils.hasText(nodeRun.getExecutionId())) {
+            runtimeService.setVariableLocal(nodeRun.getExecutionId(), "voteThreshold", threshold);
+        }
     }
 }

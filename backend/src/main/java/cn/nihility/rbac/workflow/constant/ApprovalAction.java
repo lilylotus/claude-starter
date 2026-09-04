@@ -14,6 +14,10 @@ public final class ApprovalAction {
     /** 审批拒绝（驳回，直接终止流程）。 */
     public static final String REJECT = "REJECT";
 
+    /** 反对票（阈值制会签节点专用，只计入反对票数，不立即终止流程，
+     *  production-approval-lifecycle change design.md 第7节/tasks.md 6.3）。 */
+    public static final String DISAGREE = "DISAGREE";
+
     /** 退回历史节点。 */
     public static final String RETURN = "RETURN";
 

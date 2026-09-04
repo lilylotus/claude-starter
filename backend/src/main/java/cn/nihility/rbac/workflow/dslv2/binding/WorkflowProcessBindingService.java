@@ -14,6 +14,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import java.time.LocalDateTime;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +25,7 @@ import org.springframework.util.StringUtils;
  * design.md Decision 4/12）。绑定保存 explicit definitionId、executionMode、revision、
  * enabled；全局绑定是管理员明确配置，不是引擎隐式回退。
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class WorkflowProcessBindingService {
@@ -93,7 +95,10 @@ public class WorkflowProcessBindingService {
 
     /**
      * 切换业务绑定指向的流程定义版本（含显式回滚到验证过的旧 definitionId），启动时事务内
-     * 读取并锁定所选绑定，与提交发起使用相同锁顺序（design.md Decision 4）。
+     * 读取并锁定所选绑定，与提交发起使用相同锁顺序（design.md Decision 4）。不拆分独立的
+     * "回滚"接口——目标版本号小于当前绑定版本号即语义等价于回滚，仅在日志/更新备注中区分
+     * 两种场景，供审计排查（production-approval-lifecycle change tasks.md 4.6"本轮不新增
+     * 代码，只需确认现有方法确实可以把绑定切回任意历史 definitionId"）。
      *
      * @param bindingId  绑定 id
      * @param request    请求体，须携带 {@code expectedRevision}
@@ -107,9 +112,14 @@ public class WorkflowProcessBindingService {
         }
         ProcessDefinitionEntity definition = requirePublishedDefinition(request.getDefinitionId());
         ProcessBindingEntity entity = requireBinding(bindingId);
-        if (!definition.getProcessModelId().equals(processDefinitionMapper.selectById(entity.getDefinitionId()).getProcessModelId())) {
+        ProcessDefinitionEntity previousDefinition = processDefinitionMapper.selectById(entity.getDefinitionId());
+        if (!definition.getProcessModelId().equals(previousDefinition.getProcessModelId())) {
             throw new BusinessException("切换目标流程定义必须与当前绑定属于同一流程模型");
         }
+        boolean isRollback = previousDefinition.getVersion() != null && definition.getVersion() != null
+                && definition.getVersion() < previousDefinition.getVersion();
+        log.info("业务绑定 {} 切换流程版本：{} -> {}（{}），操作人={}", bindingId, previousDefinition.getVersion(),
+                definition.getVersion(), isRollback ? "显式回滚到历史版本" : "切换到更新版本", operatorId);
 
         LocalDateTime now = LocalDateTime.now();
         String operatorText = operatorId == null ? null : operatorId.toString();

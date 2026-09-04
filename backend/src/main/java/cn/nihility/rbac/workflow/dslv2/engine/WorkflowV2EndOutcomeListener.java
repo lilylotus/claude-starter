@@ -20,6 +20,11 @@ import org.slf4j.LoggerFactory;
  * 提出的"最终同步节点与定时器/异步节点都接入同一终态协调器"是更完整的重构，本轮不实现，
  * 仍然只在 {@code approve()}/{@code reject()} 等写操作返回、检测到流程实例已无剩余执行时
  * 才回写 {@code tab_wf_process_instance} 终态。
+ * <p>
+ * 本监听器直接决定流程终态判定用的 {@code approved} 变量，不属于"降级为安全默认值即可继续"
+ * 的场景（错误吞掉会让 REJECTED 结束事件被误判为 APPROVED，属于静默数据错误而非流程卡死）；
+ * 解析/写变量失败时记录日志后原样重新抛出，交由 Flowable 命令执行边界回滚整个事务
+ * （production-approval-lifecycle change tasks.md 6.1"监听器失败不吞异常"）。
  */
 public class WorkflowV2EndOutcomeListener implements ExecutionListener {
 
@@ -39,7 +44,9 @@ public class WorkflowV2EndOutcomeListener implements ExecutionListener {
             String outcomeText = value == null ? null : value.toString();
             execution.setVariable("approved", !"REJECTED".equals(outcomeText));
         } catch (RuntimeException ex) {
-            log.error("WorkflowV2EndOutcomeListener 处理结束节点 {} 时发生异常", execution.getCurrentActivityId(), ex);
+            log.error("WorkflowV2EndOutcomeListener 处理结束节点 {} 时发生异常，终态判定可能错误，重新抛出中止流程推进",
+                    execution.getCurrentActivityId(), ex);
+            throw ex;
         }
     }
 }

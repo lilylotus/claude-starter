@@ -51,13 +51,18 @@ import cn.nihility.rbac.user.service.UserService;
 import cn.nihility.rbac.workflow.assignee.support.TaskAuthorizationService;
 import cn.nihility.rbac.workflow.constant.ProcessInstanceStatus;
 import cn.nihility.rbac.workflow.constant.TaskStatus;
+import cn.nihility.rbac.workflow.dslv2.form.WorkflowFormVersionService;
 import cn.nihility.rbac.workflow.dto.WorkflowInstanceResult;
 import cn.nihility.rbac.workflow.entity.ApprovalRecordEntity;
 import cn.nihility.rbac.workflow.entity.ApprovalTaskEntity;
+import cn.nihility.rbac.workflow.entity.FormVersionEntity;
+import cn.nihility.rbac.workflow.entity.NodeAssigneeRuleEntity;
 import cn.nihility.rbac.workflow.entity.ProcessInstanceEntity;
 import cn.nihility.rbac.workflow.mapper.ApprovalRecordMapper;
 import cn.nihility.rbac.workflow.mapper.ApprovalTaskMapper;
+import cn.nihility.rbac.workflow.mapper.NodeAssigneeRuleMapper;
 import cn.nihility.rbac.workflow.mapper.ProcessInstanceMapper;
+import cn.nihility.rbac.workflow.service.BusinessLockService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
@@ -143,6 +148,15 @@ class ApprovalRequestServiceImplTest {
     @Mock
     private OperationLogRecorder operationLogRecorder;
 
+    @Mock
+    private WorkflowFormVersionService workflowFormVersionService;
+
+    @Mock
+    private NodeAssigneeRuleMapper nodeAssigneeRuleMapper;
+
+    @Mock
+    private BusinessLockService businessLockService;
+
     private ApprovalRequestServiceImpl service;
 
     /** 初始化 MyBatis-Plus Lambda 列缓存，覆盖本类实现中构造 {@code LambdaQueryWrapper}/
@@ -154,6 +168,7 @@ class ApprovalRequestServiceImplTest {
         primeEntity(ProcessInstanceEntity.class);
         primeEntity(ApprovalRecordEntity.class);
         primeEntity(UserPositionEntity.class);
+        primeEntity(NodeAssigneeRuleEntity.class);
     }
 
     /** 为单个实体类初始化 Lambda 列缓存。 */
@@ -181,9 +196,14 @@ class ApprovalRequestServiceImplTest {
                 orgScopeService,
                 validator,
                 userDisplayService,
-                operationLogRecorder);
+                operationLogRecorder,
+                workflowFormVersionService,
+                nodeAssigneeRuleMapper,
+                businessLockService);
         CurrentUserContext.setUserId(1L);
         lenient().when(validator.validate(any())).thenReturn(Set.of());
+        lenient().when(workflowFormVersionService.ensureCurrentVersion(any()))
+                .thenReturn(FormVersionEntity.builder().id(1L).build());
     }
 
     /** 清理线程上下文。 */
@@ -201,7 +221,7 @@ class ApprovalRequestServiceImplTest {
             invocation.<ApprovalRequestEntity>getArgument(0).setId(10L);
             return 1;
         }).when(mapper).insert(any(ApprovalRequestEntity.class));
-        when(approvalProcessService.start(eq(10L), eq(FormFieldBizType.APP), eq(1L), any()))
+        when(approvalProcessService.start(eq(10L), eq(FormFieldBizType.APP), eq(ApprovalOperationType.CREATE), eq(1L), any()))
                 .thenReturn(new WorkflowInstanceResult(PROCESS_INSTANCE_ID, "flow-1", "deptLeaderApprove", "部门负责人审批"));
 
         WriteOperationResultVO<?> result = service.submit(
@@ -214,7 +234,83 @@ class ApprovalRequestServiceImplTest {
         assertThat(result.getApprovalRequest().getId()).isEqualTo(10L);
         assertThat(result.getApprovalRequest().getCurrentNodeName()).isEqualTo("部门负责人审批");
         verify(appService, never()).create(any());
-        verify(approvalProcessService).start(10L, FormFieldBizType.APP, 1L, null);
+        verify(approvalProcessService).start(10L, FormFieldBizType.APP, ApprovalOperationType.CREATE, 1L, null);
+    }
+
+    /**
+     * 提交创建申请时应落库本次命中的表单版本 id，且创建操作无"变更前"概念，beforeSnapshot
+     * 恒为空（production-approval-lifecycle change tasks.md 5.1）。
+     */
+    @Test
+    void submit_shouldPersistFormVersionAndSkipBeforeSnapshot_forCreateOperation() {
+        AppCreateRequest request = buildAppCreateRequest();
+        when(orgScopeService.isOrgIdAllowed(1L, 100L)).thenReturn(true);
+        when(workflowFormVersionService.ensureCurrentVersion(FormFieldBizType.APP))
+                .thenReturn(FormVersionEntity.builder().id(701L).build());
+        ArgumentCaptor<ApprovalRequestEntity> captor = ArgumentCaptor.forClass(ApprovalRequestEntity.class);
+        doAnswer(invocation -> {
+            invocation.<ApprovalRequestEntity>getArgument(0).setId(10L);
+            return 1;
+        }).when(mapper).insert(captor.capture());
+        when(approvalProcessService.start(eq(10L), eq(FormFieldBizType.APP), eq(ApprovalOperationType.CREATE), eq(1L), any()))
+                .thenReturn(new WorkflowInstanceResult(PROCESS_INSTANCE_ID, "flow-1", "deptLeaderApprove", "部门负责人审批"));
+
+        service.submit(FormFieldBizType.APP, ApprovalOperationType.CREATE, null, request);
+
+        ApprovalRequestEntity inserted = captor.getValue();
+        assertThat(inserted.getFormVersionId()).isEqualTo(701L);
+        assertThat(inserted.getBeforeSnapshot()).isNull();
+        assertThat(inserted.getAfterSnapshot()).isEqualTo(inserted.getRequestPayload());
+    }
+
+    /**
+     * 提交更新申请时应把当前目标记录冻结为 beforeSnapshot，与本次提交的 requestPayload
+     * （afterSnapshot）区分开（production-approval-lifecycle change tasks.md 5.1）。
+     */
+    @Test
+    void submit_shouldFreezeBeforeSnapshot_forUpdateOperation() {
+        OrgUpdateRequest request = new OrgUpdateRequest();
+        request.setParentId(100L);
+        when(orgScopeService.isOrgIdAllowed(1L, 99L)).thenReturn(true);
+        when(orgService.getById(99L)).thenReturn(OrgVO.builder().id(99L).parentId(100L).name("旧组织名").build());
+        ArgumentCaptor<ApprovalRequestEntity> captor = ArgumentCaptor.forClass(ApprovalRequestEntity.class);
+        doAnswer(invocation -> {
+            invocation.<ApprovalRequestEntity>getArgument(0).setId(11L);
+            return 1;
+        }).when(mapper).insert(captor.capture());
+        when(approvalProcessService.start(eq(11L), eq(FormFieldBizType.ORG), eq(ApprovalOperationType.UPDATE), eq(1L), any()))
+                .thenReturn(new WorkflowInstanceResult(PROCESS_INSTANCE_ID, "flow-1", "deptLeaderApprove", "部门负责人审批"));
+
+        service.submit(FormFieldBizType.ORG, ApprovalOperationType.UPDATE, 99L, request);
+
+        ApprovalRequestEntity inserted = captor.getValue();
+        assertThat(inserted.getBeforeSnapshot()).contains("旧组织名");
+        assertThat(inserted.getAfterSnapshot()).isEqualTo(inserted.getRequestPayload());
+    }
+
+    /**
+     * 审批过程（approve/reject/cancel 全流程）不存在任何修改 requestPayload/afterSnapshot 的
+     * 代码路径：申请提交后业务 payload 已冻结，审批节点只能补充意见字段
+     * （production-approval-lifecycle change tasks.md 5.2）。本测试断言最终节点通过后
+     * requestPayload 仍与提交时完全一致，验证"无入口可改"这一事实，而不是新写冻结逻辑。
+     */
+    @Test
+    void approve_shouldNotMutateRequestPayload_whenFinalNodeApproved() {
+        ApprovalRequestEntity entity = buildPendingEntity();
+        String originalPayload = entity.getRequestPayload();
+        when(mapper.selectById(10L)).thenReturn(entity);
+        stubOpenTaskAndFinalInstance();
+        when(mapper.update(eq(null), any(LambdaUpdateWrapper.class))).thenReturn(1);
+        when(orgScopeService.isOrgIdAllowed(1L, 100L)).thenReturn(true);
+        when(appService.create(any(AppCreateRequest.class))).thenReturn(AppVO.builder().id(20L).build());
+        CurrentUserContext.setUserId(2L);
+
+        service.approve(10L, "同意");
+
+        ArgumentCaptor<LambdaUpdateWrapper<ApprovalRequestEntity>> captor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(mapper).update(eq(null), captor.capture());
+        assertThat(captor.getValue().getSqlSet()).doesNotContain("requestPayload").doesNotContain("afterSnapshot");
+        assertThat(entity.getRequestPayload()).isEqualTo(originalPayload);
     }
 
     /**
@@ -237,7 +333,7 @@ class ApprovalRequestServiceImplTest {
                 .hasMessageContaining("应用名称不能为空");
 
         verify(mapper, never()).insert(any(ApprovalRequestEntity.class));
-        verify(approvalProcessService, never()).start(any(), any(), any(), any());
+        verify(approvalProcessService, never()).start(any(), any(), any(), any(), any());
     }
 
     /**
@@ -257,7 +353,7 @@ class ApprovalRequestServiceImplTest {
                 .hasMessageContaining("管辖范围");
 
         verify(mapper, never()).insert(any(ApprovalRequestEntity.class));
-        verify(approvalProcessService, never()).start(any(), any(), any(), any());
+        verify(approvalProcessService, never()).start(any(), any(), any(), any(), any());
     }
 
     /**
@@ -280,14 +376,14 @@ class ApprovalRequestServiceImplTest {
             invocation.<ApprovalRequestEntity>getArgument(0).setId(10L);
             return 1;
         }).when(mapper).insert(any(ApprovalRequestEntity.class));
-        when(approvalProcessService.start(eq(10L), eq(bizType), anyLong(), any()))
+        when(approvalProcessService.start(eq(10L), eq(bizType), eq(operationType), anyLong(), any()))
                 .thenReturn(new WorkflowInstanceResult(PROCESS_INSTANCE_ID, "flow-1", "deptLeaderApprove", "部门负责人审批"));
 
         WriteOperationResultVO<?> result = service.submit(bizType, operationType, targetId, payload);
 
         assertThat(result.isApprovalEnabled()).isTrue();
         assertThat(result.getApprovalRequest().getId()).isEqualTo(10L);
-        verify(approvalProcessService).start(eq(10L), eq(bizType), eq(1L), any());
+        verify(approvalProcessService).start(eq(10L), eq(bizType), eq(operationType), eq(1L), any());
     }
 
     /** 非最终节点通过时应仅推进流程、更新当前节点名称，不执行任何业务写操作。 */
@@ -603,6 +699,46 @@ class ApprovalRequestServiceImplTest {
         assertThat(result.getRecords()).hasSize(1);
         assertThat(result.getRecords().get(0).getRequestPayload()).isInstanceOf(Map.class);
         assertThat(result.getRecords().get(0).getTargetSnapshot()).isSameAs(current);
+    }
+
+    /**
+     * 待审批申请当前所处节点配置了 HIDDEN 字段权限时，返回给前端的 requestPayload 应整条
+     * 移除该字段，而不是设为 null（production-approval-lifecycle change tasks.md 5.2）。
+     */
+    @Test
+    void pageMine_shouldRemoveHiddenFields_whenCurrentNodeConfiguresFieldPermissions() {
+        AppCreateRequest payload = buildAppCreateRequest();
+        ApprovalRequestEntity entity = ApprovalRequestEntity.builder()
+                .id(10L)
+                .bizType(FormFieldBizType.APP)
+                .operationType(ApprovalOperationType.CREATE)
+                .requestPayload(JacksonUtils.toJson(payload))
+                .status(ApprovalRequestStatus.PENDING)
+                .processInstanceId(PROCESS_INSTANCE_ID)
+                .createBy("1")
+                .createTime(LocalDateTime.now())
+                .build();
+        Page<ApprovalRequestEntity> resultPage = new Page<>(1, 10, 1L);
+        resultPage.setRecords(java.util.List.of(entity));
+        when(mapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(resultPage);
+        when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
+        when(processInstanceMapper.selectById(PROCESS_INSTANCE_ID)).thenReturn(ProcessInstanceEntity.builder()
+                .id(PROCESS_INSTANCE_ID).processDefinitionId(50L).currentNodeId("leader").build());
+        when(nodeAssigneeRuleMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(
+                cn.nihility.rbac.workflow.entity.NodeAssigneeRuleEntity.builder()
+                        .id(1L)
+                        .processDefinitionId(50L)
+                        .nodeId("leader")
+                        .fieldPermissionsJson(JacksonUtils.toJson(Map.of("ownerId", "HIDDEN", "name", "READ")))
+                        .build());
+
+        PageResult<ApprovalRequestVO> result =
+                service.pageMine(FormFieldBizType.APP, ApprovalOperationType.CREATE, null, 1, 10);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> returnedPayload = (Map<String, Object>) result.getRecords().get(0).getRequestPayload();
+        assertThat(returnedPayload).doesNotContainKey("ownerId");
+        assertThat(returnedPayload).containsKey("name");
     }
 
     /** 为审批相关测试统一桩出"命中开放任务 + 流程实例已到达最终已通过状态"。 */

@@ -44,6 +44,6 @@ class UserAssigneeResolverTest {
 
     /** 构造解析上下文。 */
     private AssigneeResolveContext context(String assigneeValue) {
-        return new AssigneeResolveContext(1L, "node1", assigneeValue, 100L, 10L);
+        return new AssigneeResolveContext(1L, "node1", assigneeValue, 100L, 10L, null, null);
     }
 }

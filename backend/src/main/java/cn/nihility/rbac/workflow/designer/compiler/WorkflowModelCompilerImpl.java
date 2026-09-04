@@ -258,7 +258,11 @@ public class WorkflowModelCompilerImpl implements WorkflowModelCompiler {
                 Boolean.TRUE.equals(approval.getAllowTransfer()),
                 Boolean.TRUE.equals(approval.getAllowDelegate()),
                 Boolean.TRUE.equals(approval.getAllowAddSign()),
-                Boolean.TRUE.equals(approval.getAllowReturn()));
+                Boolean.TRUE.equals(approval.getAllowReturn()),
+                null,
+                null,
+                null,
+                null);
     }
 
     /**

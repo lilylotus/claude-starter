@@ -52,12 +52,31 @@ public class NodeAssigneeRuleEntity {
     /** 会签通过比例（百分比整数），仅 {@code approvalMode=PERCENT} 时使用。 */
     private Integer approvalPercent;
 
+    /** 反对票处理策略：{@code VETO}（一票否决）/{@code THRESHOLD}（阈值制），仅会签节点
+     *  （{@code approvalMode} 为 {@code AND}/{@code OR}/{@code PERCENT}）使用，DSL v2 专用，
+     *  v1 编译器恒传 {@code null}——{@code FlowableWorkflowService} 据此区分一个会签任务是
+     *  走 v1 遗留的"任一驳回即终止"判定还是 v2 的 N/A/R/U 计票判定
+     *  （production-approval-lifecycle change design.md 第7节，tasks.md 6.3）。 */
+    private String rejectPolicy;
+
     /** 空审批人处理策略：{@code TO_WORKFLOW_ADMIN}/{@code AUTO_SKIP}/{@code REJECT}/
      *  {@code BLOCK}/{@code FALLBACK_ROLE}（后两者 DSL v2 专用）。 */
     private String emptyAssigneeStrategy;
 
     /** 兜底角色编码，仅 {@code emptyAssigneeStrategy=FALLBACK_ROLE} 时使用（DSL v2 专用）。 */
     private String fallbackRoleCode;
+
+    /** 节点字段权限快照（JSON：字段标识 -> {@code HIDDEN}/{@code READ}/{@code WRITE_REQUIRED}/
+     *  {@code WRITE_OPTIONAL}），DSL v2 专用，v1 恒为空。 */
+    private String fieldPermissionsJson;
+
+    /** 组织负责人类来源解析组织的方式：{@code APPLICANT_SNAPSHOT}（默认，取申请人快照组织）/
+     *  {@code FIXED_ORG}（取 {@link #targetOrgId} 指定的固定组织），仅 {@code assigneeType=
+     *  ORG_LEADER} 时使用，其余类型恒为空（DSL v2 专用）。 */
+    private String assigneeOrgSource;
+
+    /** {@code assigneeOrgSource=FIXED_ORG} 时的固定目标组织 id，关联 {@code tab_org.id}。 */
+    private Long targetOrgId;
 
     /** 是否允许审批人为发起人本人时仍保留候选人（自审）。 */
     private Boolean allowSelfApproval;

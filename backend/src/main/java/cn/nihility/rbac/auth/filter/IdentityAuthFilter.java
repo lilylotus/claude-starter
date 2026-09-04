@@ -103,8 +103,42 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
             "/api/approval-requests/*/cancel",
             "/api/form-fields/render-schema");
 
-    /** Ant 风格路径匹配器，用于维护白名单。 */
+    /** Ant 风格路径匹配器，用于维护白名单以及 {@link #FIXED_PERMISSION_MAPPINGS}。 */
     private static final AntPathMatcher PATH_MATCHER = new AntPathMatcher();
+
+    /**
+     * "HTTP 方法 + Ant 风格路径 -&gt; 固定必须权限编码"映射表（production-approval-lifecycle
+     * change tasks.md 5.5，已确认真实漏洞：此前完全信任客户端 {@code menu} 请求头决定校验
+     * 哪个权限编码，只要调用方持有系统内任意一个权限编码，即可把该编码填进 {@code menu} 头
+     * 调用任何其他接口而不被拦截）。命中本映射表的路径改为按映射表配置的固定权限编码做
+     * {@link AuthorizationService#hasPermission} 校验，忽略客户端 {@code menu} 头的具体值；
+     * 未命中的路径（存量接口）保持"用 {@code menu} 头值做权限校验"的既有行为不变，不在本轮
+     * 重新梳理全部存量接口（工作量超出本轮范围）。覆盖范围限定在本 change（含前置
+     * {@code workflow-approval-engine}/本 change 第4节）新增的流程设计/发布审核/业务绑定/
+     * 试运行/模型启停接口，以及既有的审批 approve/reject 接口。
+     */
+    private static final List<PermissionMapping> FIXED_PERMISSION_MAPPINGS = List.of(
+            new PermissionMapping("GET", "/api/workflow/process-models", "WorkflowDesign:model:view"),
+            new PermissionMapping("GET", "/api/workflow/process-models/*", "WorkflowDesign:model:view"),
+            new PermissionMapping("GET", "/api/workflow/process-models/*/versions", "WorkflowDesign:model:view"),
+            new PermissionMapping("POST", "/api/workflow/process-models", "WorkflowDesign:model:edit"),
+            new PermissionMapping("POST", "/api/workflow/process-models/*/copy", "WorkflowDesign:model:edit"),
+            new PermissionMapping("PUT", "/api/workflow/process-models/*/draft", "WorkflowDesign:model:edit"),
+            new PermissionMapping("POST", "/api/workflow/process-models/*/simulations", "WorkflowDesign:model:edit"),
+            new PermissionMapping("POST", "/api/workflow/process-models/*/publish", "WorkflowDesign:model:publish"),
+            new PermissionMapping("POST", "/api/workflow/process-models/*/disable", "WorkflowDesign:model:disable"),
+            new PermissionMapping("POST", "/api/workflow/process-models/*/enable", "WorkflowDesign:model:disable"),
+            new PermissionMapping("POST", "/api/workflow/process-models/*/enabled", "WorkflowDesign:model:disable"),
+            new PermissionMapping("POST", "/api/workflow/process-models/*/reviews", "WorkflowDesign:model:review"),
+            new PermissionMapping("POST", "/api/workflow/process-model-reviews/*/decisions", "WorkflowDesign:model:review"),
+            new PermissionMapping("GET", "/api/workflow/process-bindings", "WorkflowDesign:binding:view"),
+            new PermissionMapping("GET", "/api/workflow/process-bindings/*", "WorkflowDesign:binding:view"),
+            new PermissionMapping("POST", "/api/workflow/process-bindings", "WorkflowDesign:binding:edit"),
+            new PermissionMapping("PUT", "/api/workflow/process-bindings/*", "WorkflowDesign:binding:edit"),
+            new PermissionMapping("POST", "/api/workflow/process-bindings/*/enable", "WorkflowDesign:binding:edit"),
+            new PermissionMapping("POST", "/api/workflow/process-bindings/*/disable", "WorkflowDesign:binding:edit"),
+            new PermissionMapping("POST", "/api/approval-requests/*/approve", "ApprovalManagement:request:approve"),
+            new PermissionMapping("POST", "/api/approval-requests/*/reject", "ApprovalManagement:request:approve"));
 
     /** 会话令牌业务逻辑接口。 */
     private final TokenService tokenService;
@@ -156,7 +190,8 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
                 return;
             }
 
-            if (!firstLoginExempt && !authorizationService.hasPermission(userId, menu)) {
+            String requiredPermission = resolveRequiredPermission(request.getMethod(), path, menu);
+            if (!firstLoginExempt && !authorizationService.hasPermission(userId, requiredPermission)) {
                 writeError(response, AuthErrorCode.FORBIDDEN, "无权限访问该资源");
                 return;
             }
@@ -176,6 +211,35 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
      */
     private boolean matches(List<String> patterns, String path) {
         return patterns.stream().anyMatch(pattern -> PATH_MATCHER.match(pattern, path));
+    }
+
+    /**
+     * 解析本次请求实际应校验的权限编码：命中 {@link #FIXED_PERMISSION_MAPPINGS} 时返回映射表
+     * 配置的固定编码（忽略 {@code menu} 头具体值，杜绝伪造 {@code menu} 头绕过）；未命中时
+     * 回退既有行为，直接使用 {@code menu} 头的值（存量接口，本轮不重新梳理）。
+     *
+     * @param httpMethod 请求 HTTP 方法
+     * @param path       请求路径
+     * @param menuHeader {@code menu} 请求头值（已校验过格式合法）
+     * @return 本次请求实际应校验的权限编码
+     */
+    private String resolveRequiredPermission(String httpMethod, String path, String menuHeader) {
+        for (PermissionMapping mapping : FIXED_PERMISSION_MAPPINGS) {
+            if (mapping.method().equalsIgnoreCase(httpMethod) && PATH_MATCHER.match(mapping.pathPattern(), path)) {
+                return mapping.permissionCode();
+            }
+        }
+        return menuHeader;
+    }
+
+    /**
+     * 固定权限映射表条目。
+     *
+     * @param method         HTTP 方法（忽略大小写比较）
+     * @param pathPattern    Ant 风格路径模式
+     * @param permissionCode 该接口实际要求的固定权限编码
+     */
+    private record PermissionMapping(String method, String pathPattern, String permissionCode) {
     }
 
     /**

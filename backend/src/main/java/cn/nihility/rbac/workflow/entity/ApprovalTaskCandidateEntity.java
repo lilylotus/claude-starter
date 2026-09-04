@@ -36,6 +36,10 @@ public class ApprovalTaskCandidateEntity {
     /** 候选人取值：{@code USER} 类型为用户 id 文本，{@code ROLE} 类型为角色编码。 */
     private String candidateValue;
 
+    /** 候选人解析依据说明（如"角色 SECURITY_ADMIN 命中管理员 3 人"），供审计与运维排查
+     *  （production-approval-lifecycle change tasks.md 5.4）。 */
+    private String resolveBasis;
+
     /** 创建人。 */
     private String createBy;
 

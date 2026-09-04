@@ -14,7 +14,7 @@ class InitiatorAssigneeResolverTest {
     /** 应返回流程实例快照记录的发起人。 */
     @Test
     void resolve_shouldReturnApplicant() {
-        AssigneeResolveContext context = new AssigneeResolveContext(1L, "node1", null, 100L, 10L);
+        AssigneeResolveContext context = new AssigneeResolveContext(1L, "node1", null, 100L, 10L, null, null);
 
         assertThat(resolver.resolve(context)).containsExactly(100L);
     }
@@ -22,7 +22,7 @@ class InitiatorAssigneeResolverTest {
     /** 发起人上下文缺失时返回空集合，不抛出异常。 */
     @Test
     void resolve_shouldReturnEmptyWhenApplicantMissing() {
-        AssigneeResolveContext context = new AssigneeResolveContext(null, "node1", null, null, null);
+        AssigneeResolveContext context = new AssigneeResolveContext(null, "node1", null, null, null, null, null);
 
         assertThat(resolver.resolve(context)).isEmpty();
     }

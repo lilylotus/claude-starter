@@ -88,7 +88,9 @@ public class WorkflowMultiInstanceExecutionListener implements ExecutionListener
                 nodeId,
                 rule.getAssigneeValue(),
                 instance == null ? null : instance.getApplicantId(),
-                instance == null ? null : instance.getApplicantOrgId());
+                instance == null ? null : instance.getApplicantOrgId(),
+                rule.getAssigneeOrgSource(),
+                rule.getTargetOrgId());
         NodeAssigneeResolutionService resolutionService = WorkflowSpringContext.getBean(NodeAssigneeResolutionService.class);
         ResolvedAssignees resolved = resolutionService.resolve(rule, context);
 

@@ -27,7 +27,7 @@ class ApplicantDeptParentLeaderAssigneeResolverTest {
                 new ApplicantDeptParentLeaderAssigneeResolver(adminRoleLookupService);
         when(adminRoleLookupService.findParentOrgLeaderUserIds(10L, "DEPT_LEADER")).thenReturn(Set.of(9L));
 
-        Set<Long> result = resolver.resolve(new AssigneeResolveContext(1L, "node1", "DEPT_LEADER", 100L, 10L));
+        Set<Long> result = resolver.resolve(new AssigneeResolveContext(1L, "node1", "DEPT_LEADER", 100L, 10L, null, null));
 
         assertThat(result).containsExactly(9L);
     }

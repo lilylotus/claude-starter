@@ -10,6 +10,8 @@ import cn.nihility.rbac.workflow.dto.ApprovalTaskVO;
 import cn.nihility.rbac.workflow.dto.ApproveRequest;
 import cn.nihility.rbac.workflow.dto.DelegateCommand;
 import cn.nihility.rbac.workflow.dto.DelegateRequest;
+import cn.nihility.rbac.workflow.dto.DisagreeCommand;
+import cn.nihility.rbac.workflow.dto.DisagreeRequest;
 import cn.nihility.rbac.workflow.dto.ProcessInstanceDetailVO;
 import cn.nihility.rbac.workflow.dto.RejectCommand;
 import cn.nihility.rbac.workflow.dto.RejectRequest;
@@ -131,6 +133,27 @@ public class WorkflowTaskController {
             @Valid @RequestBody RejectRequest request,
             @RequestHeader(value = "X-Request-Id", required = false) String requestId) {
         workflowService.reject(new RejectCommand(taskId, requireCurrentUserId(), request.getRemark(), requestId));
+        return Result.success();
+    }
+
+    /**
+     * 反对（阈值制会签节点专用反对票）：只计入反对票数，不立即终止流程，只有反对票数使该
+     * 节点已不可能达到通过阈值时才会触发流程终止；用在非阈值制会签节点上会被拒绝
+     * （production-approval-lifecycle change design.md 第7节，tasks.md 6.3）。
+     *
+     * @param taskId    审批任务 id
+     * @param request   请求体
+     * @param requestId 幂等键，可为空
+     * @return 无业务数据的成功响应
+     */
+    @Operation(summary = "审批反对（阈值制会签节点反对票）")
+    @PostMapping("/api/v1/workflow/tasks/{taskId}/disagree")
+    public Result<Void> disagree(
+            @Parameter(description = "审批任务 id", required = true) @PathVariable Long taskId,
+            @Valid @RequestBody(required = false) DisagreeRequest request,
+            @RequestHeader(value = "X-Request-Id", required = false) String requestId) {
+        workflowService.disagree(new DisagreeCommand(taskId, requireCurrentUserId(),
+                request == null ? null : request.getRemark(), requestId));
         return Result.success();
     }
 

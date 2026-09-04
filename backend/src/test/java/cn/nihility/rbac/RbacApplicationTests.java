@@ -44,7 +44,7 @@ class RbacApplicationTests {
      */
     @Test
     void approvalProcess_shouldStartAndTerminate() {
-        WorkflowInstanceResult result = approvalProcessService.start(10001L, "ORG", 1L, null);
+        WorkflowInstanceResult result = approvalProcessService.start(10001L, "ORG", "CREATE", 1L, null);
 
         assertThat(result.processInstanceId()).isNotNull();
         assertThat(result.flowableProcessInstanceId()).isNotBlank();

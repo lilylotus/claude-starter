@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.workflow.constant.ProcessModelStatus;
+import cn.nihility.rbac.workflow.dslv2.review.WorkflowReleaseReviewService;
 import cn.nihility.rbac.workflow.designer.compiler.CompiledProcess;
 import cn.nihility.rbac.workflow.designer.compiler.NodeAssigneeRuleDraft;
 import cn.nihility.rbac.workflow.designer.compiler.WorkflowModelCompiler;
@@ -61,6 +62,9 @@ class WorkflowProcessModelServiceImplTest {
     private cn.nihility.rbac.workflow.dslv2.compiler.WorkflowModelCompilerV2 workflowModelCompilerV2;
 
     @Mock
+    private WorkflowReleaseReviewService workflowReleaseReviewService;
+
+    @Mock
     private RepositoryService repositoryService;
 
     @Mock
@@ -84,7 +88,7 @@ class WorkflowProcessModelServiceImplTest {
     void setUp() {
         service = new WorkflowProcessModelServiceImpl(
                 processModelMapper, processDefinitionMapper, nodeAssigneeRuleMapper, workflowModelCompiler,
-                workflowModelCompilerV2, repositoryService);
+                workflowModelCompilerV2, workflowReleaseReviewService, repositoryService);
     }
 
     /** 保存草稿只更新 {@code model_json}，不触碰 Flowable。 */
@@ -163,7 +167,7 @@ class WorkflowProcessModelServiceImplTest {
 
         NodeAssigneeRuleDraft ruleDraft = new NodeAssigneeRuleDraft(
                 "deptLeaderApprove", "部门负责人审批", 1, null, null, null, null, null, null,
-                false, true, true, false, false);
+                false, true, true, false, false, null, null, null, null);
         when(workflowModelCompiler.compile(any())).thenReturn(new CompiledProcess(new BpmnModel(), List.of(ruleDraft)));
 
         when(repositoryService.createDeployment()).thenReturn(deploymentBuilder);

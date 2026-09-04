@@ -43,7 +43,7 @@ class PreviousApproverAssigneeResolverTest {
         when(approvalRecordMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(
                 List.of(ApprovalRecordEntity.builder().operatorId(500L).build()));
 
-        var result = resolver.resolve(new AssigneeResolveContext(1L, "node2", null, 100L, 10L));
+        var result = resolver.resolve(new AssigneeResolveContext(1L, "node2", null, 100L, 10L, null, null));
 
         assertThat(result).containsExactly(500L);
     }
@@ -54,7 +54,7 @@ class PreviousApproverAssigneeResolverTest {
         resolver = new PreviousApproverAssigneeResolver(approvalRecordMapper);
         when(approvalRecordMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
 
-        var result = resolver.resolve(new AssigneeResolveContext(1L, "node2", null, 100L, 10L));
+        var result = resolver.resolve(new AssigneeResolveContext(1L, "node2", null, 100L, 10L, null, null));
 
         assertThat(result).isEmpty();
     }
@@ -64,7 +64,7 @@ class PreviousApproverAssigneeResolverTest {
     void resolve_shouldReturnEmptyWhenProcessInstanceMissing() {
         resolver = new PreviousApproverAssigneeResolver(approvalRecordMapper);
 
-        var result = resolver.resolve(new AssigneeResolveContext(null, "node2", null, 100L, 10L));
+        var result = resolver.resolve(new AssigneeResolveContext(null, "node2", null, 100L, 10L, null, null));
 
         assertThat(result).isEmpty();
     }

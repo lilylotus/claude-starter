@@ -280,6 +280,76 @@ class IdentityAuthFilterTest {
     }
 
     /**
+     * 伪造低权限 {@code menu} 头调用固定权限映射表内的高权限接口（模型发布）必须被拒绝：
+     * 过滤器应忽略 {@code menu} 头的值，改用映射表配置的固定权限编码
+     * {@code WorkflowDesign:model:publish} 做校验，而不是调用方伪造的
+     * {@code WorkflowDesign:model:view}（production-approval-lifecycle change tasks.md 5.5，
+     * 已确认真实漏洞的回归测试）。
+     */
+    @Test
+    void doFilter_shouldReturnForbidden_whenForgedLowPermissionMenuHeaderCallsMappedPublishEndpoint() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST",
+                "/api/workflow/process-models/1/publish");
+        request.addHeader("identity-token", "valid-access-key");
+        request.addHeader("menu", "WorkflowDesign:model:view");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain filterChain = org.mockito.Mockito.mock(FilterChain.class);
+        when(tokenService.verifyAccessKey("valid-access-key")).thenReturn(Optional.of(1L));
+        when(passwordService.isFirstLogin(1L)).thenReturn(false);
+        // 只持有 view 权限，不持有 publish 权限；过滤器应完全不查询 menu 头声称的 view 编码。
+        when(authorizationService.hasPermission(1L, "WorkflowDesign:model:publish")).thenReturn(false);
+
+        filter.doFilter(request, response, filterChain);
+
+        verify(filterChain, never()).doFilter(any(), any());
+        assertThat(response.getContentAsString()).contains("\"code\":" + AuthErrorCode.FORBIDDEN);
+        verify(authorizationService).hasPermission(1L, "WorkflowDesign:model:publish");
+        verify(authorizationService, never()).hasPermission(1L, "WorkflowDesign:model:view");
+    }
+
+    /**
+     * 持有映射表要求的固定权限编码时，命中映射表的接口应正常放行。
+     */
+    @Test
+    void doFilter_shouldPass_whenUserHoldsMappedFixedPermission() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST",
+                "/api/workflow/process-models/1/publish");
+        request.addHeader("identity-token", "valid-access-key");
+        request.addHeader("menu", "WorkflowDesign:model:view");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain filterChain = org.mockito.Mockito.mock(FilterChain.class);
+        when(tokenService.verifyAccessKey("valid-access-key")).thenReturn(Optional.of(1L));
+        when(passwordService.isFirstLogin(1L)).thenReturn(false);
+        when(authorizationService.hasPermission(1L, "WorkflowDesign:model:publish")).thenReturn(true);
+
+        filter.doFilter(request, response, filterChain);
+
+        verify(filterChain).doFilter(request, response);
+    }
+
+    /**
+     * 未命中固定映射表的存量接口行为不受影响，仍按 {@code menu} 头的值做权限校验（回归）。
+     */
+    @Test
+    void doFilter_shouldStillUseMenuHeaderValue_whenPathNotInFixedMapping() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/users");
+        request.addHeader("identity-token", "valid-access-key");
+        request.addHeader("menu", "UserManagement:user:view");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain filterChain = org.mockito.Mockito.mock(FilterChain.class);
+        when(tokenService.verifyAccessKey("valid-access-key")).thenReturn(Optional.of(1L));
+        when(passwordService.isFirstLogin(1L)).thenReturn(false);
+        when(authorizationService.hasPermission(1L, "UserManagement:user:view")).thenReturn(true);
+
+        filter.doFilter(request, response, filterChain);
+
+        verify(filterChain).doFilter(request, response);
+        verify(authorizationService).hasPermission(1L, "UserManagement:user:view");
+    }
+
+    /**
      * “我的申请”属于登录用户自助查询，应绕过角色权限点判断。
      */
     @Test

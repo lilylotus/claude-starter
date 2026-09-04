@@ -4,6 +4,7 @@ import cn.nihility.rbac.workflow.dto.AddSignCommand;
 import cn.nihility.rbac.workflow.dto.ApproveCommand;
 import cn.nihility.rbac.workflow.dto.ApprovalTaskVO;
 import cn.nihility.rbac.workflow.dto.DelegateCommand;
+import cn.nihility.rbac.workflow.dto.DisagreeCommand;
 import cn.nihility.rbac.workflow.dto.ProcessInstanceDetailVO;
 import cn.nihility.rbac.workflow.dto.RejectCommand;
 import cn.nihility.rbac.workflow.dto.ReturnTaskCommand;
@@ -44,6 +45,15 @@ public interface WorkflowService {
      * @param command 驳回命令
      */
     void reject(RejectCommand command);
+
+    /**
+     * 反对（阈值制会签节点专用的反对票）：只计入反对票数，不立即终止流程实例，只有当反对票
+     * 数使得该会签节点已不可能达到通过阈值时才会触发流程终止（production-approval-lifecycle
+     * change design.md 第7节，tasks.md 6.3）。用在非阈值制会签节点上会被拒绝。
+     *
+     * @param command 反对命令
+     */
+    void disagree(DisagreeCommand command);
 
     /**
      * 将流程状态退回到指定的历史节点。

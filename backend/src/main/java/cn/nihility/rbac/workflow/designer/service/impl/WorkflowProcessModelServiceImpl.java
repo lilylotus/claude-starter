@@ -14,6 +14,7 @@ import cn.nihility.rbac.workflow.designer.service.WorkflowProcessModelService;
 import cn.nihility.rbac.workflow.dslv2.compiler.CompiledProcessV2;
 import cn.nihility.rbac.workflow.dslv2.dto.ProcessModelDslV2;
 import cn.nihility.rbac.workflow.dslv2.compiler.WorkflowModelCompilerV2;
+import cn.nihility.rbac.workflow.dslv2.review.WorkflowReleaseReviewService;
 import cn.nihility.rbac.workflow.dslv2.util.DigestUtils;
 import cn.nihility.rbac.workflow.entity.NodeAssigneeRuleEntity;
 import cn.nihility.rbac.workflow.entity.ProcessDefinitionEntity;
@@ -22,6 +23,7 @@ import cn.nihility.rbac.workflow.mapper.NodeAssigneeRuleMapper;
 import cn.nihility.rbac.workflow.mapper.ProcessDefinitionMapper;
 import cn.nihility.rbac.workflow.mapper.ProcessModelMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -59,6 +61,10 @@ public class WorkflowProcessModelServiceImpl implements WorkflowProcessModelServ
 
     /** DSL v2 → BPMN 编译器。 */
     private final WorkflowModelCompilerV2 workflowModelCompilerV2;
+
+    /** 流程模型发布审核服务，v2 发布前置门禁：仅 {@code publishV2} 路径要求当前草稿修订已
+     *  通过审核（tasks.md 4.3"本轮补齐"）。 */
+    private final WorkflowReleaseReviewService workflowReleaseReviewService;
 
     /** Flowable 流程仓库服务。 */
     private final RepositoryService repositoryService;
@@ -144,12 +150,20 @@ public class WorkflowProcessModelServiceImpl implements WorkflowProcessModelServ
             throw new BusinessException("流程模型草稿为空，无法发布");
         }
 
+        boolean schemaV2 = isSchemaV2(model.getModelJson());
+        if (schemaV2) {
+            // 发布审核仅对 v2 生效：v1 发布流程本就没有审核概念，不新增，避免改变现有 v1 行为
+            // （tasks.md 4.3"本轮补齐"）。审核不通过（未提交、被驳回、草稿已变更导致审核
+            // 失效）直接抛异常，不执行任何编译/部署。
+            workflowReleaseReviewService.requireApprovedForCurrentRevision(modelId);
+        }
+
         int nextVersion = nextVersion(modelId);
         String operatorText = operatorId == null ? null : operatorId.toString();
         LocalDateTime now = LocalDateTime.now();
         String resourceName = model.getProcessCode() + "-v" + nextVersion + ".bpmn20.xml";
 
-        ProcessDefinitionEntity definition = isSchemaV2(model.getModelJson())
+        ProcessDefinitionEntity definition = schemaV2
                 ? publishV2(model, nextVersion, resourceName, operatorText, now)
                 : publishV1(model, nextVersion, resourceName, operatorText, now);
 
@@ -339,6 +353,20 @@ public class WorkflowProcessModelServiceImpl implements WorkflowProcessModelServ
     }
 
     /**
+     * {@inheritDoc}
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class, propagation = Propagation.REQUIRED)
+    public void setModelEnabled(Long modelId, boolean enabled, Long operatorId) {
+        requireModel(modelId);
+        processModelMapper.update(null, new LambdaUpdateWrapper<ProcessModelEntity>()
+                .eq(ProcessModelEntity::getId, modelId)
+                .set(ProcessModelEntity::getEnabled, enabled)
+                .set(ProcessModelEntity::getUpdateBy, operatorId == null ? null : operatorId.toString())
+                .set(ProcessModelEntity::getUpdateTime, LocalDateTime.now()));
+    }
+
+    /**
      * 批量落库编译产物派生的节点审批人规则。
      */
     private void insertAssigneeRules(
@@ -364,6 +392,10 @@ public class WorkflowProcessModelServiceImpl implements WorkflowProcessModelServ
                     .allowDelegate(draft.allowDelegate())
                     .allowAddSign(draft.allowAddSign())
                     .allowReturn(draft.allowReturn())
+                    .fieldPermissionsJson(draft.fieldPermissionsJson())
+                    .assigneeOrgSource(draft.assigneeOrgSource())
+                    .targetOrgId(draft.targetOrgId())
+                    .rejectPolicy(draft.rejectPolicy())
                     .createBy(operatorText)
                     .createTime(now)
                     .updateBy(operatorText)

@@ -64,6 +64,17 @@ public class ApprovalRequestEntity {
     /** 当前所在审批节点名称，流程结束（已通过/已拒绝/已撤回）后置空。 */
     private String currentNodeName;
 
+    /** 提交时命中的表单版本 id，关联 {@code tab_wf_form_version.id}，历史申请为空。 */
+    private Long formVersionId;
+
+    /** 提交时冻结的变更前业务数据快照（JSON），仅 UPDATE/ENABLE/DISABLE/DELETE 类操作有值，
+     *  CREATE 操作无"变更前"概念，为空。 */
+    private String beforeSnapshot;
+
+    /** 提交时冻结的变更后业务数据快照（JSON），即 {@link #requestPayload} 的等价只读副本，
+     *  供审计留痕，审批过程中业务 payload 本身不可再变更（design.md Decision 5）。 */
+    private String afterSnapshot;
+
     /** 创建人，即申请提交人。 */
     private String createBy;
 

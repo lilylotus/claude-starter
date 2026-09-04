@@ -3,6 +3,7 @@ package cn.nihility.rbac.workflow.integration;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import cn.nihility.rbac.workflow.constant.ApprovalMode;
+import cn.nihility.rbac.workflow.constant.ExecutionMode;
 import cn.nihility.rbac.workflow.constant.ProcessInstanceStatus;
 import cn.nihility.rbac.workflow.dto.ApproveCommand;
 import cn.nihility.rbac.workflow.dto.RejectCommand;
@@ -39,7 +40,8 @@ class MultiInstanceApprovalIntegrationTest extends AbstractWorkflowEngineIntegra
                 List.of(NodeSeed.simple("miApprove", "会签审批(AND)", ApprovalMode.AND, null,
                         "610001,610002,610003")));
         WorkflowInstanceResult started = workflowService.start(new StartProcessCommand(
-                fixture.processCode(), "TEST", 1L, "集成测试流程", 619999L, null, null, null));
+                fixture.processCode(), "TEST", 1L, "集成测试流程", 619999L, null, null, null,
+                fixture.processDefinitionId(), null, null, ExecutionMode.LEGACY_SYNC));
 
         List<ApprovalTaskEntity> tasks = tasksOf(started.processInstanceId(), "miApprove");
         assertThat(tasks).hasSize(3);
@@ -75,7 +77,8 @@ class MultiInstanceApprovalIntegrationTest extends AbstractWorkflowEngineIntegra
                 List.of(NodeSeed.simple("miApprove", "会签审批(OR)", ApprovalMode.OR, null,
                         "620001,620002,620003")));
         WorkflowInstanceResult started = workflowService.start(new StartProcessCommand(
-                fixture.processCode(), "TEST", 1L, "集成测试流程", 629999L, null, null, null));
+                fixture.processCode(), "TEST", 1L, "集成测试流程", 629999L, null, null, null,
+                fixture.processDefinitionId(), null, null, ExecutionMode.LEGACY_SYNC));
 
         List<ApprovalTaskEntity> tasks = tasksOf(started.processInstanceId(), "miApprove");
         assertThat(tasks).hasSize(3);
@@ -100,7 +103,8 @@ class MultiInstanceApprovalIntegrationTest extends AbstractWorkflowEngineIntegra
                 List.of(NodeSeed.simple("miApprove", "会签审批(PERCENT-60)", ApprovalMode.PERCENT, 60,
                         "630001,630002,630003,630004,630005")));
         WorkflowInstanceResult started = workflowService.start(new StartProcessCommand(
-                fixture.processCode(), "TEST", 1L, "集成测试流程", 639999L, null, null, null));
+                fixture.processCode(), "TEST", 1L, "集成测试流程", 639999L, null, null, null,
+                fixture.processDefinitionId(), null, null, ExecutionMode.LEGACY_SYNC));
 
         List<ApprovalTaskEntity> tasks = tasksOf(started.processInstanceId(), "miApprove");
         assertThat(tasks).hasSize(5);
@@ -130,7 +134,8 @@ class MultiInstanceApprovalIntegrationTest extends AbstractWorkflowEngineIntegra
                 List.of(NodeSeed.simple("miApprove", "会签审批(AND)", ApprovalMode.AND, null,
                         "640001,640002,640003")));
         WorkflowInstanceResult started = workflowService.start(new StartProcessCommand(
-                fixture.processCode(), "TEST", 1L, "集成测试流程", 649999L, null, null, null));
+                fixture.processCode(), "TEST", 1L, "集成测试流程", 649999L, null, null, null,
+                fixture.processDefinitionId(), null, null, ExecutionMode.LEGACY_SYNC));
 
         List<ApprovalTaskEntity> tasks = tasksOf(started.processInstanceId(), "miApprove");
         assertThat(tasks).hasSize(3);

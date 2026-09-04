@@ -39,16 +39,20 @@ import cn.nihility.rbac.user.service.PositionService;
 import cn.nihility.rbac.user.service.UserDisplayService;
 import cn.nihility.rbac.user.service.UserService;
 import cn.nihility.rbac.workflow.assignee.support.TaskAuthorizationService;
+import cn.nihility.rbac.workflow.dslv2.form.WorkflowFormVersionService;
 import cn.nihility.rbac.workflow.constant.ApprovalAction;
 import cn.nihility.rbac.workflow.constant.ProcessInstanceStatus;
 import cn.nihility.rbac.workflow.constant.TaskStatus;
 import cn.nihility.rbac.workflow.dto.WorkflowInstanceResult;
 import cn.nihility.rbac.workflow.entity.ApprovalRecordEntity;
 import cn.nihility.rbac.workflow.entity.ApprovalTaskEntity;
+import cn.nihility.rbac.workflow.entity.NodeAssigneeRuleEntity;
 import cn.nihility.rbac.workflow.entity.ProcessInstanceEntity;
 import cn.nihility.rbac.workflow.mapper.ApprovalRecordMapper;
 import cn.nihility.rbac.workflow.mapper.ApprovalTaskMapper;
+import cn.nihility.rbac.workflow.mapper.NodeAssigneeRuleMapper;
 import cn.nihility.rbac.workflow.mapper.ProcessInstanceMapper;
+import cn.nihility.rbac.workflow.service.BusinessLockService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -133,6 +137,16 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
     /** 操作日志记录器。 */
     private final OperationLogRecorder operationLogRecorder;
 
+    /** 表单版本业务逻辑接口，提交时按 bizType 落库命中的表单版本快照。 */
+    private final WorkflowFormVersionService workflowFormVersionService;
+
+    /** 节点审批人规则数据访问接口，用于按申请当前所处节点读取字段权限快照做 HIDDEN 字段过滤。 */
+    private final NodeAssigneeRuleMapper nodeAssigneeRuleMapper;
+
+    /** 业务活动申请锁服务，保证同一业务目标同一时间只有一条运行中的审批申请
+     *  （production-approval-lifecycle change design.md 第8节，tasks.md 6.2）。 */
+    private final BusinessLockService businessLockService;
+
     /**
      * {@inheritDoc}
      */
@@ -163,11 +177,25 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
         LocalDateTime now = LocalDateTime.now();
         Long applicantId = requireCurrentUserId();
         String currentUserId = applicantId.toString();
+
+        // 提交时落库本次命中的不可变表单版本，以及冻结的变更前/变更后快照（design.md
+        // Decision 5"申请保存完整业务快照、表单版本、before/after"）：变更前快照取自当前
+        // 尚未被本次审批影响的业务数据（CREATE 操作无"变更前"概念，恒为空）；变更后快照即
+        // 本次提交的 requestPayload 等价只读副本，冻结后审批过程中不可再修改（见 approve()/
+        // reject() 全流程未出现任何回写 request_payload/after_snapshot 的代码路径）。
+        Long formVersionId = workflowFormVersionService.ensureCurrentVersion(bizType).getId();
+        Object beforeSnapshotSource = Objects.equals(operationType, ApprovalOperationType.CREATE)
+                ? null
+                : getCurrentTarget(bizType, targetId);
+        String requestPayloadJson = typedPayload == null ? null : JacksonUtils.toJson(typedPayload);
         ApprovalRequestEntity entity = ApprovalRequestEntity.builder()
                 .bizType(bizType)
                 .operationType(operationType)
                 .targetId(targetId)
-                .requestPayload(typedPayload == null ? null : JacksonUtils.toJson(typedPayload))
+                .requestPayload(requestPayloadJson)
+                .formVersionId(formVersionId)
+                .beforeSnapshot(beforeSnapshotSource == null ? null : JacksonUtils.toJson(beforeSnapshotSource))
+                .afterSnapshot(requestPayloadJson)
                 .status(ApprovalRequestStatus.PENDING)
                 .createBy(currentUserId)
                 .createTime(now)
@@ -176,8 +204,15 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
                 .build();
         approvalRequestMapper.insert(entity);
 
+        // 固定加锁顺序第一层——业务活动锁：同一业务目标同时只允许一条运行中的变更申请，
+        // 与随后 approvalProcessService.start() 内部的绑定锁/实例创建处于同一事务
+        // （production-approval-lifecycle change design.md 第8节，tasks.md 6.2）。CREATE
+        // 操作没有已存在的目标 id，使用申请自身 id 作为临时键，天然不会与其他申请冲突。
+        businessLockService.acquire(bizType, resolveTargetKey(targetId, entity.getId()), entity.getId(), applicantId);
+
         Long applicantOrgId = resolveApplicantOrgId(applicantId);
-        WorkflowInstanceResult process = approvalProcessService.start(entity.getId(), bizType, applicantId, applicantOrgId);
+        WorkflowInstanceResult process = approvalProcessService.start(
+                entity.getId(), bizType, operationType, applicantId, applicantOrgId);
         entity.setProcessInstanceId(process.processInstanceId());
         entity.setFlowableProcessInstanceId(process.flowableProcessInstanceId());
         entity.setCurrentNodeName(process.currentNodeName());
@@ -262,6 +297,7 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
         }
         approvalRequestMapper.update(null, wrapper);
         recordRequestStatusChange(entity, ApprovalRequestStatus.APPROVED, approverId, opinion);
+        releaseBusinessLock(entity, approverId);
     }
 
     /**
@@ -281,6 +317,7 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
                 .set(ApprovalRequestEntity::getUpdateBy, approverId.toString())
                 .set(ApprovalRequestEntity::getUpdateTime, now));
         recordRequestStatusChange(entity, ApprovalRequestStatus.REJECTED, approverId, finalOpinion);
+        releaseBusinessLock(entity, approverId);
     }
 
     /**
@@ -324,6 +361,7 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
                 .set(ApprovalRequestEntity::getUpdateBy, approverId.toString())
                 .set(ApprovalRequestEntity::getUpdateTime, now));
         recordRequestStatusChange(entity, ApprovalRequestStatus.REJECTED, approverId, opinion);
+        releaseBusinessLock(entity, approverId);
     }
 
     /**
@@ -354,6 +392,7 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
             throw new BusinessException("只有待审批申请可以撤回");
         }
         recordRequestStatusChange(entity, ApprovalRequestStatus.CANCELLED, currentUserId, null);
+        releaseBusinessLock(entity, currentUserId);
     }
 
     /**
@@ -480,7 +519,10 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
     private ApprovalRequestVO toVO(ApprovalRequestEntity entity, Map<String, String> displayNames) {
         ApprovalRequestVO vo = ApprovalConvert.INSTANCE.toRequestVO(entity);
         if (StringUtils.hasText(entity.getRequestPayload())) {
-            vo.setRequestPayload(JacksonUtils.toObj(entity.getRequestPayload(), JacksonUtils.MAP_OBJECT_TYPE_REFERENCE));
+            Map<String, Object> payload = JacksonUtils.toObj(
+                    entity.getRequestPayload(), JacksonUtils.MAP_OBJECT_TYPE_REFERENCE);
+            removeHiddenFields(payload, entity.getProcessInstanceId());
+            vo.setRequestPayload(payload);
         }
         if (entity.getApproverId() != null) {
             vo.setApproverName(displayNames.getOrDefault(entity.getApproverId().toString(), "未知用户"));
@@ -492,6 +534,36 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
             vo.setTargetSnapshot(getCurrentTarget(entity.getBizType(), entity.getTargetId()));
         }
         return vo;
+    }
+
+    /**
+     * 按申请当前所处审批节点的字段权限快照，从返回给前端的表单数据中整条移除 {@code HIDDEN}
+     * 字段（不是设为 {@code null}），未处于任何 DSL v2 节点（v1 流程/流程已结束/规则未配置
+     * 字段权限）时不做任何过滤，原样返回（production-approval-lifecycle change tasks.md
+     * 5.2）。
+     */
+    private void removeHiddenFields(Map<String, Object> payload, Long processInstanceId) {
+        if (payload == null || payload.isEmpty() || processInstanceId == null) {
+            return;
+        }
+        ProcessInstanceEntity instance = processInstanceMapper.selectById(processInstanceId);
+        if (instance == null || !StringUtils.hasText(instance.getCurrentNodeId())) {
+            return;
+        }
+        NodeAssigneeRuleEntity rule = nodeAssigneeRuleMapper.selectOne(new LambdaQueryWrapper<NodeAssigneeRuleEntity>()
+                .eq(NodeAssigneeRuleEntity::getProcessDefinitionId, instance.getProcessDefinitionId())
+                .eq(NodeAssigneeRuleEntity::getNodeId, instance.getCurrentNodeId())
+                .last("LIMIT 1"));
+        if (rule == null || !StringUtils.hasText(rule.getFieldPermissionsJson())) {
+            return;
+        }
+        Map<String, String> permissions = JacksonUtils.toObj(
+                rule.getFieldPermissionsJson(), JacksonUtils.MAP_STRING_TYPE_REFERENCE);
+        permissions.forEach((fieldCode, level) -> {
+            if ("HIDDEN".equals(level)) {
+                payload.remove(fieldCode);
+            }
+        });
     }
 
     /**
@@ -771,6 +843,26 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
             throw new BusinessException("当前用户未登录");
         }
         return userId;
+    }
+
+    /**
+     * 计算业务活动锁的 {@code targetKey}：非创建操作使用目标记录 id 文本，能真正区分"同一个
+     * 目标"从而阻止并发重复发起；创建操作没有已存在的目标身份，使用申请自身 id 作为临时键——
+     * 天然唯一，不会与任何其他申请冲突（design.md 第9节"CREATE 场景可用申请自身临时键"），
+     * 即创建操作不做跨申请去重，只是复用同一套加锁/释放生命周期保持实现一致。
+     */
+    private String resolveTargetKey(Long targetId, Long requestId) {
+        return targetId != null ? targetId.toString() : "REQUEST:" + requestId;
+    }
+
+    /**
+     * 申请到达终态（通过/拒绝/撤回）后释放业务活动锁，使同一业务目标可以再次发起新的申请；
+     * 释放时校验当前占用者确为本申请 id，避免误释放（{@link BusinessLockService#release}
+     * 自身也做了该校验，此处按同一目标键调用即可）。
+     */
+    private void releaseBusinessLock(ApprovalRequestEntity entity, Long operatorId) {
+        String targetKey = resolveTargetKey(entity.getTargetId(), entity.getId());
+        businessLockService.release(entity.getBizType(), targetKey, entity.getId(), operatorId);
     }
 
     /**

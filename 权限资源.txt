@@ -262,18 +262,54 @@ WorkflowDesign（流程设计器，见 openspec/changes/workflow-approval-engine
 - WorkflowDesign:model:view      流程模型列表/版本历史页面访问（查看流程模型列表、按流程
   编码查看版本历史，只读展示发布人/发布时间/状态/DSL 快照，历史版本不提供编辑入口）
 - WorkflowDesign:model:edit      新增/编辑流程模型草稿（保存 Workflow JSON DSL 草稿，仅
-  更新草稿内容，不触发部署，不影响当前已发布、正在运行的版本）
+  更新草稿内容，不触发部署，不影响当前已发布、正在运行的版本）；本权限点同时复用给
+  DSL v2 草稿的"快速预演"接口（POST .../process-models/{id}/simulations，
+  production-approval-lifecycle change tasks.md 4.2）——预演读取的是编辑者自己正在改的
+  草稿或某个已发布版本快照做只读静态解释，不产生真实运行数据，语义上与"编辑草稿"是同一
+  批可信任对象，未单独登记新权限点
 - WorkflowDesign:model:publish   发布流程模型（编译当前草稿为 BPMN 并部署，生成新的不可变
   版本；与 edit 分别独立校验，持有编辑权限不隐含拥有发布权限，避免普通编辑者误发布未经
   评审的流程变更）
 - WorkflowDesign:model:disable   下线/重新启用流程模型当前生效版本（下线后拒绝以该流程编码
   新发起，不影响运行中实例；重新启用只能激活当前版本，不支持跳过版本直接激活更早的历史
-  版本；启/停复用同一权限点）
+  版本；启/停复用同一权限点）；本权限点同时复用给"模型级启停"接口（POST
+  .../process-models/{id}/enabled，production-approval-lifecycle change tasks.md
+  4.6）——语义为独立控制"是否接受新发起"，与本权限点原本控制的版本级下线/重新上线是
+  同一批"流程模型上下线相关开关"操作，未单独登记新权限点
+- WorkflowDesign:model:review    流程模型发布审核（提交当前草稿审核 POST
+  .../process-models/{modelId}/reviews、审核决策 POST
+  .../process-model-reviews/{reviewId}/decisions；审核者与编辑者不能是同一人；
+  production-approval-lifecycle change tasks.md 5.5，本轮补齐 tab_menu/tab_permission
+  种子数据——此前 workflow-approval-engine 后续批次的代码注释已引用该编码但从未真正登记，
+  导致该权限点在数据库里从未真实存在、任何角色含 SUPER_ADMIN 都无法被授予）
+- WorkflowDesign:binding:view    业务绑定列表/详情查看（GET .../process-bindings、GET
+  .../process-bindings/{bindingId}；production-approval-lifecycle change tasks.md 5.5，
+  本轮补齐种子数据，原因同上）
+- WorkflowDesign:binding:edit    业务绑定新建/切换版本（含显式回滚）/启停（POST
+  .../process-bindings、PUT .../process-bindings/{bindingId}、POST
+  .../process-bindings/{bindingId}/enable、POST
+  .../process-bindings/{bindingId}/disable；production-approval-lifecycle change
+  tasks.md 5.5，本轮补齐种子数据，原因同上）
 前端落地为侧边栏"流程设计"一级菜单下的"流程模型"页面（/workflow/models，Vue Flow 画布见
 /workflow/designer/:id，不单独登记菜单，通过列表页"进入设计器"跳转）；后端流程模型的
 "分页列出全部流程模型"接口尚未提供（仅有草稿保存/发布/下线/启用/版本历史五个依赖已知 id
 的接口），列表页面对此做了兜底降级（手动输入 id 操作），后端补齐列表接口后不需要新增
-菜单/权限点。
+菜单/权限点。发布审核/业务绑定管理页面前端尚未实现（属于本轮 Non-Goals，见 tasks.md 5.3
+"前端页面改动不在本轮范围"同一约束），权限点已在后端生效，等前端页面落地后按同一批编码
+接入，不需要再新增。
+
+运维查询接口 GET /api/v1/workflow/operations/exceptions（查询当前处于空审批人待分配状态
+的流程实例列表，production-approval-lifecycle change tasks.md 5.4）复用
+WorkflowDesign:model:view——与流程模型只读查看同属"流程设计只读查看"范畴，未单独登记新
+权限点，前端运维页面尚未实现，属于后续批次。
+
+安全加固说明（production-approval-lifecycle change tasks.md 5.5）：此前
+IdentityAuthFilter 完全信任客户端 menu 请求头决定校验哪个权限编码，只要调用方持有系统内
+任意一个权限编码就能伪造 menu 头调用任何其他接口而不被拦截。本轮在 IdentityAuthFilter 内
+新增了"HTTP 方法+路径 -> 固定权限编码"静态映射表，覆盖本节及前置第4节新增的流程设计/
+发布审核/业务绑定/试运行/模型启停接口，以及既有的审批 approve/reject 接口：命中映射表的
+路径按固定编码校验、忽略 menu 头具体值；未命中的存量接口仍按 menu 头值校验，行为不变。
+以上新增/沿用的权限编码即该映射表引用的固定编码，不需要额外新增。
 
 
 聊天

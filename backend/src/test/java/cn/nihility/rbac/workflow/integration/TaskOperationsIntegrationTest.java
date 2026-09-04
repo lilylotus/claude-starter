@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.workflow.constant.ApprovalAction;
 import cn.nihility.rbac.workflow.constant.ApprovalMode;
+import cn.nihility.rbac.workflow.constant.ExecutionMode;
 import cn.nihility.rbac.workflow.constant.ProcessInstanceStatus;
 import cn.nihility.rbac.workflow.constant.TaskStatus;
 import cn.nihility.rbac.workflow.dto.AddSignCommand;
@@ -46,7 +47,8 @@ class TaskOperationsIntegrationTest extends AbstractWorkflowEngineIntegrationTes
     void transfer_shouldChangeAssigneeAndRecordFromAndToUser() {
         ProcessFixture fixture = deployAndSeed(TRANSFER_DELEGATE_RETURN_BPMN, threeLevelNodeSeeds());
         WorkflowInstanceResult started = workflowService.start(new StartProcessCommand(
-                fixture.processCode(), "TEST", 1L, "集成测试流程", 809999L, null, null, null));
+                fixture.processCode(), "TEST", 1L, "集成测试流程", 809999L, null, null, null,
+                fixture.processDefinitionId(), null, null, ExecutionMode.LEGACY_SYNC));
 
         Long taskId = singleTaskId(started.processInstanceId(), "levelOne");
         workflowService.transfer(new TransferCommand(taskId, 710001L, 719000L, "临时出差，转办处理", null));
@@ -75,7 +77,8 @@ class TaskOperationsIntegrationTest extends AbstractWorkflowEngineIntegrationTes
     void transfer_shouldBeRejected_whenTargetNodeDoesNotAllowTransfer() {
         ProcessFixture fixture = deployAndSeed(TRANSFER_DELEGATE_RETURN_BPMN, threeLevelNodeSeeds());
         WorkflowInstanceResult started = workflowService.start(new StartProcessCommand(
-                fixture.processCode(), "TEST", 1L, "集成测试流程", 819999L, null, null, null));
+                fixture.processCode(), "TEST", 1L, "集成测试流程", 819999L, null, null, null,
+                fixture.processDefinitionId(), null, null, ExecutionMode.LEGACY_SYNC));
 
         Long levelOneTaskId = singleTaskId(started.processInstanceId(), "levelOne");
         workflowService.approve(new ApproveCommand(levelOneTaskId, 710001L, "同意", null));
@@ -100,7 +103,8 @@ class TaskOperationsIntegrationTest extends AbstractWorkflowEngineIntegrationTes
     void delegate_shouldReturnToOriginalAssignee_afterDelegateCompletesTask() {
         ProcessFixture fixture = deployAndSeed(TRANSFER_DELEGATE_RETURN_BPMN, threeLevelNodeSeeds());
         WorkflowInstanceResult started = workflowService.start(new StartProcessCommand(
-                fixture.processCode(), "TEST", 1L, "集成测试流程", 829999L, null, null, null));
+                fixture.processCode(), "TEST", 1L, "集成测试流程", 829999L, null, null, null,
+                fixture.processDefinitionId(), null, null, ExecutionMode.LEGACY_SYNC));
 
         Long taskId = singleTaskId(started.processInstanceId(), "levelOne");
         workflowService.delegate(new DelegateCommand(taskId, 710001L, 718001L, "外出学习，委托代为审批", null));
@@ -137,7 +141,8 @@ class TaskOperationsIntegrationTest extends AbstractWorkflowEngineIntegrationTes
                 List.of(new NodeSeed("miApprove", "会签审批(AND，可加签)", ApprovalMode.AND, null,
                         "830001,830002", false, false, true, false)));
         WorkflowInstanceResult started = workflowService.start(new StartProcessCommand(
-                fixture.processCode(), "TEST", 1L, "集成测试流程", 839999L, null, null, null));
+                fixture.processCode(), "TEST", 1L, "集成测试流程", 839999L, null, null, null,
+                fixture.processDefinitionId(), null, null, ExecutionMode.LEGACY_SYNC));
 
         List<ApprovalTaskEntity> beforeAddSign = tasksOf(started.processInstanceId(), "miApprove");
         assertThat(beforeAddSign).hasSize(2);
@@ -192,7 +197,8 @@ class TaskOperationsIntegrationTest extends AbstractWorkflowEngineIntegrationTes
     void returnTask_shouldMoveBackToHistoryNodeAndReResolveAssignee() {
         ProcessFixture fixture = deployAndSeed(TRANSFER_DELEGATE_RETURN_BPMN, threeLevelNodeSeeds());
         WorkflowInstanceResult started = workflowService.start(new StartProcessCommand(
-                fixture.processCode(), "TEST", 1L, "集成测试流程", 849999L, null, null, null));
+                fixture.processCode(), "TEST", 1L, "集成测试流程", 849999L, null, null, null,
+                fixture.processDefinitionId(), null, null, ExecutionMode.LEGACY_SYNC));
 
         Long levelOneTaskId = singleTaskId(started.processInstanceId(), "levelOne");
         workflowService.approve(new ApproveCommand(levelOneTaskId, 710001L, "同意", null));
@@ -230,7 +236,8 @@ class TaskOperationsIntegrationTest extends AbstractWorkflowEngineIntegrationTes
     void returnTask_shouldBeRejected_whenTargetNodeDoesNotAllowReturn() {
         ProcessFixture fixture = deployAndSeed(TRANSFER_DELEGATE_RETURN_BPMN, threeLevelNodeSeeds());
         WorkflowInstanceResult started = workflowService.start(new StartProcessCommand(
-                fixture.processCode(), "TEST", 1L, "集成测试流程", 859999L, null, null, null));
+                fixture.processCode(), "TEST", 1L, "集成测试流程", 859999L, null, null, null,
+                fixture.processDefinitionId(), null, null, ExecutionMode.LEGACY_SYNC));
 
         Long levelOneTaskId = singleTaskId(started.processInstanceId(), "levelOne");
         workflowService.approve(new ApproveCommand(levelOneTaskId, 710001L, "同意", null));

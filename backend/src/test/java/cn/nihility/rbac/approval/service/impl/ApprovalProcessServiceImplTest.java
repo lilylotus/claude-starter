@@ -5,12 +5,17 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import cn.nihility.rbac.workflow.constant.ExecutionMode;
+import cn.nihility.rbac.workflow.dslv2.binding.ProcessBindingResolutionService;
+import cn.nihility.rbac.workflow.dslv2.binding.ResolvedProcessBinding;
 import cn.nihility.rbac.workflow.dto.ApproveCommand;
 import cn.nihility.rbac.workflow.dto.RejectCommand;
 import cn.nihility.rbac.workflow.dto.StartProcessCommand;
 import cn.nihility.rbac.workflow.dto.WithdrawCommand;
 import cn.nihility.rbac.workflow.dto.WorkflowInstanceResult;
 import cn.nihility.rbac.workflow.engine.WorkflowService;
+import cn.nihility.rbac.workflow.entity.ProcessBindingEntity;
+import cn.nihility.rbac.workflow.entity.ProcessDefinitionEntity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -19,8 +24,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 /**
- * {@link ApprovalProcessServiceImpl} 单元测试：验证其作为薄封装正确构造命令对象并转调用
- * {@link WorkflowService}（workflow-approval-engine change design.md Decision 8）。
+ * {@link ApprovalProcessServiceImpl} 单元测试：验证其经
+ * {@link ProcessBindingResolutionService} 解析出实际生效的业务绑定与流程定义后，正确构造
+ * 命令对象并转调用 {@link WorkflowService}（workflow-approval-engine change design.md
+ * Decision 8；production-approval-lifecycle change design.md Decision 4，tasks.md 4.5）。
  */
 @ExtendWith(MockitoExtension.class)
 class ApprovalProcessServiceImplTest {
@@ -28,21 +35,30 @@ class ApprovalProcessServiceImplTest {
     @Mock
     private WorkflowService workflowService;
 
+    @Mock
+    private ProcessBindingResolutionService processBindingResolutionService;
+
     private ApprovalProcessServiceImpl service;
 
     /** 构造被测服务。 */
     @BeforeEach
     void setUp() {
-        service = new ApprovalProcessServiceImpl(workflowService);
+        service = new ApprovalProcessServiceImpl(workflowService, processBindingResolutionService);
     }
 
-    /** 启动流程时应使用固定的 MASTER_DATA_APPROVAL 流程编码，透传业务参数。 */
+    /** 启动流程时应按解析出的绑定/流程定义构造命令，透传业务参数。 */
     @Test
-    void start_shouldDelegateToWorkflowServiceWithMasterDataProcessCode() {
+    void start_shouldDelegateToWorkflowServiceWithResolvedBinding() {
+        ProcessBindingEntity binding = ProcessBindingEntity.builder()
+                .id(88L).revision(3L).executionMode(ExecutionMode.LEGACY_SYNC).build();
+        ProcessDefinitionEntity definition = ProcessDefinitionEntity.builder()
+                .id(66L).processCode("MASTER_DATA_APPROVAL").build();
+        when(processBindingResolutionService.resolveForStart("ORG", "CREATE", 100L))
+                .thenReturn(new ResolvedProcessBinding(binding, definition));
         WorkflowInstanceResult expected = new WorkflowInstanceResult(1L, "flowable-1", "deptLeaderApprove", "部门负责人审批");
         when(workflowService.start(any())).thenReturn(expected);
 
-        WorkflowInstanceResult result = service.start(10L, "ORG", 1L, 100L);
+        WorkflowInstanceResult result = service.start(10L, "ORG", "CREATE", 1L, 100L);
 
         ArgumentCaptor<StartProcessCommand> captor = ArgumentCaptor.forClass(StartProcessCommand.class);
         verify(workflowService).start(captor.capture());
@@ -52,6 +68,10 @@ class ApprovalProcessServiceImplTest {
         assertThat(command.businessId()).isEqualTo(10L);
         assertThat(command.applicantId()).isEqualTo(1L);
         assertThat(command.applicantOrgId()).isEqualTo(100L);
+        assertThat(command.definitionId()).isEqualTo(66L);
+        assertThat(command.bindingId()).isEqualTo(88L);
+        assertThat(command.bindingRevision()).isEqualTo(3L);
+        assertThat(command.executionMode()).isEqualTo(ExecutionMode.LEGACY_SYNC);
         assertThat(result).isSameAs(expected);
     }
 

@@ -62,8 +62,10 @@ dependencies {
     implementation "org.flowable:flowable-spring-boot-starter:${FlowableVersion}"
     // ============ Flowable 核心：流程引擎 ============
     implementation "org.flowable:flowable-spring-boot-starter-process:${FlowableVersion}"
-    // ============ 可选：Flowable REST API ============
-    implementation "org.flowable:flowable-spring-boot-starter-rest:${FlowableVersion}"
+    /* flowable-spring-boot-starter-rest 已于 production-approval-lifecycle change 移除：
+       仓库内没有任何代码依赖其导出的通用 REST 端点（均通过注入 RuntimeService/TaskService 等
+       Bean 直接调用），保留该 starter 反而让 IdentityAuthFilter 之外多出一批未经业务层鉴权
+       校验的引擎数据读写入口（design.md Decision 8 Risks，tasks.md 5.6）。 */
 
     implementation 'io.netty:netty-all:4.2.16.Final'
     implementation 'org.springframework.boot:spring-boot-starter-websocket'

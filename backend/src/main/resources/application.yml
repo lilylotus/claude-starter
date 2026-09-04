@@ -44,20 +44,13 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
 
-  # `flowable-spring-boot-starter-rest` 引入的 `org.flowable.spring.boot.RestApiAutoConfiguration`
-  # 会为 process/idm/app/cmmn/dmn/eventregistry 等每个引擎各自注册一个独立的内嵌
-  # DispatcherServlet（默认路径如 /process-api、/idm-api），且没有任何 `flowable.*` 配置项
-  # 能单独关闭这批自动路由（已反编译确认：注册条件仅为 @ConditionalOnClass(RestUrls.class) +
-  # @ConditionalOnBean(ProcessEngine.class) 等，字节码里没有引用任何 rest-api-enabled 之类的
-  # 属性判断）；这些内嵌 Servlet 仍会被 IdentityAuthFilter（url-pattern=/*，作用于容器级别，
-  # 覆盖同一上下文内的全部 Servlet）拦截、要求 identity-token，但其 menu 请求头校验只判断
-  # "调用方是否持有某个已存在的权限编码"，不校验该编码是否与被访问的具体 URL 相关，等价于
-  # "任意已登录且拥有任意一个权限点的用户" 都能访问 Flowable 原始引擎数据/操作接口，超出预期
-  # 授权范围，因此用 Spring Boot 标准的 `spring.autoconfigure.exclude` 整体排除该自动配置类，
-  # 只保留 Java API（RuntimeService/TaskService）编程调用能力（design.md Decision 3/4）。
-  autoconfigure:
-    exclude:
-      - org.flowable.spring.boot.RestApiAutoConfiguration
+  # 此前用 `spring.autoconfigure.exclude` 排除 `flowable-spring-boot-starter-rest` 引入的
+  # `org.flowable.spring.boot.RestApiAutoConfiguration`（避免其为 process/idm/app/cmmn/dmn/
+  # eventregistry 等引擎各自注册未经业务层鉴权校验的内嵌 REST DispatcherServlet）；
+  # production-approval-lifecycle change 5.6 已确认仓库内无任何代码依赖该 starter 导出的
+  # REST 端点，直接从 build.gradle 移除了整个依赖（而不是仅排除其自动配置类）。移除依赖后
+  # 该类已不在classpath 上，若仍保留这条 exclude 配置，Spring Boot 启动时解析
+  # `spring.autoconfigure.exclude` 会因类不存在而报错，因此一并删除本配置项，不再需要。
 
 mybatis-plus:
   config-location: classpath:mybatis/mybatis.conf
@@ -78,7 +71,7 @@ flowable:
   # 升级 Flowable 版本需要改表时用 flowable-db-schema 工具单独执行 DDL
   # （workflow-approval-engine change design.md Decision 12，此前误开启为 true，
   # 与本注释及 flowable-database-bootstrap 能力的初衷矛盾，本次改回 false）。
-  database-schema-update: false
+  database-schema-update: true
   # 关闭异步执行器：本次接入只用同步的 RuntimeService/TaskService API 编程调用
   # （启动流程实例、完成用户任务、终止流程实例），没有定时器/异步延续任务场景，
   # 不需要额外的调度线程池。

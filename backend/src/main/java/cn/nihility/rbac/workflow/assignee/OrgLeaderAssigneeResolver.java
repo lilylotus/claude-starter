@@ -9,16 +9,19 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 /**
- * 指定组织负责人审批人解析器。当前 schema 未提供额外的"目标组织"配置列
- * （{@code tab_wf_node_assignee_rule} 只有一个 {@code assignee_value} 承载"要求的管理员角色
- * 编码"，见 design.md Decision 5），因此本实现的"目标组织"取自流程实例快照的发起人所属
- * 组织，与 {@link ApplicantDeptLeaderAssigneeResolver} 算法一致——这是本次实现在 schema
- * 约束下的既定假设，两者作为独立的 {@link AssigneeType} 枚举值保留，供后续如需支持"指定
- * 任意具体组织"时再扩展规则表结构、改写本类。
+ * 指定组织负责人审批人解析器。目标组织按节点规则的 {@code assigneeOrgSource} 决定：
+ * {@code FIXED_ORG} 时使用规则配置的固定目标组织（{@code context.targetOrgId()}，供"指定
+ * 固定组织管理员审批"场景使用，如"test 组织下新增需要 test 组织下的管理员审批"）；未配置
+ * 或为 {@code APPLICANT_SNAPSHOT}（默认）时保持既有行为，取流程实例快照的发起人所属组织
+ * （{@code context.applicantOrgId()}），与 {@link ApplicantDeptLeaderAssigneeResolver} 的
+ * 默认算法一致（production-approval-lifecycle change tasks.md 5.3）。
  */
 @Component
 @RequiredArgsConstructor
 public class OrgLeaderAssigneeResolver implements AssigneeResolver {
+
+    /** {@code orgSource} 固定目标组织取值，见 {@link AssigneeResolveContext#orgSource()}。 */
+    private static final String ORG_SOURCE_FIXED_ORG = "FIXED_ORG";
 
     /** 管理员角色查询辅助组件。 */
     private final AdminRoleLookupService adminRoleLookupService;
@@ -36,12 +39,15 @@ public class OrgLeaderAssigneeResolver implements AssigneeResolver {
      */
     @Override
     public Set<Long> resolve(AssigneeResolveContext context) {
-        if (context.applicantOrgId() == null) {
+        Long targetOrgId = ORG_SOURCE_FIXED_ORG.equals(context.orgSource())
+                ? context.targetOrgId()
+                : context.applicantOrgId();
+        if (targetOrgId == null) {
             return Set.of();
         }
         String roleCode = StringUtils.hasText(context.assigneeValue())
                 ? context.assigneeValue()
                 : WorkflowConstants.DEFAULT_ORG_LEADER_ROLE_CODE;
-        return adminRoleLookupService.findOrgLeaderUserIds(context.applicantOrgId(), roleCode);
+        return adminRoleLookupService.findOrgLeaderUserIds(targetOrgId, roleCode);
     }
 }
