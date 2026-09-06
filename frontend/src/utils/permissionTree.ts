@@ -72,11 +72,21 @@ export const PERMISSION_MODULE_LABELS: Record<string, string> = {
   ApprovalManagement: '审批管理',
   Chat: '聊天',
   SensitiveWordManagement: '敏感词管理',
+  WorkflowDesign: '流程设计',
 }
 
-// 未在 PERMISSION_MODULE_LABELS 中登记的模块名（如后续新增模块但还没来得及补充映射）
-// 兜底展示原始模块名，不报错、不显示空白；作为 buildPermissionTree 的默认
-// resolveGroupLabel 实现供各调用方直接传入，不必各自维护一份同样逻辑的解析函数
+// 角色管理/权限点管理页面只允许展示中文模块名，不允许英文模块编码前缀直接暴露给用户；
+// 未在 PERMISSION_MODULE_LABELS 中登记的模块名（如新增模块但忘记补充映射）会兜底展示
+// 原始英文编码，不报错、不显示空白，但会在开发环境打印告警提示补齐映射，避免线上静默
+// 漏配。作为 buildPermissionTree 的默认 resolveGroupLabel 实现供各调用方直接传入，不必
+// 各自维护一份同样逻辑的解析函数
 export function resolvePermissionModuleLabel(moduleName: string): string {
-  return PERMISSION_MODULE_LABELS[moduleName] ?? moduleName
+  const label = PERMISSION_MODULE_LABELS[moduleName]
+  if (!label && import.meta.env.DEV) {
+    console.warn(
+      `[permissionTree] 模块编码 "${moduleName}" 未在 PERMISSION_MODULE_LABELS 中登记中文名，` +
+        '角色管理/权限点管理页面将直接展示英文编码，请补齐映射。',
+    )
+  }
+  return label ?? moduleName
 }

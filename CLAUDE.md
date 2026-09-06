@@ -148,6 +148,16 @@ letter"）。日期前缀只在归档时由 `openspec-archive-change` 自动加�
 如 `UserManagement:user:add`）。**任何新增/删除页面菜单、新增/删除按钮的改动，都必须
 同步更新这份文件**，保持它与前端实际实现一致，不要让它过期。
 
+权限编码的模块段（如 `UserManagement`、`WorkflowDesign`）本身是英文 PascalCase（对应
+前端管理页面组件名），这是既定约定、不需要改成中文；但**前端角色管理弹窗的权限点勾选树
+（`RoleManagementView.vue`/`RoleDetailView.vue`）与权限点管理页面
+（`PermissionManagementView.vue`）展示给用户的模块分组名必须是中文**，不能直接把英文
+模块编码前缀展示出来。三处页面共用 `frontend/src/utils/permissionTree.ts` 里的
+`PERMISSION_MODULE_LABELS` 映射表把英文模块前缀转成中文名；新增权限模块前缀时必须同步
+在这份映射表里补一条中文名（与 `权限资源.txt` 里该模块登记的中文名保持一致），否则会
+在角色管理页面直接展示出未翻译的英文模块名——`resolvePermissionModuleLabel` 在开发环境
+下会对漏配的模块名打印告警，但仍需手动补齐映射，不会自动生成中文名。
+
 ## 代码风格
 
 Java 代码遵循 `java-code-style` skill 的规范（4 空格缩进、K&R 大括号风格、UTF-8、
