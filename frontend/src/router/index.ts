@@ -46,6 +46,7 @@ const implementedComponents: Record<string, () => Promise<unknown>> = {
   '/chat': () => import('@/views/chat/ChatView.vue'),
   '/system/sensitive-words': () => import('@/views/chat/SensitiveWordManagementView.vue'),
   '/workflow/models': () => import('@/views/workflow/process-model/ProcessModelListView.vue'),
+  '/workflow/bindings': () => import('@/views/workflow/binding/ProcessBindingView.vue'),
 }
 
 const menuRoutes = MENU_GROUPS.flatMap((group) =>

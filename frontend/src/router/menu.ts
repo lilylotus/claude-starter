@@ -82,7 +82,12 @@ export const MENU_GROUPS: MenuGroup[] = [
     key: 'workflow-design',
     title: '流程设计',
     icon: Connection,
-    children: [{ title: '流程模型', path: '/workflow/models', permissionKey: 'WorkflowDesign:model:view' }],
+    children: [
+      { title: '流程模型', path: '/workflow/models', permissionKey: 'WorkflowDesign:model:view' },
+      // 业务绑定管理页面：按 bizType×operationType×scopeType 配置各业务对象的新增/更新/
+      // 启用/停用/删除各自走哪个已发布流程版本，参见 approval-process-binding-console change
+      { title: '业务绑定', path: '/workflow/bindings', permissionKey: 'WorkflowDesign:binding:view' },
+    ],
   },
   {
     // 聊天独立一级导航分组，与后端 V15__create_chat_tables.sql 新增的"聊天"侧边栏分组
