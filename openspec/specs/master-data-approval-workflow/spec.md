@@ -75,35 +75,51 @@
 - **THEN** 系统仍然成功生成一条状态为"待审批"的申请记录，不在提交阶段因编码重复而拒绝
 
 ### Requirement: 审批通过后执行既有业务逻辑
-系统 SHALL 提供审批通过接口，仅 `ApprovalManagement:request:approve` 权限点持有者，且同时是该申请当前所处审批节点解析出的指定处理人或候选人（用户或角色维度命中）时，才允许调用；候选组节点未认领时系统 SHALL 自动先认领再完成。审批流程 SHALL 支持多级：当前节点通过后若流程尚未到达最终审批节点，系统 SHALL NOT 执行该 `bizType` 对应的创建/更新/启用/停用/删除逻辑，仅推进流程到下一节点、更新 `currentNodeName`，申请状态保持"待审批"；仅当流程到达最终审批节点并通过后，系统 SHALL 以该申请的**提交人**身份（而非当前调用审批接口的审批人身份）重新执行一次管辖组织范围校验，通过后调用该 `bizType` 对应模块既有的创建/更新/启用/停用/删除方法（`request_payload` 反序列化为该方法的请求参数），复用该方法内部已有的全部业务规则校验（如唯一性、父子关系约束）与操作日志记录；该方法执行的操作日志中"操作人"字段 SHALL 记录为提交人，而非审批人。若该方法执行时业务规则校验失败（如编码唯一性冲突），审批操作 SHALL 返回失败，该申请状态 SHALL 保持"待审批"不变，不自动转为"已拒绝"，也不创建/修改任何业务记录，流程也不会推进到已通过状态。审批通过执行成功后（最终节点），系统 SHALL 将该申请状态置为"已通过"，记录最终审批人与审批时间；`operationType=CREATE` 的申请 SHALL 回填 `resultTargetId` 为新创建记录的 id；系统 SHALL 完成该申请关联的 Flowable 用户任务。
+系统 SHALL 提供审批通过接口，仅 `ApprovalManagement:request:approve` 权限点持有者，且同时是该申请当前所处审批节点解析出的指定处理人或候选人（用户或角色维度命中）时，才允许调用；候选组节点未认领时系统 SHALL 自动先认领再完成。系统 SHALL 在申请发起时冻结 executionMode；历史和未启用新模式的申请使用 LEGACY_SYNC。审批流程 SHALL 支持多级：非最终节点审批 SHALL 只推进流程到下一节点、更新 `currentNodeName`，不执行正式主数据变更，申请状态保持"待审批"。
+
+> **当前实现状态**：`RELIABLE_ASYNC` 的 Outbox 生产/消费基础设施与 ORG/USER 两类业务执行适配器已实现，但 `ProcessBindingResolutionService.resolveForStart` 当前对任何 `RELIABLE_ASYNC` 绑定一律拒绝并提示"可靠异步执行尚未实现"，因此生产环境目前**没有任何入口**能让一次真实的审批提交真正走上 `RELIABLE_ASYNC` 路径；"新绑定可显式选择 RELIABLE_ASYNC"仅描述目标形态，尚未生效。POSITION/APP 两类业务的执行适配器也尚未实现。放开该入口、补齐 POSITION/APP 适配器留待后续 change。
+
+LEGACY_SYNC 最终审批通过时，系统 SHALL 以该申请的**提交人**身份（而非当前调用审批接口的审批人身份）重新执行一次管辖组织范围校验，通过后调用该 `bizType` 对应模块既有的创建/更新/启用/停用/删除方法（`request_payload` 反序列化为该方法的请求参数），复用该方法内部已有的全部业务规则校验（如唯一性、父子关系约束）与操作日志记录；该方法执行的操作日志中"操作人"字段 SHALL 记录为提交人，而非审批人。业务校验失败时审批操作 SHALL 返回失败，申请状态 SHALL 保持"待审批"不变，不自动转为"已拒绝"，也不创建/修改任何业务记录，流程也不会推进到已通过状态。成功后申请 SHALL 置为"已通过"，记录最终审批人与审批时间；`operationType=CREATE` 的申请 SHALL 回填 `resultTargetId` 为新创建记录的 id；系统 SHALL 完成该申请关联的 Flowable 用户任务。
+
+RELIABLE_ASYNC 最终审批 SHALL 同事务完成引擎推进、审批通过状态、审批审计和业务执行 Outbox，executionStatus 置 PENDING。执行器 SHALL 使用提交人的当前权限和管辖范围、目标版本与既有业务规则校验，再执行相同主数据方法；成功原子保存 SUCCEEDED、resultTargetId 与消费标记，操作日志仍归属提交人并额外追踪审批人与执行身份。失败 SHALL 保留审批通过结果，按原因置 FAILED_RETRYABLE 或 FAILED_MANUAL，不回滚已完成审批，也不修改未授权或冲突的业务数据。改变 payload SHALL 必须重新申请审批。
 
 #### Scenario: 非最终节点通过仅推进流程
 - **WHEN** 审批人对一条配置了两级审批的待审批申请，在第一级节点调用审批通过接口
 - **THEN** 系统不执行任何业务数据创建/更新，申请状态保持"待审批"，`currentNodeName` 更新为第二级节点名称
 
-#### Scenario: 最终节点通过创建类申请后执行创建
-- **WHEN** 审批人对一条 `operationType=CREATE` 的待审批申请在最终审批节点调用审批通过接口，审批时刻该申请提交人的管辖组织范围仍然允许该操作，且业务规则校验（如编码唯一性）通过
-- **THEN** 系统创建对应的业务记录，操作日志记录操作人为提交人，该申请状态变为"已通过"并回填 `resultTargetId`
+#### Scenario: 审批通过创建类申请后执行创建
+- **WHEN** LEGACY_SYNC 创建类申请最终批准且提交人范围与业务校验通过
+- **THEN** 同步创建业务记录、操作日志归属提交人，申请已通过并回填 resultTargetId
 
-#### Scenario: 最终节点审批通过时业务规则校验失败，申请保持待审批
-- **WHEN** 审批人对一条 `bizType=ORG`、`operationType=CREATE` 的待审批申请在最终审批节点调用审批通过接口，此时申请携带的组织编码已经被另一条已审批通过的申请占用
-- **THEN** 系统拒绝本次审批操作，返回业务错误，该申请状态保持"待审批"，不创建任何组织记录
+#### Scenario: 审批通过时业务规则校验失败，申请保持待审批
+- **WHEN** LEGACY_SYNC 组织创建申请最终批准时组织编码已被占用
+- **THEN** 返回业务错误，申请保持待审批且不创建组织
 
 #### Scenario: 审批通过时提交人的管辖组织范围已收紧导致失败
-- **WHEN** 某条申请提交时提交人的管辖组织范围允许操作目标组织，提交后、最终节点审批前提交人的管辖组织范围被调整为不再包含该组织，审批人在最终节点调用审批通过接口
-- **THEN** 系统拒绝本次审批操作，返回业务错误，不执行创建/更新等操作，该申请状态保持"待审批"
+- **WHEN** LEGACY_SYNC 申请最终批准时提交人已无目标组织管辖范围
+- **THEN** 审批失败且申请保持待审批，不执行业务变更
 
 #### Scenario: 更新用户类申请审批通过后同步执行任职记录整体更新
-- **WHEN** 审批人对一条 `bizType=USER`、`operationType=UPDATE` 且 `requestPayload` 携带完整 `positions` 数组的申请在最终审批节点调用审批通过接口
-- **THEN** 系统按用户模块既有的任职记录整体更新（diff 同步）规则执行，新增/更新/物理删除对应的任职记录，行为与直接调用 `PUT /api/users/{id}` 一致
+- **WHEN** LEGACY_SYNC 用户更新申请携带完整 positions 并通过最终审批
+- **THEN** 按既有用户更新规则同步新增、更新、删除任职记录，与直接调用用户更新接口一致
 
 #### Scenario: 无审批权限的用户调用审批通过接口被拒绝
-- **WHEN** 不拥有 `ApprovalManagement:request:approve` 权限点的用户调用审批通过接口
-- **THEN** 系统拒绝该次调用，返回无权限错误，该申请状态不变
+- **WHEN** 用户无审批权限或不具备当前任务资格
+- **THEN** 请求被拒绝且申请与任务状态不变
 
 #### Scenario: 拥有审批权限但不是当前节点处理人被拒绝
 - **WHEN** 拥有 `ApprovalManagement:request:approve` 权限点的用户，对一条当前处于第一级审批节点、但该用户既不是该节点指定处理人也不在候选人范围内的申请调用审批通过接口
 - **THEN** 系统拒绝该次调用，返回无权限错误，该申请状态与所处节点不变
+
+#### Scenario: 新模式业务校验失败
+- **WHEN** RELIABLE_ASYNC 最终审批通过后执行器发现编码冲突或提交人范围收紧
+- **THEN** 审批保持已通过，执行标记 FAILED_MANUAL，正式数据不变，页面展示失败原因与处理入口
+
+#### Scenario: 新模式异步更新用户及任职
+- **WHEN** RELIABLE_ASYNC 用户更新申请最终通过且执行校验成功
+- **THEN** 用户及完整 positions 更新在同一业务事务生效，成功结果与消费标记一起提交
+
+> 该场景当前只能通过测试手工构造 `RELIABLE_ASYNC` 数据并手动触发 Outbox 事件消费来验证执行适配器本身的正确性，无法通过真实提交审批的生产 API 端到端触发（见上文"当前实现状态"）。
 
 ### Requirement: 审批拒绝
 系统 SHALL 提供审批拒绝接口，仅 `ApprovalManagement:request:approve` 权限点持有者，且同时是该申请当前所处审批节点解析出的指定处理人或候选人时才允许调用，且必须携带非空的拒绝意见。无论申请当前处于第几级审批节点，审批拒绝时系统 SHALL NOT 执行该 `bizType` 对应的创建/更新/状态切换/删除逻辑，业务数据保持不变；系统 SHALL 将该申请状态置为"已拒绝"，记录拒绝人、拒绝时间与拒绝意见，并终止该申请关联的 Flowable 流程实例（不再等待其余审批级别）。
@@ -180,3 +196,22 @@
 #### Scenario: 开关关闭时提交新增组织后直接展示新数据
 - **WHEN** 组织的审批开关为关闭状态，用户在组织管理页面提交新增组织表单
 - **THEN** 页面展示创建成功提示，并直接展示新创建的组织数据，行为与本 change 之前一致
+
+### Requirement: 双状态展示与模式兼容
+系统 SHALL 为申请返回 executionMode、approvalStatus、executionStatus、可见失败信息与 resultTargetId。前端 SHALL 区分审批中、审批通过待生效、已生效和执行失败；旧申请不因新绑定切换而改变语义。审批开关关闭后的直接生效行为 SHALL 保持不变。按申请 ID 审批且存在多个可操作任务时 SHALL 要求明确 taskId，不能任取任务。
+
+> **当前实现状态**：后端字段（executionMode/approvalStatus/executionStatus/resultTargetId）已随申请落库返回；"前端 SHALL 区分…四种状态"这部分属于前端设计器/待办体验范围，本 change 未实现，留待后续 change。另见"审批通过后执行既有业务逻辑"需求中关于 `RELIABLE_ASYNC` 尚无生产入口的说明。
+
+#### Scenario: 同意后尚未生效
+- **WHEN** 新模式最终审批已通过但执行事件尚未消费
+- **THEN** 页面显示审批通过待生效，不显示业务创建成功
+
+#### Scenario: 切换绑定不改变存量
+- **WHEN** 绑定从 LEGACY_SYNC 切到 RELIABLE_ASYNC
+- **THEN** 已发起申请仍按原模式执行，新申请采用新模式
+
+> 由于 `resolveForStart` 当前拒绝 `RELIABLE_ASYNC` 绑定，"切到 RELIABLE_ASYNC"这一步在生产环境暂不可执行，该场景目前只在单元/集成测试层面验证。
+
+#### Scenario: 多任务消歧
+- **WHEN** 同一审批人拥有某申请的多个并行待办且请求未指定 taskId
+- **THEN** 返回任务歧义错误，要求选择明确任务

@@ -1,7 +1,9 @@
 ## MODIFIED Requirements
 
 ### Requirement: 审批通过后执行既有业务逻辑
-系统 SHALL 提供审批通过接口，仅 `ApprovalManagement:request:approve` 权限点持有者且具备当前任务资格的用户可调用。系统 SHALL 在申请发起时冻结 executionMode；历史和未启用新模式的申请使用 LEGACY_SYNC，新绑定可显式选择 RELIABLE_ASYNC。非最终节点审批 SHALL 只推进流程，不执行正式主数据变更。
+系统 SHALL 提供审批通过接口，仅 `ApprovalManagement:request:approve` 权限点持有者且具备当前任务资格的用户可调用。系统 SHALL 在申请发起时冻结 executionMode；历史和未启用新模式的申请使用 LEGACY_SYNC。非最终节点审批 SHALL 只推进流程，不执行正式主数据变更。
+
+> **当前实现状态**：`RELIABLE_ASYNC` 的 Outbox 生产/消费基础设施与 ORG/USER 两类业务执行适配器已实现（详见本 change tasks.md 7.1-7.3），但 `ProcessBindingResolutionService.resolveForStart` 当前对任何 `RELIABLE_ASYNC` 绑定一律拒绝并提示"可靠异步执行尚未实现"，因此生产环境目前**没有任何入口**能让一次真实的审批提交真正走上 `RELIABLE_ASYNC` 路径；"新绑定可显式选择 RELIABLE_ASYNC"这句仅描述目标形态，尚未生效。POSITION/APP 两类业务的执行适配器也尚未实现。放开该入口、补齐 POSITION/APP 适配器是后续 change 的工作。
 
 LEGACY_SYNC 最终审批通过时，系统 SHALL 以该申请的**提交人**身份（而非当前调用审批接口的审批人身份）重新执行一次管辖组织范围校验，通过后调用该 `bizType` 对应模块既有的创建/更新/启用/停用/删除方法（`request_payload` 反序列化为该方法的请求参数），复用全部业务规则校验与操作日志记录；操作日志中操作人 SHALL 为提交人。业务校验失败时审批操作 SHALL 返回失败，申请保持待审批，不自动拒绝且不修改正式业务记录。成功后申请 SHALL 为已通过，记录审批人与时间，CREATE回填resultTargetId，并完成关联Flowable任务。
 
@@ -35,10 +37,14 @@ RELIABLE_ASYNC 最终审批 SHALL 同事务完成引擎推进、审批通过状�
 - **WHEN** RELIABLE_ASYNC用户更新申请最终通过且执行校验成功
 - **THEN** 用户及完整positions更新在同一业务事务生效，成功结果与消费标记一起提交
 
+> 该场景当前只能通过测试手工构造 `RELIABLE_ASYNC` 数据并手动触发 Outbox 事件消费来验证执行适配器本身的正确性，无法通过真实提交审批的生产 API 端到端触发（见上文"当前实现状态"）。
+
 ## ADDED Requirements
 
 ### Requirement: 双状态展示与模式兼容
 系统 SHALL 为申请返回executionMode、approvalStatus、executionStatus、可见失败信息与resultTargetId。前端 SHALL 区分审批中、审批通过待生效、已生效和执行失败；旧申请不因新绑定切换而改变语义。审批开关关闭后的直接生效行为 SHALL 保持不变。按申请ID审批且存在多个可操作任务时 SHALL 要求明确taskId，不能任取任务。
+
+> **当前实现状态**：后端字段（executionMode/approvalStatus/executionStatus/resultTargetId）已随申请落库返回；"前端 SHALL 区分…四种状态"这部分属于第8节前端设计器/待办体验范围，本 change 未实现，留待后续 change。另见上文"审批通过后执行既有业务逻辑"里关于 `RELIABLE_ASYNC` 尚无生产入口的说明。
 
 #### Scenario: 同意后尚未生效
 - **WHEN** 新模式最终审批已通过但执行事件尚未消费
@@ -47,6 +53,8 @@ RELIABLE_ASYNC 最终审批 SHALL 同事务完成引擎推进、审批通过状�
 #### Scenario: 切换绑定不改变存量
 - **WHEN** 绑定从LEGACY_SYNC切到RELIABLE_ASYNC
 - **THEN** 已发起申请仍按原模式执行，新申请采用新模式
+
+> 由于 `resolveForStart` 当前拒绝 `RELIABLE_ASYNC` 绑定，"切到RELIABLE_ASYNC"这一步在生产环境暂不可执行，该场景目前只在单元/集成测试层面验证。
 
 #### Scenario: 多任务消歧
 - **WHEN** 同一审批人拥有某申请的多个并行待办且请求未指定taskId
