@@ -1,21 +1,16 @@
--- ----------------------------------------------------------------------------
--- RBAC 权限管理系统 - 数据库基线脚本（Flyway 迁移版本 V1）
--- 本文件由原 V1~V14 共 14 个迁移文件合并而来（openspec change
--- consolidate-flyway-migrations-v5），代表这些迁移按顺序执行完毕后的最终数据库状态
--- （全部 46 张表的建表语句 +
--- 全部种子数据），不再保留中间过程中的 ALTER/UPDATE/DROP 步骤与已被后续存量数据
--- 回填但对全新数据库无意义的 INSERT...SELECT。整体按"先建表、后插入有依赖关系的
--- 种子数据"的顺序线性组织。
--- 数据库需提前手动创建，例如：
---   CREATE DATABASE rbac_demo DEFAULT CHARACTER SET utf8mb4;
--- 兼容数据库：MySQL 5.7 / MySQL 8.0。
--- 注意：本文件只适用于全新空 schema。已经执行过旧 V1~V14 的数据库不得仅删除
--- flyway_schema_history 后重跑本文件；需要保留数据的环境必须继续使用与既有历史匹配的
--- 旧迁移集合，需要重建的开发/测试环境必须完整删除并重新创建 schema。
--- ----------------------------------------------------------------------------
-
 -- ============================================================================
--- 第一部分：建表语句（共 46 张表）
+-- RBAC 权限管理系统数据库初始化脚本
+--
+-- 本文件由原 V1–V14、V18–V20 共 17 个实际存在的迁移脚本合并而成（V15–V17 不存在），
+-- 代表这些迁移按数值版本顺序执行完毕后的最终数据库状态：73 张业务表及完整种子数据。
+-- 表结构直接表达最终字段、默认值、可空性、索引和约束，不保留历史 ALTER 或回填过程。
+--
+-- 适用范围：仅限全新、空的 schema；同一脚本兼容 MySQL 5.7 与 MySQL 8.0。
+-- 已执行旧迁移链且需要保留数据的数据库不得直接替换本文件，不得仅删除
+-- flyway_schema_history 或执行 repair 后强制重跑；应继续使用与旧校验和匹配的迁移集合，
+-- 或另行设计并验证数据迁移方案。可丢弃数据的开发/测试环境必须完整重建 schema。
+-- ============================================================================
+-- 第一部分：建表语句（共 73 张表）
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -272,6 +267,7 @@ CREATE TABLE IF NOT EXISTS `tab_app_auth_config` (
     `app_id`            BIGINT      NOT NULL COMMENT '所属应用 id，关联 tab_app.id，一对一唯一',
     `auth_protocol`     VARCHAR(16) NOT NULL DEFAULT 'NONE' COMMENT '单点登录协议类型：NONE/CAS/OAUTH2',
     `service_patterns`  TEXT                 DEFAULT NULL COMMENT '回跳地址 ANT 匹配规则列表（JSON 字符串数组），CAS/OAuth2.0 等协议共用，auth_protocol=NONE 时为空',
+    `login_methods` VARCHAR(500) NOT NULL DEFAULT '["PASSWORD"]' COMMENT '允许的登录认证方式，JSON 字符串数组（PASSWORD/SMS/QRCODE 子集，PASSWORD 恒定包含）',
     `logout_notify_url` VARCHAR(255)         DEFAULT NULL COMMENT '登出通知回调地址，POST 回调该地址通知应用登出事件，未配置时登出不通知该应用',
     `create_by`         VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
     `create_time`       DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -709,6 +705,7 @@ CREATE TABLE IF NOT EXISTS `tab_admin` (
     `name`        VARCHAR(64)  NOT NULL COMMENT '管理员名称',
     `code`        VARCHAR(64)  NOT NULL COMMENT '管理员编码',
     `user_id`     BIGINT       NOT NULL COMMENT '关联用户 id，关联 tab_user.id，不建物理外键',
+    `auto_created_role_id` BIGINT NULL COMMENT '若非空，表示该管理员是通过"按角色批量设置管理员"为这个角色 id 自动创建的',
     `show_order`  INT          NOT NULL DEFAULT 0 COMMENT '显示序号，值越大越靠前',
     `remark`      VARCHAR(255)          DEFAULT NULL COMMENT '备注',
     `status`      INT          NOT NULL DEFAULT 2000 COMMENT '状态：2000=启用，3000=停用，-1000=已删除（逻辑删除）',
@@ -798,6 +795,7 @@ CREATE TABLE IF NOT EXISTS `tab_login_log`
     `login_browser`    VARCHAR(32)  NULL COMMENT '登录浏览器，从 User-Agent 解析，解析不出时为空',
     `login_user_agent` VARCHAR(512) NULL COMMENT '原始 User-Agent 请求头，取不到时为空',
     `session_id`       VARCHAR(64)  NULL COMMENT '本次登录建立的 SSO 会话标识（会话令牌 SHA-256 摘要），仅 SSO 登录成功时填充，管理端口令登录/登录失败为 NULL',
+    `login_method` VARCHAR(20) NOT NULL DEFAULT 'PASSWORD' COMMENT '登录方式：PASSWORD=口令，SMS=短信验证码，QRCODE=扫码',
     `create_by`        VARCHAR(64)  NOT NULL COMMENT '创建人，即本次登录尝试提交的账号，为空时存 unknown',
     `create_time`      DATETIME     NOT NULL COMMENT '创建时间，即本次登录尝试发生时间',
     `update_by`        VARCHAR(64)  NOT NULL COMMENT '更新人，恒等于 create_by（本表只追加不更新）',
@@ -921,6 +919,15 @@ CREATE TABLE IF NOT EXISTS `tab_approval_request` (
     `opinion`                       VARCHAR(500) NULL COMMENT '审批意见，拒绝时必填，通过时可选',
     `flowable_process_instance_id`  VARCHAR(64)  NULL COMMENT '关联的 Flowable 流程实例 id',
     `flowable_task_id`              VARCHAR(64)  NULL COMMENT '关联的 Flowable 用户任务 id',
+    `process_instance_id` BIGINT NULL COMMENT '关联 tab_wf_process_instance.id，驱动多级审批的流程实例',
+    `current_node_name` VARCHAR(128) NULL COMMENT '当前所在审批节点名称，流程结束后置空',
+    `execution_mode` VARCHAR(24) NOT NULL DEFAULT 'LEGACY_SYNC' COMMENT '执行模式：LEGACY_SYNC 同步执行（历史行为）/RELIABLE_ASYNC 审批通过后经 Outbox 可靠异步执行',
+    `execution_status` VARCHAR(24) NULL COMMENT '业务执行状态：NOT_READY/PENDING/EXECUTING/SUCCEEDED/FAILED_RETRYABLE/FAILED_MANUAL，仅 RELIABLE_ASYNC 使用',
+    `base_revision` VARCHAR(128) NULL COMMENT '发起时目标业务数据的版本/哈希快照，执行前重新校验是否已变化',
+    `previous_request_id` BIGINT NULL COMMENT '因路由或 payload 变更而重新发起时关联的前一条申请 id',
+    `form_version_id`  BIGINT   NULL COMMENT '提交时命中的表单版本 id，关联 tab_wf_form_version.id，历史申请为空',
+    `before_snapshot`  LONGTEXT NULL COMMENT '提交时冻结的变更前业务数据快照（JSON），仅 UPDATE/ENABLE/DISABLE/DELETE 类操作有值',
+    `after_snapshot`   LONGTEXT NULL COMMENT '提交时冻结的变更后业务数据快照（JSON），即 request_payload 的等价只读副本，审批过程中不可再变更',
     `create_by`                     VARCHAR(64)           DEFAULT NULL COMMENT '创建人，即提交人',
     `create_time`                   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间，即提交时间',
     `update_by`                     VARCHAR(64)           DEFAULT NULL COMMENT '更新人，即最后一次处理人',
@@ -1093,6 +1100,525 @@ CREATE TABLE IF NOT EXISTS `tab_upstream_sync_record_detail`
     KEY `idx_tab_upstream_sync_record_detail_source` (`source_id`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
   COMMENT = '上游数据同步执行记录明细表，记录每行处理的原始数据与结果，成功/失败均记录';
+
+-- ----------------------------------------------------------------------------
+-- V2 合并的最终表结构
+-- ----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS `tab_chat_conversation`
+(
+    `id`                BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `conversation_type` INT         NOT NULL COMMENT '会话类型：1=单聊，2=群聊',
+    `name`              VARCHAR(128) NULL COMMENT '群聊名称，单聊为空（前端按对方展示名动态显示）',
+    `next_seq`          BIGINT      NOT NULL DEFAULT 1 COMMENT '下一个可分配的会话内消息序号，事务内 SELECT ... FOR UPDATE 取号后自增',
+    `status`            INT         NOT NULL DEFAULT 2000 COMMENT '状态：2000=正常，3000=已解散（本阶段未提供解散入口，预留）',
+    `create_by`         VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`       DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`         VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`       DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_tab_chat_conversation_type` (`conversation_type`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci
+  COMMENT = '聊天会话表（单聊/群聊）';
+
+CREATE TABLE IF NOT EXISTS `tab_chat_conversation_member`
+(
+    `id`              BIGINT   NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `conversation_id` BIGINT   NOT NULL COMMENT '所属会话 id，关联 tab_chat_conversation.id',
+    `user_id`         BIGINT   NOT NULL COMMENT '成员用户 id，关联 tab_user.id',
+    `role`            INT      NOT NULL DEFAULT 2 COMMENT '成员角色：1=群主，2=普通成员（单聊两条记录均为 2）',
+    `joined_time`     DATETIME NOT NULL COMMENT '加入时间',
+    `status`          INT      NOT NULL DEFAULT 2000 COMMENT '状态：2000=在会话中，3000=已退出/被移出',
+    `create_by`       VARCHAR(64)       DEFAULT NULL COMMENT '创建人',
+    `create_time`     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`       VARCHAR(64)       DEFAULT NULL COMMENT '更新人',
+    `update_time`     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_chat_conversation_member_conv_user` (`conversation_id`, `user_id`),
+    KEY `idx_tab_chat_conversation_member_user_id` (`user_id`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci
+  COMMENT = '聊天会话成员表（含群成员）';
+
+CREATE TABLE IF NOT EXISTS `tab_chat_message`
+(
+    `id`               BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `msg_id`           VARCHAR(64) NOT NULL COMMENT '客户端生成的消息幂等 id，唯一索引，跨重启去重的权威依据',
+    `conversation_id`  BIGINT      NOT NULL COMMENT '所属会话 id，关联 tab_chat_conversation.id',
+    `conversation_seq` BIGINT      NOT NULL COMMENT '会话内严格递增、不重复的消息序号',
+    `sender_id`        BIGINT      NOT NULL COMMENT '发送者用户 id，关联 tab_user.id',
+    `msg_type`         INT         NOT NULL DEFAULT 1 COMMENT '消息内容类型：1=文本（本阶段仅支持文本，其余类型预留占位）',
+    `content`          TEXT        NOT NULL COMMENT '消息内容（敏感词过滤/替换后落库，本阶段服务端可见明文，不做信封加密）',
+    `filtered`         TINYINT     NOT NULL DEFAULT 0 COMMENT '是否命中过敏感词：0=否，1=是',
+    `send_time`        DATETIME    NOT NULL COMMENT '发送时间',
+    `create_by`        VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`        VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_chat_message_msg_id` (`msg_id`),
+    KEY `idx_tab_chat_message_conv_seq` (`conversation_id`, `conversation_seq`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci
+  COMMENT = '聊天消息记录表';
+
+CREATE TABLE IF NOT EXISTS `tab_chat_message_offline`
+(
+    `id`           BIGINT   NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `message_id`   BIGINT   NOT NULL COMMENT '关联 tab_chat_message.id',
+    `receiver_id`  BIGINT   NOT NULL COMMENT '接收者用户 id，关联 tab_user.id',
+    `delivered`    TINYINT  NOT NULL DEFAULT 0 COMMENT '是否已补偿推送：0=否，1=是',
+    `create_by`    VARCHAR(64)       DEFAULT NULL COMMENT '创建人',
+    `create_time`  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`    VARCHAR(64)       DEFAULT NULL COMMENT '更新人',
+    `update_time`  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_tab_chat_message_offline_receiver` (`receiver_id`, `delivered`),
+    KEY `idx_tab_chat_message_offline_message_id` (`message_id`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci
+  COMMENT = '离线消息队列表，用户重新上线并完成认证后按序补偿推送';
+
+CREATE TABLE IF NOT EXISTS `tab_chat_sensitive_word`
+(
+    `id`           BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `word`         VARCHAR(64) NOT NULL COMMENT '敏感词词条',
+    `status`       INT         NOT NULL DEFAULT 2000 COMMENT '状态：2000=启用，3000=停用（删除为物理删除，不使用逻辑删除状态）',
+    `create_by`    VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`    VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_chat_sensitive_word_word` (`word`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci
+  COMMENT = '聊天敏感词库表，服务启动时加载进内存构建 AC 自动机，变更后触发内存重建';
+
+-- ----------------------------------------------------------------------------
+-- V4 合并的最终表结构
+-- ----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS `tab_user_role_rule` (
+    `id`             BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `role_id`        BIGINT       NOT NULL COMMENT '目标角色 id，关联 tab_role.id，不建物理外键',
+    `name`           VARCHAR(128) NOT NULL COMMENT '规则名称，便于同一角色下管理多条规则',
+    `remark`         VARCHAR(255)          DEFAULT NULL COMMENT '备注',
+    `last_exec_time` DATETIME     NULL COMMENT '最近一次执行时间，从未执行过为空',
+    `last_exec_by`   VARCHAR(64)  NULL COMMENT '最近一次执行人（人工保存触发时为操作人，事件自动触发时为原始事件操作人）',
+    `create_by`      VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
+    `create_time`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`      VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
+    `update_time`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_tab_user_role_rule_role_id` (`role_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '用户角色规则表：组织范围/用户属性条件持久化，事件驱动自动重算';
+
+CREATE TABLE IF NOT EXISTS `tab_user_role_rule_org_scope` (
+    `id`               BIGINT     NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `rule_id`          BIGINT     NOT NULL COMMENT '所属规则 id，关联 tab_user_role_rule.id，不建物理外键',
+    `org_id`           BIGINT     NOT NULL COMMENT '组织 id，关联 tab_org.id，不建物理外键',
+    `include_children` TINYINT    NOT NULL DEFAULT 0 COMMENT '是否包含递归子组织：0=否，1=是',
+    `create_by`        VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`      DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`        VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`      DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_user_role_rule_org_scope` (`rule_id`, `org_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '用户角色规则组织范围条件表';
+
+CREATE TABLE IF NOT EXISTS `tab_user_role_rule_user_attr` (
+    `id`                BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `rule_id`           BIGINT       NOT NULL COMMENT '所属规则 id，关联 tab_user_role_rule.id，不建物理外键',
+    `metadata_field_id` BIGINT       NOT NULL COMMENT '关联的元数据字段 id，biz_type 为 USER 或 POSITION，不建物理外键',
+    `operator`          VARCHAR(8)   NOT NULL COMMENT '运算符：EQ=等于，NE=不等于，IN=属于多值',
+    `attr_value`        VARCHAR(255) NOT NULL COMMENT '比较值，EQ/NE 为单个值，IN 为逗号分隔的多个值',
+    `create_by`         VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`         VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_user_role_rule_user_attr` (`rule_id`, `metadata_field_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '用户角色规则用户属性条件表';
+
+CREATE TABLE IF NOT EXISTS `tab_user_role_rule_grant` (
+    `id`          BIGINT   NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `rule_id`     BIGINT   NOT NULL COMMENT '产生该关联的规则 id，关联 tab_user_role_rule.id，不建物理外键',
+    `user_id`     BIGINT   NOT NULL COMMENT '用户 id，关联 tab_user.id，不建物理外键',
+    `role_id`     BIGINT   NOT NULL COMMENT '角色 id，冗余存储自 tab_user_role_rule.role_id，避免查询时反查规则表',
+    `create_by`   VARCHAR(64)        DEFAULT NULL COMMENT '创建人',
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`   VARCHAR(64)        DEFAULT NULL COMMENT '更新人',
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_user_role_rule_grant` (`rule_id`, `user_id`),
+    KEY `idx_tab_user_role_rule_grant_role_user` (`role_id`, `user_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '用户角色规则计算结果表，按 rule_id 整体重建';
+
+-- ----------------------------------------------------------------------------
+-- V7 合并的最终表结构
+-- ----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS `tab_wf_process_model` (
+    `id`                    BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `process_code`          VARCHAR(64)  NOT NULL COMMENT '业务侧流程编码，唯一，如 MASTER_DATA_APPROVAL',
+    `process_name`          VARCHAR(128) NOT NULL COMMENT '流程名称',
+    `model_json`            TEXT         NULL COMMENT '当前草稿 DSL（JSON），status 为 PUBLISHED/DISABLED 时仍可继续编辑覆盖',
+    `draft_revision` BIGINT NOT NULL DEFAULT 1 COMMENT '草稿修订号，乐观锁，每次保存草稿自增',
+    `draft_status` VARCHAR(24) NOT NULL DEFAULT 'EDITING' COMMENT '草稿状态：EDITING/IN_REVIEW/APPROVED_FOR_RELEASE',
+    `status`                VARCHAR(16)  NOT NULL DEFAULT 'DRAFT' COMMENT '状态：DRAFT/PUBLISHED/DISABLED',
+    `current_definition_id` BIGINT       NULL COMMENT '当前生效的已发布版本，关联 tab_wf_process_definition.id',
+    `enabled` TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否接受新发起，与草稿编辑/发布态解耦',
+    `create_by`             VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
+    `create_time`           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`             VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
+    `update_time`           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_wf_process_model_process_code` (`process_code`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '流程模型主数据表';
+
+CREATE TABLE IF NOT EXISTS `tab_wf_process_definition` (
+    `id`                      BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `process_model_id`        BIGINT       NOT NULL COMMENT '所属流程模型 id，关联 tab_wf_process_model.id',
+    `process_code`            VARCHAR(64)  NOT NULL COMMENT '业务侧流程编码，冗余自流程模型',
+    `version`                 INT          NOT NULL COMMENT '同一流程模型下的版本号，自增',
+    `schema_version` INT NOT NULL DEFAULT 1 COMMENT 'DSL schemaVersion，历史 v1 定义默认 1',
+    `compiler_version` VARCHAR(32) NULL COMMENT '编译该版本时使用的编译器版本号',
+    `flowable_definition_key` VARCHAR(128) NOT NULL COMMENT 'Flowable 流程定义 key（BPMN process 的 id）',
+    `flowable_definition_id`  VARCHAR(64)  NULL COMMENT 'Flowable 部署后生成的流程定义 id，部署完成前为空',
+    `model_json_snapshot`     TEXT         NULL COMMENT '发布时刻的 DSL 快照，只读',
+    `model_digest` VARCHAR(128) NULL COMMENT 'DSL 快照摘要（如 SHA-256），供试运行报告/审核记录比对是否失效',
+    `xml_snapshot` LONGTEXT NULL COMMENT '编译产物 BPMN XML 快照，只读导出用',
+    `xml_digest` VARCHAR(128) NULL COMMENT 'BPMN XML 快照摘要',
+    `node_mapping_json` LONGTEXT NULL COMMENT '节点 id 到 BPMN activityId 的映射快照（JSON）',
+    `rule_snapshot_json` LONGTEXT NULL COMMENT '发布时刻节点审批人规则的完整快照（JSON），审计与试运行报告比对用',
+    `form_version_id` BIGINT NULL COMMENT '绑定的表单版本 id，关联 tab_wf_form_version.id',
+    `status`                  VARCHAR(16)  NOT NULL DEFAULT 'PUBLISHED' COMMENT '状态：PUBLISHED/DISABLED',
+    `published_by`            VARCHAR(64)  NULL COMMENT '发布人',
+    `published_time`          DATETIME     NULL COMMENT '发布时间',
+    `create_by`               VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
+    `create_time`             DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`               VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
+    `update_time`             DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_wf_process_definition_model_version` (`process_model_id`, `version`),
+    KEY `idx_tab_wf_process_definition_key` (`flowable_definition_key`),
+    KEY `idx_tab_wf_process_definition_flowable_id` (`flowable_definition_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '流程定义（不可变发布版本快照）表';
+
+CREATE TABLE IF NOT EXISTS `tab_wf_node_assignee_rule` (
+    `id`                      BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `process_definition_id`   BIGINT      NOT NULL COMMENT '所属流程定义版本 id，关联 tab_wf_process_definition.id',
+    `node_id`                 VARCHAR(64) NOT NULL COMMENT 'BPMN 用户任务节点 id',
+    `node_name`               VARCHAR(128) NOT NULL COMMENT '节点名称',
+    `node_order`              INT         NOT NULL DEFAULT 0 COMMENT '节点顺序，用于展示"第几级审批"',
+    `assignee_type`           VARCHAR(32) NOT NULL COMMENT '审批人来源类型：USER/ROLE/POSITION/ORG_LEADER/APPLICANT_DEPT_LEADER/APPLICANT_DEPT_PARENT_LEADER/INITIATOR/PREVIOUS_APPROVER',
+    `assignee_value`          VARCHAR(255) NULL COMMENT '审批人来源取值，按 assignee_type 解释',
+    `approval_mode`           VARCHAR(16) NOT NULL DEFAULT 'SINGLE' COMMENT '审批模式：SINGLE/AND/OR/PERCENT',
+    `approval_percent`        INT         NULL COMMENT '会签通过比例（0~100 的整数），仅 approval_mode=PERCENT 使用',
+    `reject_policy` VARCHAR(24) NULL COMMENT '会签反对票处理策略：VETO（一票否决）/THRESHOLD（阈值制），仅会签节点使用，DSL v2 专用，v1 编译器与单人/候选组节点恒为 NULL',
+    `empty_assignee_strategy` VARCHAR(24) NOT NULL DEFAULT 'TO_WORKFLOW_ADMIN' COMMENT '空审批人策略：TO_WORKFLOW_ADMIN/AUTO_SKIP/REJECT',
+    `fallback_role_code` VARCHAR(64) NULL COMMENT '兜底角色编码，仅 empty_assignee_strategy=FALLBACK_ROLE 时使用',
+    `field_permissions_json` LONGTEXT     NULL COMMENT '节点字段权限快照（JSON：字段标识 -> HIDDEN/READ/WRITE_REQUIRED/WRITE_OPTIONAL），DSL v2 专用，v1 恒为空',
+    `assignee_org_source`    VARCHAR(32)  NULL COMMENT '组织负责人类来源解析组织的方式：APPLICANT_SNAPSHOT（默认，取申请人快照组织）/FIXED_ORG（取 target_org_id 指定的固定组织），仅 ORG_LEADER 类型使用',
+    `target_org_id`          BIGINT       NULL COMMENT 'assignee_org_source=FIXED_ORG 时的固定目标组织 id，关联 tab_org.id',
+    `allow_self_approval`     TINYINT     NOT NULL DEFAULT 0 COMMENT '是否允许审批人为发起人本人（自审）',
+    `allow_transfer`          TINYINT     NOT NULL DEFAULT 0 COMMENT '是否允许转办',
+    `allow_delegate`          TINYINT     NOT NULL DEFAULT 0 COMMENT '是否允许委派',
+    `allow_add_sign`          TINYINT     NOT NULL DEFAULT 0 COMMENT '是否允许加签',
+    `allow_return`            TINYINT     NOT NULL DEFAULT 0 COMMENT '是否允许退回到该节点',
+    `create_by`               VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`             DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`               VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`             DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_wf_node_assignee_rule` (`process_definition_id`, `node_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '节点审批人规则表';
+
+CREATE TABLE IF NOT EXISTS `tab_wf_process_instance` (
+    `id`                     BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `flowable_instance_id`   VARCHAR(64) NULL COMMENT 'Flowable 流程实例 id，创建本行时流程实例可能尚未启动',
+    `process_definition_id`  BIGINT      NOT NULL COMMENT '所属流程定义版本 id，关联 tab_wf_process_definition.id',
+    `binding_id` BIGINT NULL COMMENT '发起时命中的业务绑定 id，关联 tab_wf_process_binding.id',
+    `binding_revision` BIGINT NULL COMMENT '发起时命中的业务绑定修订号快照',
+    `form_version_id` BIGINT NULL COMMENT '发起时使用的表单版本 id 快照',
+    `business_type`          VARCHAR(32) NOT NULL COMMENT '业务对象类型，如 ORG/USER/POSITION/APP',
+    `business_id`            BIGINT      NULL COMMENT '业务对象 id',
+    `title`                  VARCHAR(255) NULL COMMENT '流程标题，供列表展示',
+    `applicant_id`           BIGINT      NOT NULL COMMENT '发起人用户 id',
+    `applicant_org_id`       BIGINT      NULL COMMENT '发起人所属组织 id，发起时快照',
+    `applicant_identity_snapshot` LONGTEXT NULL COMMENT '提交时冻结的申请人身份上下文快照（JSON：组织/岗位/角色等）',
+    `status`                 VARCHAR(16) NOT NULL DEFAULT 'RUNNING' COMMENT '状态：RUNNING/APPROVED/REJECTED/WITHDRAWN/TERMINATED',
+    `outcome` VARCHAR(32) NULL COMMENT '流程正常结束的明确结果，不能从"找不到运行实例"反推',
+    `exception_code` VARCHAR(64) NULL COMMENT '运维阻塞原因码，如 ASSIGNEE_EMPTY/JOB_FAILED，独立于 status，不伪造引擎终态',
+    `current_node_id`        VARCHAR(64) NULL COMMENT '当前所在节点 id，结束后置空',
+    `current_node_name`      VARCHAR(128) NULL COMMENT '当前所在节点名称，结束后置空',
+    `started_time`           DATETIME    NOT NULL COMMENT '启动时间',
+    `finished_time`          DATETIME    NULL COMMENT '结束时间，运行中为空',
+    `revision` BIGINT NOT NULL DEFAULT 1 COMMENT '乐观锁修订号，配合固定锁顺序使用',
+    `create_by`              VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`            DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`              VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`            DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_wf_process_instance_flowable_id` (`flowable_instance_id`),
+    KEY `idx_tab_wf_process_instance_business` (`business_type`, `business_id`),
+    KEY `idx_tab_wf_process_instance_applicant` (`applicant_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '流程实例表';
+
+CREATE TABLE IF NOT EXISTS `tab_wf_approval_task` (
+    `id`                   BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `flowable_task_id`     VARCHAR(64) NOT NULL COMMENT 'Flowable 用户任务 id',
+    `process_instance_id`  BIGINT      NULL COMMENT '所属流程实例 id，关联 tab_wf_process_instance.id',
+    `node_run_id` BIGINT NULL COMMENT '所属节点轮次 id，关联 tab_wf_node_run.id',
+    `node_id`              VARCHAR(64) NOT NULL COMMENT '节点 id',
+    `node_name`            VARCHAR(128) NULL COMMENT '节点名称',
+    `assignee_id`          BIGINT      NULL COMMENT '指定处理人用户 id，候选组任务未认领时为空',
+    `owner_id` BIGINT NULL COMMENT '委派场景下的原处理人（owner），受托人 resolve 后归还给该用户决策',
+    `delegation_status` VARCHAR(24) NULL COMMENT '委派状态：DELEGATED/RESOLVED，非委派场景为空',
+    `candidate_type`       VARCHAR(16) NULL COMMENT '候选人类型：USER/ROLE，会签/候选组场景为空则查明细表',
+    `status`               VARCHAR(16) NOT NULL DEFAULT 'PENDING' COMMENT '状态：PENDING/CLAIMED/COMPLETED/TRANSFERRED/RETURNED',
+    `revision` BIGINT NOT NULL DEFAULT 1 COMMENT '乐观锁修订号',
+    `cancel_reason` VARCHAR(255) NULL COMMENT '任务被取消（MI 提前结束/退回/终止）时的原因说明',
+    `finished_time`        DATETIME    NULL COMMENT '完成时间，未完成为空',
+    `due_time` DATETIME NULL COMMENT '节点操作期限，超时提醒依据，存储 UTC',
+    `create_by`            VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`          DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间，即任务创建时间',
+    `update_by`            VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`          DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_wf_approval_task_flowable_id` (`flowable_task_id`),
+    KEY `idx_tab_wf_approval_task_instance` (`process_instance_id`),
+    KEY `idx_tab_wf_approval_task_assignee` (`assignee_id`, `status`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '审批任务表';
+
+CREATE TABLE IF NOT EXISTS `tab_wf_approval_task_candidate` (
+    `id`               BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `task_id`          BIGINT      NOT NULL COMMENT '所属审批任务 id，关联 tab_wf_approval_task.id',
+    `candidate_type`   VARCHAR(16) NOT NULL COMMENT '候选人类型：USER/ROLE',
+    `candidate_value`  VARCHAR(64) NOT NULL COMMENT '候选人取值：USER 为用户 id 文本，ROLE 为角色编码',
+    `resolve_basis` VARCHAR(255) NULL COMMENT '候选人解析依据说明，供审计与运维排查',
+    `create_by`        VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`        VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_wf_approval_task_candidate` (`task_id`, `candidate_type`, `candidate_value`),
+    KEY `idx_tab_wf_approval_task_candidate_value` (`candidate_type`, `candidate_value`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '审批任务候选人明细表';
+
+CREATE TABLE IF NOT EXISTS `tab_wf_approval_record` (
+    `id`                  BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `process_instance_id` BIGINT      NOT NULL COMMENT '所属流程实例 id，关联 tab_wf_process_instance.id',
+    `task_id`             BIGINT      NULL COMMENT '关联的审批任务 id，SUBMIT/TERMINATE 无关联任务时为空',
+    `node_id`             VARCHAR(64) NULL COMMENT '节点 id，无关联节点时为空',
+    `node_name`           VARCHAR(128) NULL COMMENT '节点名称，无关联节点时为空',
+    `operator_id`         BIGINT      NULL COMMENT '操作人用户 id',
+    `action`              VARCHAR(16) NOT NULL COMMENT '动作类型：SUBMIT/APPROVE/REJECT/RETURN/TRANSFER/DELEGATE/ADD_SIGN/WITHDRAW/TERMINATE',
+    `remark`              VARCHAR(500) NULL COMMENT '处理意见/说明',
+    `from_user_id`        BIGINT      NULL COMMENT '转办/委派场景记录的原处理人用户 id',
+    `to_user_id` BIGINT NULL COMMENT '转办/委派场景记录的新处理人用户 id，其余场景为空',
+    `create_by`           VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`         DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间，即操作发生时间',
+    `update_by`           VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`         DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_tab_wf_approval_record_instance` (`process_instance_id`),
+    KEY `idx_tab_wf_approval_record_task` (`task_id`),
+    KEY `idx_tab_wf_approval_record_operator` (`operator_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '审批轨迹表，只追加不更新不删除';
+
+CREATE TABLE IF NOT EXISTS `tab_wf_operation_request` (
+    `id`            BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `request_key`   VARCHAR(128) NOT NULL COMMENT '幂等键，取自 X-Request-Id 请求头',
+    `task_id`       BIGINT      NULL COMMENT '关联的审批任务 id，部分操作（如撤回）不针对具体任务，可为空',
+    `operator_id`   BIGINT      NULL COMMENT '操作人用户 id',
+    `operation`     VARCHAR(16) NOT NULL COMMENT '操作类型，同 tab_wf_approval_record.action 枚举',
+    `payload_hash` VARCHAR(64) NULL COMMENT '本次请求规范化 payload 的 SHA-256 摘要（十六进制小写），用于判断重复请求是否为真实重试',
+    `result_text`  LONGTEXT    NULL COMMENT '首次执行成功后的返回结果 JSON 快照，命中同 key 同 payload 的重复请求时直接反序列化返回',
+    `status`        VARCHAR(16) NOT NULL DEFAULT 'SUCCESS' COMMENT '执行结果状态：SUCCESS/FAILED',
+    `create_by`     VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`     VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_wf_operation_request_key` (`request_key`),
+    KEY `idx_tab_wf_operation_request_task` (`task_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '操作幂等记录表';
+
+-- ----------------------------------------------------------------------------
+-- V11 合并的最终表结构
+-- ----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS `tab_wf_release_review` (
+    `id`               BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `process_model_id` BIGINT       NOT NULL COMMENT '所属流程模型 id，关联 tab_wf_process_model.id',
+    `draft_revision`   BIGINT       NOT NULL COMMENT '发起审核时的草稿修订号快照',
+    `artifact_digest`  VARCHAR(128) NOT NULL COMMENT '发起审核时的 DSL 产物摘要，草稿再次修改后与最新摘要不一致即视为审核失效',
+    `editor_id`        BIGINT       NOT NULL COMMENT '提交审核的编辑者用户 id',
+    `reviewer_id`      BIGINT       NULL COMMENT '审核者用户 id，做出审核决策后回填，且不能与 editor_id 相同',
+    `review_status`    VARCHAR(24)  NOT NULL DEFAULT 'PENDING' COMMENT '审核状态：PENDING/APPROVED/REJECTED',
+    `review_opinion`   VARCHAR(500) NULL COMMENT '审核意见',
+    `test_report_ref`  VARCHAR(128) NULL COMMENT '关联的测试环境试运行报告引用 id',
+    `submit_time`      DATETIME     NOT NULL COMMENT '提交审核时间',
+    `review_time`      DATETIME     NULL COMMENT '审核决策时间',
+    `create_by`        VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
+    `create_time`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`        VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
+    `update_time`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_tab_wf_release_review_model_revision` (`process_model_id`, `draft_revision`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '流程模型发布审核记录表，历史保留不覆盖';
+
+CREATE TABLE IF NOT EXISTS `tab_wf_process_binding` (
+    `id`              BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `biz_type`        VARCHAR(32) NOT NULL COMMENT '业务对象类型：ORG/USER/POSITION/APP',
+    `operation_type`  VARCHAR(16) NOT NULL COMMENT '操作类型：CREATE/UPDATE/ENABLE/DISABLE/DELETE',
+    `scope_type`      VARCHAR(16) NOT NULL DEFAULT 'GLOBAL' COMMENT '绑定范围类型：ORG（精确组织）/GLOBAL（全局兜底）',
+    `scope_id`        BIGINT      NOT NULL DEFAULT 0 COMMENT '范围内组织 id，scope_type=GLOBAL 时固定为 0',
+    `definition_id`   BIGINT      NOT NULL COMMENT '绑定的流程定义 id，关联 tab_wf_process_definition.id，显式版本，不隐式取最新',
+    `execution_mode`  VARCHAR(24) NOT NULL DEFAULT 'LEGACY_SYNC' COMMENT '该绑定下发起申请使用的执行模式：LEGACY_SYNC/RELIABLE_ASYNC',
+    `revision`        BIGINT      NOT NULL DEFAULT 1 COMMENT '乐观锁修订号，切换绑定版本时自增',
+    `enabled`         TINYINT(1)  NOT NULL DEFAULT 1 COMMENT '是否启用，禁用后该维度拒绝新发起，与唯一性约束无关（保留行以便重新启用）',
+    `create_by`       VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`       VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_wf_process_binding_dimension` (`biz_type`, `operation_type`, `scope_type`, `scope_id`),
+    KEY `idx_tab_wf_process_binding_definition` (`definition_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '业务绑定表：biz_type+operation_type 精确定位到显式 definitionId';
+
+CREATE TABLE IF NOT EXISTS `tab_wf_form_version` (
+    `id`             BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `form_code`      VARCHAR(64)  NOT NULL COMMENT '表单编码，通常对应 biz_type',
+    `form_version`   INT          NOT NULL COMMENT '表单版本号，同 form_code 下自增',
+    `schema_text`    LONGTEXT     NOT NULL COMMENT '表单字段 schema 快照（JSON），来自动态字段元数据，只读不可变',
+    `schema_digest`  VARCHAR(128) NOT NULL COMMENT 'schema_text 摘要，供快速比对是否变化',
+    `create_by`      VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
+    `create_time`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`      VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
+    `update_time`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_wf_form_version` (`form_code`, `form_version`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '不可变表单版本快照表';
+
+CREATE TABLE IF NOT EXISTS `tab_wf_node_run` (
+    `id`             BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `instance_id`    BIGINT      NOT NULL COMMENT '所属流程实例 id，关联 tab_wf_process_instance.id',
+    `node_id`        VARCHAR(64) NOT NULL COMMENT '节点 id',
+    `execution_id`   VARCHAR(64) NULL COMMENT 'Flowable 执行 execution id，MI 场景对应 miBody execution',
+    `round_no`       INT         NOT NULL DEFAULT 1 COMMENT '同一节点第几次激活（退回重建轮次时递增）',
+    `total_count`    INT         NOT NULL DEFAULT 0 COMMENT '总票数 N',
+    `agree_count`    INT         NOT NULL DEFAULT 0 COMMENT '同意票数 A',
+    `reject_count`   INT         NOT NULL DEFAULT 0 COMMENT '反对/驳回票数 R',
+    `run_status`     VARCHAR(24) NOT NULL DEFAULT 'RUNNING' COMMENT '轮次状态：RUNNING/COMPLETED/CANCELLED',
+    `revision`       BIGINT      NOT NULL DEFAULT 1 COMMENT '乐观锁修订号，同实例锁内更新计票',
+    `create_by`      VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`      VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_wf_node_run` (`instance_id`, `node_id`, `round_no`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '节点轮次表，承载会签计票与作用域隔离';
+
+CREATE TABLE IF NOT EXISTS `tab_wf_business_lock` (
+    `biz_type`          VARCHAR(32)  NOT NULL COMMENT '业务对象类型：ORG/USER/POSITION/APP',
+    `target_key`        VARCHAR(128) NOT NULL COMMENT '业务目标标识（如目标记录 id 文本，CREATE 场景可用申请自身临时键）',
+    `active_request_id` BIGINT       NULL COMMENT '当前占用该锁的活动申请 id，为空表示锁行存在但当前空闲，可复用行不必删除',
+    `revision`           BIGINT      NOT NULL DEFAULT 1 COMMENT '乐观锁修订号',
+    `create_by`         VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
+    `create_time`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`         VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
+    `update_time`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`biz_type`, `target_key`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '业务活动申请锁表，锁行可保留复用';
+
+CREATE TABLE IF NOT EXISTS `tab_wf_outbox_event` (
+    `id`               BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `event_id`         VARCHAR(64)  NOT NULL COMMENT '业务幂等事件 id',
+    `aggregate_id`     VARCHAR(64)  NOT NULL COMMENT '聚合根标识，通常为流程实例 id 文本',
+    `event_seq`        BIGINT       NOT NULL COMMENT '同一聚合根内事件序号，供顺序消费参考',
+    `event_type`       VARCHAR(32)  NOT NULL COMMENT '事件类型：TASK_CREATED/TASK_ASSIGNED/TASK_CANCELLED/PROCESS_APPROVED/PROCESS_REJECTED/BUSINESS_SUCCEEDED/BUSINESS_FAILED/CC_CREATED',
+    `payload`          LONGTEXT     NOT NULL COMMENT '事件负载（JSON）',
+    `status`           VARCHAR(24)  NOT NULL DEFAULT 'PENDING' COMMENT '状态：PENDING/LEASED/SUCCEEDED/FAILED',
+    `next_retry_time`  DATETIME     NOT NULL COMMENT '下次可领取/重试时间，用于按索引扫描到期候选',
+    `lease_token`      VARCHAR(64)  NULL COMMENT '当前持有租约的 token，完成/续期均需匹配该 token（CAS）',
+    `lease_until`      DATETIME     NULL COMMENT '租约到期时间，过期后其他消费者可重新抢占',
+    `attempt_count`    INT          NOT NULL DEFAULT 0 COMMENT '已尝试次数，超过上限转人工处理队列',
+    `create_by`        VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
+    `create_time`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`        VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
+    `update_time`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_wf_outbox_event_id` (`event_id`),
+    KEY `idx_tab_wf_outbox_event_poll` (`status`, `next_retry_time`, `id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'Outbox 可靠事件表';
+
+CREATE TABLE IF NOT EXISTS `tab_wf_event_consume` (
+    `id`             BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `event_id`       VARCHAR(64)  NOT NULL COMMENT '关联 tab_wf_outbox_event.event_id',
+    `consumer_code`  VARCHAR(32)  NOT NULL COMMENT '消费者标识，如 BUSINESS_EXECUTOR/NOTIFIER',
+    `result`         VARCHAR(24)  NOT NULL DEFAULT 'SUCCEEDED' COMMENT '消费结果：SUCCEEDED/FAILED',
+    `processed_time` DATETIME     NOT NULL COMMENT '处理完成时间',
+    `create_by`      VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
+    `create_time`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`      VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
+    `update_time`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_wf_event_consume` (`event_id`, `consumer_code`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '事件消费去重表';
+
+CREATE TABLE IF NOT EXISTS `tab_wf_business_execution` (
+    `id`                BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `request_id`        BIGINT      NOT NULL COMMENT '关联 tab_approval_request.id',
+    `attempt_no`        INT         NOT NULL DEFAULT 1 COMMENT '第几次执行尝试',
+    `lease_token`       VARCHAR(64) NULL COMMENT '执行该次尝试时持有的 Outbox 租约 token',
+    `execution_status`  VARCHAR(24) NOT NULL DEFAULT 'EXECUTING' COMMENT '本次尝试的执行状态：EXECUTING/SUCCEEDED/FAILED_RETRYABLE/FAILED_MANUAL',
+    `error_code`        VARCHAR(64) NULL COMMENT '失败错误码，供运维分类处理',
+    `result_target_id`  BIGINT      NULL COMMENT '执行成功后生效的业务记录 id（CREATE 场景）',
+    `create_by`         VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`       DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`         VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`       DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_wf_business_execution` (`request_id`, `attempt_no`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '业务执行尝试记录表';
+
+CREATE TABLE IF NOT EXISTS `tab_wf_cc_record` (
+    `id`            BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `instance_id`   BIGINT      NOT NULL COMMENT '所属流程实例 id，关联 tab_wf_process_instance.id',
+    `node_run_id`   BIGINT      NOT NULL COMMENT '产生该抄送的节点轮次 id，关联 tab_wf_node_run.id',
+    `recipient_id`  BIGINT      NOT NULL COMMENT '抄送接收人用户 id',
+    `read_time`     DATETIME    NULL COMMENT '接收人查看时间，未读为空',
+    `create_by`     VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`     VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_wf_cc_record` (`node_run_id`, `recipient_id`),
+    KEY `idx_tab_wf_cc_record_recipient` (`recipient_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '抄送记录表';
+
+CREATE TABLE IF NOT EXISTS `tab_wf_notification` (
+    `id`               BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `event_id`         VARCHAR(64) NOT NULL COMMENT '关联 tab_wf_outbox_event.event_id',
+    `recipient_id`     BIGINT      NOT NULL COMMENT '接收人用户 id',
+    `channel`          VARCHAR(24) NOT NULL DEFAULT 'IN_APP' COMMENT '通知渠道：IN_APP 站内消息，首轮唯一可靠渠道',
+    `delivery_status`  VARCHAR(24) NOT NULL DEFAULT 'PENDING' COMMENT '投递状态：PENDING/DELIVERED/FAILED',
+    `attempt_count`    INT         NOT NULL DEFAULT 0 COMMENT '已尝试投递次数',
+    `create_by`        VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`        VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_wf_notification` (`event_id`, `recipient_id`, `channel`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '站内通知投递记录表';
 
 -- ============================================================================
 -- 第二部分：种子数据（按依赖关系顺序插入）
@@ -1530,7 +2056,7 @@ VALUES ('待我审批', 'ApprovalManagement:request:approve', @approval_group_id
         NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
 
 -- ----------------------------------------------------------------------------
--- 权限点种子数据（127 条，按 权限资源.txt 模块分段插入）
+-- 权限点种子数据（145 条，按 权限资源.txt 模块分段插入）
 -- ----------------------------------------------------------------------------
 -- 组织/用户/任职/应用/角色/权限点/管理员/菜单/字典/元数据配置/表单管理/操作日志
 -- 共 95 条源自 权限资源.txt（一次性脚本 gen_permission_seed.py 解析生成，此前版本的
@@ -1738,7 +2264,312 @@ VALUES ('查看我的申请/待我审批', 'ApprovalManagement:request:view', 0,
        ('修改审批开关', 'ApprovalManagement:switch:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
 
 -- ----------------------------------------------------------------------------
--- 超级管理员角色，关联上面全部 127 个种子权限点；本 INSERT...SELECT 位于全部权限点之后，
+-- ============================================================================
+-- V2–V14、V18–V20 合并的最终种子数据
+-- ============================================================================
+
+-- 种子敏感词数据（最小可用示例集，生产环境请通过后台管理接口按需维护）。
+INSERT INTO `tab_chat_sensitive_word` (`word`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES ('赌博', 2000, '1', NOW(), '1', NOW()),
+       ('毒品', 2000, '1', NOW(), '1', NOW()),
+       ('诈骗', 2000, '1', NOW(), '1', NOW()),
+       ('枪支', 2000, '1', NOW(), '1', NOW()),
+       ('色情', 2000, '1', NOW(), '1', NOW());
+
+-- ----------------------------------------------------------------------------
+-- 权限点登记：新增"聊天"侧边栏一级导航分组 + 聊天页面访问/创建群聊/群成员管理三个
+-- 权限点；"系统管理"分组下新增"敏感词管理"页面 + 分页查询/新增/删除/启用/停用五个权限点。
+-- ----------------------------------------------------------------------------
+
+SET @admin_user_id_text := '1';
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('聊天', 'chat', 0, 1, 45, '侧边栏一级导航分组', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+SET @chat_group_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'chat');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('聊天', 'Chat:conversation:view', @chat_group_id, 1, 10,
+        '聊天页面访问（会话列表 + 消息收发 + 历史消息查询）', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+SET @chat_view_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'Chat:conversation:view');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('创建群聊', 'Chat:conversation:create', @chat_view_id, 2, 20, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('群成员管理', 'Chat:conversation:manageMember', @chat_view_id, 2, 10,
+        '添加群成员、移除成员、退出群聊', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+SET @system_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'system');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('敏感词管理', 'SensitiveWordManagement:sensitiveWord:view', @system_id, 1, 0,
+        '聊天敏感词库分页查询', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+SET @sensitive_word_view_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'SensitiveWordManagement:sensitiveWord:view');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('新增敏感词', 'SensitiveWordManagement:sensitiveWord:add', @sensitive_word_view_id, 2, 40, NULL, 2000,
+        @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('删除敏感词', 'SensitiveWordManagement:sensitiveWord:delete', @sensitive_word_view_id, 2, 30, NULL, 2000,
+        @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('启用敏感词', 'SensitiveWordManagement:sensitiveWord:enable', @sensitive_word_view_id, 2, 20, NULL, 2000,
+        @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('停用敏感词', 'SensitiveWordManagement:sensitiveWord:disable', @sensitive_word_view_id, 2, 10, NULL, 2000,
+        @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`,
+                              `update_by`, `update_time`)
+VALUES ('聊天页面访问', 'Chat:conversation:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('创建群聊', 'Chat:conversation:create', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('群成员管理', 'Chat:conversation:manageMember', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+        NOW()),
+       ('敏感词管理页面访问', 'SensitiveWordManagement:sensitiveWord:view', 0, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('新增敏感词', 'SensitiveWordManagement:sensitiveWord:add', 0, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('删除敏感词', 'SensitiveWordManagement:sensitiveWord:delete', 0, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('启用敏感词', 'SensitiveWordManagement:sensitiveWord:enable', 0, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('停用敏感词', 'SensitiveWordManagement:sensitiveWord:disable', 0, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW());
+
+-- 新增两个权限点及其菜单/按钮资源目录条目：角色管理"批量添加用户角色"、管理员管理
+-- "按角色批量设置管理员"（add-user-role-batch-assignment change tasks.md 第 6 节）。
+-- 授权判断只读 tab_permission（AuthorizationServiceImpl 经 tab_role_permission 关联），
+-- tab_menu 是角色管理"权限点选择树"渲染用的资源目录，两张表需要同步新增同一个 code，
+-- 与 V1 里其余按钮权限点的落库方式保持一致。
+
+SET @role_menu_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'RoleManagement:role:view');
+SET @admin_menu_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'AdminManagement:admin:view');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('批量添加用户角色', 'RoleManagement:role:batchAssignUser', @role_menu_id, 2, 5, NULL, 2000, 'system', NOW(), 'system', NOW()),
+       ('按角色批量设置管理员', 'AdminManagement:admin:batchPromoteByRole', @admin_menu_id, 2, 5, NULL, 2000, 'system', NOW(), 'system', NOW());
+
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES ('批量添加用户角色', 'RoleManagement:role:batchAssignUser', 0, NULL, 2000, 'system', NOW(), 'system', NOW()),
+       ('按角色批量设置管理员', 'AdminManagement:admin:batchPromoteByRole', 0, NULL, 2000, 'system', NOW(), 'system', NOW());
+
+-- 默认两级审批规则需要的占位角色：部门负责人（组织负责人类审批人规则兜底/演示）、安全管理员。
+-- ----------------------------------------------------------------------------
+
+INSERT INTO `tab_role` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES ('部门负责人', 'DEPT_LEADER', 0, '组织负责人类审批人规则兜底/演示角色（workflow-approval-engine change）', 2000, 'system', NOW(), 'system', NOW()),
+       ('安全管理员', 'SECURITY_ADMIN', 0, '默认两级审批流程第二级审批角色（workflow-approval-engine change）', 2000, 'system', NOW(), 'system', NOW());
+
+-- ----------------------------------------------------------------------------
+-- 默认主数据审批流程（部门负责人 -> 安全管理员两级）种子数据：流程模型 + 流程定义（version=1）+
+-- 节点审批人规则。flowable_definition_id 留空，由 WorkflowDefinitionBackfillRunner 在应用
+-- 启动、Flowable 完成部署后回填。
+-- ----------------------------------------------------------------------------
+
+INSERT INTO `tab_wf_process_model` (`process_code`, `process_name`, `model_json`, `status`, `current_definition_id`,
+                                     `create_by`, `create_time`, `update_by`, `update_time`)
+VALUES ('MASTER_DATA_APPROVAL', '主数据变更审批流程',
+        '{"processCode":"MASTER_DATA_APPROVAL","processName":"主数据变更审批流程","nodes":[{"id":"start","type":"START"},{"id":"deptLeaderApprove","type":"APPROVAL","name":"部门负责人审批","assigneeType":"ORG_LEADER","assigneeValue":"DEPT_LEADER","approvalMode":"SINGLE","emptyAssigneeStrategy":"TO_WORKFLOW_ADMIN","allowSelfApproval":false,"allowTransfer":true,"allowDelegate":true,"allowAddSign":false,"allowReturn":false},{"id":"securityAdminApprove","type":"APPROVAL","name":"安全管理员审批","assigneeType":"ROLE","assigneeValue":"SECURITY_ADMIN","approvalMode":"SINGLE","emptyAssigneeStrategy":"TO_WORKFLOW_ADMIN","allowSelfApproval":false,"allowTransfer":true,"allowDelegate":true,"allowAddSign":false,"allowReturn":true},{"id":"end","type":"END"}],"edges":[{"from":"start","to":"deptLeaderApprove"},{"from":"deptLeaderApprove","to":"securityAdminApprove"},{"from":"securityAdminApprove","to":"end"}]}',
+        'PUBLISHED', NULL, 'system', NOW(), 'system', NOW());
+
+SET @wf_master_data_model_id := (SELECT `id` FROM `tab_wf_process_model` WHERE `process_code` = 'MASTER_DATA_APPROVAL');
+
+INSERT INTO `tab_wf_process_definition` (`process_model_id`, `process_code`, `version`, `flowable_definition_key`,
+                                          `flowable_definition_id`, `model_json_snapshot`, `status`, `published_by`,
+                                          `published_time`, `create_by`, `create_time`, `update_by`, `update_time`)
+SELECT @wf_master_data_model_id, 'MASTER_DATA_APPROVAL', 1, 'masterDataApprovalProcess', NULL, `model_json`,
+       'PUBLISHED', 'system', NOW(), 'system', NOW(), 'system', NOW()
+FROM `tab_wf_process_model`
+WHERE `id` = @wf_master_data_model_id;
+
+SET @wf_master_data_definition_id := (SELECT `id` FROM `tab_wf_process_definition` WHERE `process_model_id` = @wf_master_data_model_id AND `version` = 1);
+
+UPDATE `tab_wf_process_model`
+SET `current_definition_id` = @wf_master_data_definition_id
+WHERE `id` = @wf_master_data_model_id;
+
+INSERT INTO `tab_wf_node_assignee_rule` (`process_definition_id`, `node_id`, `node_name`, `node_order`,
+                                          `assignee_type`, `assignee_value`, `approval_mode`, `approval_percent`,
+                                          `empty_assignee_strategy`, `allow_self_approval`, `allow_transfer`,
+                                          `allow_delegate`, `allow_add_sign`, `allow_return`, `create_by`,
+                                          `create_time`, `update_by`, `update_time`)
+VALUES (@wf_master_data_definition_id, 'deptLeaderApprove', '部门负责人审批', 1, 'ORG_LEADER', 'DEPT_LEADER', 'SINGLE',
+        NULL, 'TO_WORKFLOW_ADMIN', 0, 1, 1, 0, 0, 'system', NOW(), 'system', NOW()),
+       (@wf_master_data_definition_id, 'securityAdminApprove', '安全管理员审批', 2, 'ROLE', 'SECURITY_ADMIN', 'SINGLE',
+        NULL, 'TO_WORKFLOW_ADMIN', 0, 1, 1, 0, 1, 'system', NOW(), 'system', NOW());
+
+-- workflow-approval-engine change 遗留缺口修复：该 change 的后端/前端代码（流程设计器
+-- Vue Flow 画布、WorkflowProcessModelController 等）与 权限资源.txt 里"流程设计"章节
+-- 早已落地，但当时只更新了 权限资源.txt 文档，漏了本该同步登记的 tab_menu/tab_permission
+-- 种子数据（对照 V2__create_chat_tables.sql "聊天"模块的登记方式）。导致 WorkflowDesign:
+-- model:view/edit/publish/disable 四个权限点在数据库里从未真实存在，任何角色（含
+-- SUPER_ADMIN）都无法被授予，前端侧边栏"流程设计"一级菜单因此对所有用户都不可见
+-- （现象：页面上找不到"流程设计"菜单）。本脚本补登记该菜单分组 + 页面 + 三个按钮级
+-- 权限点，并为 SUPER_ADMIN 角色补授，写法与 V2 脚本一致。
+-- ----------------------------------------------------------------------------
+
+SET @admin_user_id_text := '1';
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('流程设计', 'workflow-design', 0, 1, 35, '侧边栏一级导航分组', 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW());
+
+SET @workflow_design_group_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'workflow-design');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('流程模型', 'WorkflowDesign:model:view', @workflow_design_group_id, 1, 10,
+        '流程模型列表/版本历史页面访问（查看流程模型列表、按流程编码查看版本历史，只读展示发布人/发布时间/状态/DSL 快照，历史版本不提供编辑入口）',
+        2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+
+SET @workflow_model_view_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'WorkflowDesign:model:view');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('编辑流程模型', 'WorkflowDesign:model:edit', @workflow_model_view_id, 2, 30,
+        '新增/编辑流程模型草稿，仅更新草稿内容，不触发部署', 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('发布流程模型', 'WorkflowDesign:model:publish', @workflow_model_view_id, 2, 20,
+        '编译当前草稿为 BPMN 并部署，生成新的不可变版本；与 edit 分别独立校验', 2000,
+        @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('下线/启用流程模型', 'WorkflowDesign:model:disable', @workflow_model_view_id, 2, 10,
+        '下线/重新启用流程模型当前生效版本，启/停复用同一权限点', 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW());
+
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`,
+                              `update_by`, `update_time`)
+VALUES ('流程模型列表/版本历史页面访问', 'WorkflowDesign:model:view', 0, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('新增/编辑流程模型草稿', 'WorkflowDesign:model:edit', 0, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('发布流程模型', 'WorkflowDesign:model:publish', 0, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('下线/重新启用流程模型', 'WorkflowDesign:model:disable', 0, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW());
+
+-- ----------------------------------------------------------------------------
+-- production-approval-lifecycle change tasks.md 4.5"兼容性种子迁移"：
+-- ApprovalProcessServiceImpl.start() 接入 ProcessBindingResolutionService 后，四个业务模块
+-- （ORG/USER/POSITION/APP）提交审批必须能解析出一条已启用的业务绑定，否则直接报"未配置
+-- 绑定"而无法提交审批。本脚本为 ORG/USER/POSITION/APP 与 ApprovalOperationType 全部取值
+-- （CREATE/UPDATE/ENABLE/DISABLE/DELETE）各插入一条全局兜底绑定（scope_type=GLOBAL，
+-- scope_id=0），definition_id 取现有 MASTER_DATA_APPROVAL 流程模型的 current_definition_id，
+-- execution_mode 固定 LEGACY_SYNC（历史同步执行行为，不受本轮"拒绝 RELIABLE_ASYNC"限制）。
+-- 用子查询动态获取 current_definition_id，不硬编码具体 id 数字；若该流程模型尚未发布任何
+-- 版本（current_definition_id 为 NULL），WHERE 条件令派生结果集为空，本脚本优雅跳过插入，
+-- 不产生违反 tab_wf_process_binding 唯一约束或引用无效 definition_id 的脏数据。
+-- 全部使用 MySQL 5.7 兼容写法，不使用窗口函数/CTE/JSON_TABLE/厂商专属 upsert。
+-- ----------------------------------------------------------------------------
+
+SET @admin_user_id_text := '1';
+
+SET @wf_master_data_definition_id := (
+    SELECT `current_definition_id`
+    FROM `tab_wf_process_model`
+    WHERE `process_code` = 'MASTER_DATA_APPROVAL'
+    LIMIT 1
+);
+
+INSERT INTO `tab_wf_process_binding` (`biz_type`, `operation_type`, `scope_type`, `scope_id`, `definition_id`,
+                                       `execution_mode`, `revision`, `enabled`, `create_by`, `create_time`,
+                                       `update_by`, `update_time`)
+SELECT biz.`biz_type`, op.`operation_type`, 'GLOBAL', 0, @wf_master_data_definition_id, 'LEGACY_SYNC', 1, 1,
+       @admin_user_id_text, NOW(), @admin_user_id_text, NOW()
+FROM (SELECT 'ORG' AS `biz_type`
+      UNION ALL
+      SELECT 'USER'
+      UNION ALL
+      SELECT 'POSITION'
+      UNION ALL
+      SELECT 'APP') biz
+         CROSS JOIN (SELECT 'CREATE' AS `operation_type`
+                     UNION ALL
+                     SELECT 'UPDATE'
+                     UNION ALL
+                     SELECT 'ENABLE'
+                     UNION ALL
+                     SELECT 'DISABLE'
+                     UNION ALL
+                     SELECT 'DELETE') op
+WHERE @wf_master_data_definition_id IS NOT NULL;
+
+-- 补齐 WorkflowDesign:model:review / WorkflowDesign:binding:view / WorkflowDesign:binding:edit
+-- 权限点种子数据（写法与 V10 一致）。
+-- ----------------------------------------------------------------------------
+
+SET @admin_user_id_text := '1';
+
+SET @workflow_model_view_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'WorkflowDesign:model:view');
+SET @workflow_design_group_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'workflow-design');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+SELECT '流程发布审核', 'WorkflowDesign:model:review', @workflow_model_view_id, 2, 15,
+       '提交流程模型发布审核、审核决策；审核者与编辑者不能是同一人', 2000, @admin_user_id_text, NOW(),
+       @admin_user_id_text, NOW()
+WHERE @workflow_model_view_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM `tab_menu` WHERE `code` = 'WorkflowDesign:model:review');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+SELECT '业务绑定查看', 'WorkflowDesign:binding:view', @workflow_design_group_id, 1, 5,
+       '流程业务绑定列表/详情查看', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()
+WHERE @workflow_design_group_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM `tab_menu` WHERE `code` = 'WorkflowDesign:binding:view');
+
+SET @workflow_binding_view_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'WorkflowDesign:binding:view');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+SELECT '业务绑定编辑', 'WorkflowDesign:binding:edit', @workflow_binding_view_id, 2, 5,
+       '新建业务绑定、切换绑定版本（含显式回滚）、启停业务绑定', 2000, @admin_user_id_text, NOW(),
+       @admin_user_id_text, NOW()
+WHERE @workflow_binding_view_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM `tab_menu` WHERE `code` = 'WorkflowDesign:binding:edit');
+
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`,
+                              `update_by`, `update_time`)
+SELECT '流程发布审核', 'WorkflowDesign:model:review', 0, NULL, 2000, @admin_user_id_text, NOW(),
+       @admin_user_id_text, NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `tab_permission` WHERE `code` = 'WorkflowDesign:model:review');
+
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`,
+                              `update_by`, `update_time`)
+SELECT '业务绑定查看', 'WorkflowDesign:binding:view', 0, NULL, 2000, @admin_user_id_text, NOW(),
+       @admin_user_id_text, NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `tab_permission` WHERE `code` = 'WorkflowDesign:binding:view');
+
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`,
+                              `update_by`, `update_time`)
+SELECT '业务绑定编辑', 'WorkflowDesign:binding:edit', 0, NULL, 2000, @admin_user_id_text, NOW(),
+       @admin_user_id_text, NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `tab_permission` WHERE `code` = 'WorkflowDesign:binding:edit');
+
+SET @admin_user_id_text := '1';
+
+SET @workflow_design_group_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'workflow-design');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+SELECT '运维终止流程实例', 'WorkflowDesign:instance:terminate', @workflow_design_group_id, 2, 40,
+       '独立运维权限：强制终止运行中的流程实例，终止原因必填，结束流程并取消全部开放任务，不触发任何业务执行事件',
+       2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()
+WHERE @workflow_design_group_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM `tab_menu` WHERE `code` = 'WorkflowDesign:instance:terminate');
+
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`,
+                              `update_by`, `update_time`)
+SELECT '运维终止流程实例', 'WorkflowDesign:instance:terminate', 0, NULL, 2000, @admin_user_id_text, NOW(),
+       @admin_user_id_text, NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `tab_permission` WHERE `code` = 'WorkflowDesign:instance:terminate');
+
+-- 超级管理员角色，关联上面全部 145 个种子权限点；本 INSERT...SELECT 位于全部权限点之后，
 -- 天然覆盖本次合并新增的插件、导出和审批权限，不需要单独补授。
 -- ----------------------------------------------------------------------------
 
