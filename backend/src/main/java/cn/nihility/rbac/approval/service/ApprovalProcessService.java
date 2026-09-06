@@ -21,9 +21,14 @@ public interface ApprovalProcessService {
      * @param operationType  操作类型：CREATE/UPDATE/ENABLE/DISABLE/DELETE
      * @param applicantId    发起人用户 id
      * @param applicantOrgId 发起人所属组织 id，解析不到时传 {@code null}
+     * @param typedPayload   已校验、已转换类型的提交内容对象，用于按流程定义的路由字段清单
+     *                       构建 Flowable 流程变量供条件分支判断，可为空
+     *                       （workflow-condition-payload-fields change design.md Decision 7）
      * @return 流程启动结果，含流程实例 id 与当前所在节点信息
      */
-    WorkflowInstanceResult start(Long requestId, String bizType, String operationType, Long applicantId, Long applicantOrgId);
+    WorkflowInstanceResult start(
+            Long requestId, String bizType, String operationType, Long applicantId, Long applicantOrgId,
+            Object typedPayload);
 
     /**
      * 审批通过当前节点任务。

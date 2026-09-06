@@ -2,7 +2,12 @@ package cn.nihility.rbac.workflow.designer.compiler;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+import cn.nihility.rbac.formfield.dto.FormFieldRenderItemVO;
+import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
 import cn.nihility.rbac.workflow.constant.ApprovalMode;
 import cn.nihility.rbac.workflow.constant.AssigneeType;
 import cn.nihility.rbac.workflow.constant.EmptyAssigneeStrategy;
@@ -12,6 +17,7 @@ import cn.nihility.rbac.workflow.designer.dto.EdgeConditionDsl;
 import cn.nihility.rbac.workflow.designer.dto.EdgeDsl;
 import cn.nihility.rbac.workflow.designer.dto.EndNodeDsl;
 import cn.nihility.rbac.workflow.designer.dto.ProcessModelDsl;
+import cn.nihility.rbac.workflow.designer.dto.RouteFieldCode;
 import cn.nihility.rbac.workflow.designer.dto.StartNodeDsl;
 import cn.nihility.rbac.workflow.exception.WorkflowModelValidationException;
 import java.util.List;
@@ -22,17 +28,31 @@ import org.flowable.bpmn.model.Process;
 import org.flowable.bpmn.model.SequenceFlow;
 import org.flowable.bpmn.model.StartEvent;
 import org.flowable.bpmn.model.UserTask;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
  * {@link WorkflowModelCompilerImpl} 单元测试（workflow-approval-engine change tasks.md
- * 9.5）：覆盖"单人串行两级""两级含一个会签节点""含条件分支"三种典型 DSL 的编译结果，以及
- * "孤立节点""条件分支缺默认边"两种结构校验失败场景。
+ * 9.5；workflow-condition-payload-fields change tasks.md 5.1）：覆盖"单人串行两级""两级含
+ * 一个会签节点""含条件分支"三种典型 DSL 的编译结果，条件分支引用真实表单字段的 null 安全
+ * 表达式生成（含数字/日期比较值转换）、路由字段清单的收集去重，以及"孤立节点""条件分支
+ * 缺默认边"两种结构校验失败场景。
  */
 class WorkflowModelCompilerImplTest {
 
+    /** 表单字段定义服务的桩，条件分支引用的字段元数据从这里查询。 */
+    private FormFieldDefinitionService formFieldDefinitionService;
+
     /** 待测编译器实例。 */
-    private final WorkflowModelCompilerImpl compiler = new WorkflowModelCompilerImpl();
+    private WorkflowModelCompilerImpl compiler;
+
+    /** 构造被测编译器与桩。 */
+    @BeforeEach
+    void setUp() {
+        formFieldDefinitionService = mock(FormFieldDefinitionService.class);
+        ProcessModelDslValidator validator = new ProcessModelDslValidator(formFieldDefinitionService);
+        compiler = new WorkflowModelCompilerImpl(validator, formFieldDefinitionService);
+    }
 
     /**
      * 单人串行两级：等价于 Flyway 预置的 MASTER_DATA_APPROVAL 默认流程（部门负责人 ->
@@ -66,6 +86,7 @@ class WorkflowModelCompilerImplTest {
         assertThat(elementsOf(process, UserTask.class)).hasSize(2);
         assertThat(elementsOf(process, ExclusiveGateway.class)).isEmpty();
         assertThat(elementsOf(process, SequenceFlow.class)).hasSize(3);
+        assertThat(compiled.routeFieldCodes()).isEmpty();
 
         for (UserTask userTask : elementsOf(process, UserTask.class)) {
             assertThat(userTask.getTaskListeners()).hasSize(1);
@@ -127,11 +148,13 @@ class WorkflowModelCompilerImplTest {
     }
 
     /**
-     * 含条件分支且携带默认兜底边：应生成排他网关，携带条件的边设置条件表达式，未携带条件的
-     * 边被标记为网关的默认流。
+     * 含条件分支（数字字段）且携带默认兜底边：应生成排他网关，携带条件的边设置 null 安全的
+     * 数字比较表达式，未携带条件的边被标记为网关的默认流，路由字段清单去重收集
+     * （workflow-condition-payload-fields change design.md Decision 1/2/3/5）。
      */
     @Test
-    void compile_shouldBuildExclusiveGatewayWithConditionAndDefaultFlow() {
+    void compile_shouldBuildExclusiveGatewayWithNullSafeNumberConditionAndDefaultFlow() {
+        stubField("ORG", "amount", 2);
         ProcessModelDsl dsl = ProcessModelDsl.builder()
                 .processCode("CONDITION_BRANCH_PROCESS")
                 .processName("含条件分支的审批流程")
@@ -146,7 +169,7 @@ class WorkflowModelCompilerImplTest {
                 .edges(List.of(
                         EdgeDsl.builder().from("start").to("amountGateway").build(),
                         EdgeDsl.builder().from("amountGateway").to("highAmountApprove")
-                                .condition(EdgeConditionDsl.builder().field("amount").operator("GT").value(1000).build())
+                                .condition(condition("ORG", "amount", "GT", 1000))
                                 .build(),
                         EdgeDsl.builder().from("amountGateway").to("lowAmountApprove").build(),
                         EdgeDsl.builder().from("highAmountApprove").to("end").build(),
@@ -169,7 +192,43 @@ class WorkflowModelCompilerImplTest {
                 .filter(flow -> "highAmountApprove".equals(flow.getTargetRef()))
                 .findFirst()
                 .orElseThrow();
-        assertThat(conditionalFlow.getConditionExpression()).isEqualTo("${amount > 1000}");
+        assertThat(conditionalFlow.getConditionExpression())
+                .isEqualTo("${(ORG_amount != null) && (ORG_amount > 1000)}");
+
+        assertThat(compiled.routeFieldCodes()).containsExactly(new RouteFieldCode("ORG", "amount"));
+    }
+
+    /**
+     * 日期字段条件应把比较值编译时转换为 epoch day 数字字面量嵌入表达式，两边同为数值比较
+     * （workflow-condition-payload-fields change design.md Decision 3）。
+     */
+    @Test
+    void compile_shouldConvertDateConditionValueToEpochDayLiteral() {
+        stubField("ORG", "hireDate", 4);
+        ProcessModelDsl dsl = conditionBranchDsl(condition("ORG", "hireDate", "GT", "2026-01-01"));
+
+        CompiledProcess compiled = compiler.compile(dsl);
+
+        SequenceFlow conditionalFlow = conditionalFlowOf(compiled);
+        long expectedEpochDay = java.time.LocalDate.of(2026, 1, 1).toEpochDay();
+        assertThat(conditionalFlow.getConditionExpression())
+                .isEqualTo("${(ORG_hireDate != null) && (ORG_hireDate > " + expectedEpochDay + ")}");
+    }
+
+    /**
+     * 文本框/字典下拉字段条件的比较值应按字符串字面量加单引号嵌入表达式，沿用既有
+     * {@code formatValue} 字符串分支逻辑。
+     */
+    @Test
+    void compile_shouldQuoteStringConditionValueForTextField() {
+        stubField("ORG", "riskLevel", 3);
+        ProcessModelDsl dsl = conditionBranchDsl(condition("ORG", "riskLevel", "EQ", "HIGH"));
+
+        CompiledProcess compiled = compiler.compile(dsl);
+
+        SequenceFlow conditionalFlow = conditionalFlowOf(compiled);
+        assertThat(conditionalFlow.getConditionExpression())
+                .isEqualTo("${(ORG_riskLevel != null) && (ORG_riskLevel == 'HIGH')}");
     }
 
     /**
@@ -202,6 +261,7 @@ class WorkflowModelCompilerImplTest {
      */
     @Test
     void compile_shouldRejectConditionNodeWithoutDefaultBranch() {
+        stubField("ORG", "amount", 2);
         ProcessModelDsl dsl = ProcessModelDsl.builder()
                 .processCode("MISSING_DEFAULT_BRANCH_PROCESS")
                 .processName("条件分支缺默认边的流程")
@@ -216,10 +276,10 @@ class WorkflowModelCompilerImplTest {
                 .edges(List.of(
                         EdgeDsl.builder().from("start").to("gateway").build(),
                         EdgeDsl.builder().from("gateway").to("branchA")
-                                .condition(EdgeConditionDsl.builder().field("amount").operator("GT").value(1000).build())
+                                .condition(condition("ORG", "amount", "GT", 1000))
                                 .build(),
                         EdgeDsl.builder().from("gateway").to("branchB")
-                                .condition(EdgeConditionDsl.builder().field("amount").operator("LTE").value(1000).build())
+                                .condition(condition("ORG", "amount", "LTE", 1000))
                                 .build(),
                         EdgeDsl.builder().from("branchA").to("end").build(),
                         EdgeDsl.builder().from("branchB").to("end").build()))
@@ -228,6 +288,51 @@ class WorkflowModelCompilerImplTest {
         assertThatThrownBy(() -> compiler.compile(dsl))
                 .isInstanceOf(WorkflowModelValidationException.class)
                 .hasMessageContaining("缺少默认分支");
+    }
+
+    /**
+     * 构造一个只含"网关 -> 分支节点（携带条件）/默认分支节点"的最小含条件分支 DSL，供仅关注
+     * 条件表达式编译结果的测试用例复用。
+     */
+    private ProcessModelDsl conditionBranchDsl(EdgeConditionDsl condition) {
+        return ProcessModelDsl.builder()
+                .processCode("CONDITION_VALUE_PROCESS")
+                .processName("条件比较值编译测试流程")
+                .nodes(List.of(
+                        startNode("start"),
+                        conditionNode("gateway"),
+                        approvalNode("branchA", "分支 A", AssigneeType.ROLE, "SECURITY_ADMIN",
+                                ApprovalMode.SINGLE, null),
+                        approvalNode("branchB", "分支 B", AssigneeType.ORG_LEADER, "DEPT_LEADER",
+                                ApprovalMode.SINGLE, null),
+                        endNode("end")))
+                .edges(List.of(
+                        EdgeDsl.builder().from("start").to("gateway").build(),
+                        EdgeDsl.builder().from("gateway").to("branchA").condition(condition).build(),
+                        EdgeDsl.builder().from("gateway").to("branchB").build(),
+                        EdgeDsl.builder().from("branchA").to("end").build(),
+                        EdgeDsl.builder().from("branchB").to("end").build()))
+                .build();
+    }
+
+    /** 从编译产物中取出唯一携带条件表达式的连线。 */
+    private SequenceFlow conditionalFlowOf(CompiledProcess compiled) {
+        Process process = compiled.bpmnModel().getMainProcess();
+        return elementsOf(process, SequenceFlow.class).stream()
+                .filter(flow -> flow.getConditionExpression() != null)
+                .findFirst()
+                .orElseThrow();
+    }
+
+    /** 桩定 {@link FormFieldDefinitionService#buildRenderSchema} 返回携带指定字段的渲染元数据。 */
+    private void stubField(String bizType, String fieldCode, int controlType) {
+        when(formFieldDefinitionService.buildRenderSchema(eq(bizType))).thenReturn(List.of(
+                FormFieldRenderItemVO.builder().fieldCode(fieldCode).controlType(controlType).build()));
+    }
+
+    /** 构造条件 DSL。 */
+    private EdgeConditionDsl condition(String fieldBizType, String field, String operator, Object value) {
+        return EdgeConditionDsl.builder().fieldBizType(fieldBizType).field(field).operator(operator).value(value).build();
     }
 
     private StartNodeDsl startNode(String id) {

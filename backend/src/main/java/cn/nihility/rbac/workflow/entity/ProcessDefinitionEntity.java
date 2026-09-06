@@ -61,6 +61,11 @@ public class ProcessDefinitionEntity {
     /** 绑定的表单版本 id，关联 {@code tab_wf_form_version.id}。 */
     private Long formVersionId;
 
+    /** 条件分支引用的路由字段清单（JSON 数组，元素形如
+     *  {@code {"bizType":"ORG","fieldCode":"riskLevel"}}），发布时从条件边提取去重写入，
+     *  历史版本为空（workflow-condition-payload-fields change design.md Decision 1）。 */
+    private String routeFieldCodes;
+
     /** Flowable 流程定义 key（BPMN {@code process} 的 {@code id}）。 */
     private String flowableDefinitionKey;
 

@@ -10,16 +10,27 @@ import type { DesignerEdge, DesignerNode, DesignerNodeType } from '@/stores/work
 import {
   APPROVAL_MODE_OPTIONS,
   ASSIGNEE_TYPE_OPTIONS,
-  CONDITION_OPERATOR_OPTIONS,
+  CONDITION_FIELD_BIZ_TYPE_LABEL,
   EMPTY_ASSIGNEE_STRATEGY_OPTIONS,
+  getConditionOperatorOptions,
+  type ConditionFieldOption,
   type ConditionOperator,
   type EdgeConditionDsl,
 } from '@/types/workflow'
+import {
+  FORM_FIELD_CONTROL_TYPE_DATE,
+  FORM_FIELD_CONTROL_TYPE_DICT,
+  FORM_FIELD_CONTROL_TYPE_NUMBER,
+  type FormFieldBizType,
+} from '@/types/formField'
 
 const props = defineProps<{
   node: DesignerNode
   outgoingEdges: DesignerEdge[]
   nodeLabel: (id: string) => string
+  // 条件分支"字段"下拉的数据源：组织/用户/任职/应用四类业务对象的表单字段定义合并列表，
+  // 已过滤掉多选字典类型字段，由 ProcessDesignerView.vue 并行请求 render-schema 后传入。
+  conditionFieldOptions: ConditionFieldOption[]
   readonly?: boolean
 }>()
 
@@ -42,20 +53,73 @@ function updateField(field: string, value: unknown) {
 
 const hasDefaultBranch = computed(() => props.outgoingEdges.some((edge) => !edge.data?.condition))
 
+function emptyCondition(): EdgeConditionDsl {
+  return { fieldBizType: '', field: '', operator: 'EQ', value: null }
+}
+
 function toggleBranchDefault(edge: DesignerEdge, isDefault: boolean) {
   if (isDefault) {
     emit('update-edge-condition', { edgeId: edge.id, condition: null })
   } else {
-    emit('update-edge-condition', {
-      edgeId: edge.id,
-      condition: { field: '', operator: 'EQ', value: '' },
-    })
+    emit('update-edge-condition', { edgeId: edge.id, condition: emptyCondition() })
   }
 }
 
 function updateConditionField(edge: DesignerEdge, patch: Partial<EdgeConditionDsl>) {
-  const current: EdgeConditionDsl = edge.data?.condition ?? { field: '', operator: 'EQ', value: '' }
+  const current: EdgeConditionDsl = edge.data?.condition ?? emptyCondition()
   emit('update-edge-condition', { edgeId: edge.id, condition: { ...current, ...patch } })
+}
+
+// 按业务类型分组的字段下拉数据（Element Plus el-option-group），组内选项按 fieldName 展示，
+// 只展示实际有字段的业务类型分组；顺序固定为 组织/用户/任职/应用。
+const FIELD_GROUP_ORDER: FormFieldBizType[] = ['ORG', 'USER', 'POSITION', 'APP']
+const groupedFieldOptions = computed(() =>
+  FIELD_GROUP_ORDER.map((bizType) => ({
+    bizType,
+    label: CONDITION_FIELD_BIZ_TYPE_LABEL[bizType],
+    options: props.conditionFieldOptions.filter((opt) => opt.bizType === bizType),
+  })).filter((group) => group.options.length > 0),
+)
+
+// 字段下拉用 `${bizType}::${fieldCode}` 作为选项的复合 value，因为不同业务类型下可能
+// 存在相同的 fieldCode（如都叫 remark），裸 fieldCode 无法保证跨分组唯一。
+function fieldOptionKey(bizType: string, fieldCode: string): string {
+  return `${bizType}::${fieldCode}`
+}
+
+function conditionFieldSelectValue(condition: EdgeConditionDsl | null | undefined): string {
+  if (!condition?.fieldBizType || !condition?.field) return ''
+  return fieldOptionKey(condition.fieldBizType, condition.field)
+}
+
+// 根据 condition 当前的 fieldBizType/field 反查完整的字段选项（含 controlType/dictOptions），
+// 驱动比较符/比较值控件的联动展示；未选字段或选中了一个已不在数据源里的字段（如字段被停用）
+// 时返回 undefined，比较符/比较值控件按"未选字段"处理并禁用。
+function findConditionFieldOption(condition: EdgeConditionDsl | null | undefined): ConditionFieldOption | undefined {
+  if (!condition?.fieldBizType || !condition?.field) return undefined
+  return props.conditionFieldOptions.find(
+    (opt) => opt.bizType === condition.fieldBizType && opt.fieldCode === condition.field,
+  )
+}
+
+function conditionOperatorOptions(condition: EdgeConditionDsl | null | undefined) {
+  return getConditionOperatorOptions(findConditionFieldOption(condition)?.controlType)
+}
+
+// 切换"字段"选择后：比较值语义完全依赖所选字段的控件类型，统一清空避免留下类型不匹配的
+// 脏值；比较符仅在新字段的控件类型下仍然合法时保留，否则重置为默认的"等于"
+// （design.md Decision 6 / tasks.md 4.2）。
+function handleFieldSelect(edge: DesignerEdge, compositeKey: string) {
+  const separatorIndex = compositeKey.indexOf('::')
+  if (separatorIndex < 0) return
+  const bizType = compositeKey.slice(0, separatorIndex)
+  const fieldCode = compositeKey.slice(separatorIndex + 2)
+  const option = props.conditionFieldOptions.find((opt) => opt.bizType === bizType && opt.fieldCode === fieldCode)
+  const currentOperator = edge.data?.condition?.operator
+  const allowedOperators = getConditionOperatorOptions(option?.controlType).map((opt) => opt.value)
+  const nextOperator: ConditionOperator =
+    currentOperator && allowedOperators.includes(currentOperator) ? currentOperator : 'EQ'
+  updateConditionField(edge, { fieldBizType: bizType, field: fieldCode, operator: nextOperator, value: null })
 }
 </script>
 
@@ -225,28 +289,83 @@ function updateConditionField(edge: DesignerEdge, patch: Partial<EdgeConditionDs
             <el-button v-if="!readonly" link type="danger" @click="emit('remove-branch', edge.id)">删除</el-button>
           </div>
           <div v-if="edge.data?.condition" class="node-property-panel__branch-condition">
-            <el-input
-              :model-value="edge.data.condition.field"
-              placeholder="字段（流程启动变量）"
-              style="width: 140px"
+            <el-select
+              :model-value="conditionFieldSelectValue(edge.data.condition)"
+              placeholder="请选择字段"
+              style="width: 160px"
               :disabled="readonly"
-              @update:model-value="(v: string) => updateConditionField(edge, { field: v })"
-            />
+              @update:model-value="(v: string) => handleFieldSelect(edge, v)"
+            >
+              <el-option-group v-for="group in groupedFieldOptions" :key="group.bizType" :label="group.label">
+                <el-option
+                  v-for="opt in group.options"
+                  :key="opt.fieldCode"
+                  :label="opt.fieldName"
+                  :value="fieldOptionKey(opt.bizType, opt.fieldCode)"
+                />
+              </el-option-group>
+            </el-select>
             <el-select
               :model-value="edge.data.condition.operator"
+              placeholder="请先选择字段"
               style="width: 110px"
-              :disabled="readonly"
+              :disabled="readonly || !findConditionFieldOption(edge.data.condition)"
               @update:model-value="(v: ConditionOperator) => updateConditionField(edge, { operator: v })"
             >
-              <el-option v-for="opt in CONDITION_OPERATOR_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
+              <el-option
+                v-for="opt in conditionOperatorOptions(edge.data.condition)"
+                :key="opt.value"
+                :label="opt.label"
+                :value="opt.value"
+              />
             </el-select>
-            <el-input
-              :model-value="String(edge.data.condition.value ?? '')"
-              placeholder="比较值"
-              style="width: 120px"
-              :disabled="readonly"
-              @update:model-value="(v: string) => updateConditionField(edge, { value: v })"
-            />
+
+            <template v-if="findConditionFieldOption(edge.data.condition)?.controlType === FORM_FIELD_CONTROL_TYPE_NUMBER">
+              <el-input-number
+                :model-value="(edge.data.condition.value as number | null | undefined) ?? undefined"
+                placeholder="比较值"
+                style="width: 140px"
+                :disabled="readonly"
+                :controls="false"
+                @update:model-value="(v: number | undefined) => updateConditionField(edge, { value: v ?? null })"
+              />
+            </template>
+            <template v-else-if="findConditionFieldOption(edge.data.condition)?.controlType === FORM_FIELD_CONTROL_TYPE_DICT">
+              <el-select
+                :model-value="(edge.data.condition.value as string | null | undefined) ?? undefined"
+                placeholder="请选择比较值"
+                style="width: 140px"
+                :disabled="readonly"
+                @update:model-value="(v: string) => updateConditionField(edge, { value: v })"
+              >
+                <el-option
+                  v-for="opt in findConditionFieldOption(edge.data.condition)?.dictOptions ?? []"
+                  :key="opt.value"
+                  :label="opt.label"
+                  :value="opt.value"
+                />
+              </el-select>
+            </template>
+            <template v-else-if="findConditionFieldOption(edge.data.condition)?.controlType === FORM_FIELD_CONTROL_TYPE_DATE">
+              <el-date-picker
+                :model-value="(edge.data.condition.value as string | null | undefined) ?? null"
+                type="date"
+                value-format="YYYY-MM-DD"
+                placeholder="请选择比较值"
+                style="width: 140px"
+                :disabled="readonly"
+                @update:model-value="(v: string | null) => updateConditionField(edge, { value: v })"
+              />
+            </template>
+            <template v-else>
+              <el-input
+                :model-value="(edge.data.condition.value as string | null | undefined) ?? ''"
+                :placeholder="findConditionFieldOption(edge.data.condition) ? '比较值' : '请先选择字段'"
+                style="width: 140px"
+                :disabled="readonly || !findConditionFieldOption(edge.data.condition)"
+                @update:model-value="(v: string) => updateConditionField(edge, { value: v })"
+              />
+            </template>
           </div>
         </div>
       </div>
@@ -334,5 +453,6 @@ function updateConditionField(edge: DesignerEdge, patch: Partial<EdgeConditionDs
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 </style>

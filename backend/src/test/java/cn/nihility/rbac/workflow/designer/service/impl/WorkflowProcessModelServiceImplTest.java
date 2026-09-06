@@ -168,7 +168,8 @@ class WorkflowProcessModelServiceImplTest {
         NodeAssigneeRuleDraft ruleDraft = new NodeAssigneeRuleDraft(
                 "deptLeaderApprove", "部门负责人审批", 1, null, null, null, null, null, null,
                 false, true, true, false, false, null, null, null, null);
-        when(workflowModelCompiler.compile(any())).thenReturn(new CompiledProcess(new BpmnModel(), List.of(ruleDraft)));
+        when(workflowModelCompiler.compile(any()))
+                .thenReturn(new CompiledProcess(new BpmnModel(), List.of(ruleDraft), List.of()));
 
         when(repositoryService.createDeployment()).thenReturn(deploymentBuilder);
         when(deploymentBuilder.name(anyString())).thenReturn(deploymentBuilder);
@@ -195,6 +196,46 @@ class WorkflowProcessModelServiceImplTest {
         assertThat(model.getCurrentDefinitionId()).isEqualTo(result.getProcessDefinitionId());
         verify(nodeAssigneeRuleMapper).insert(any(NodeAssigneeRuleEntity.class));
         verify(repositoryService).createDeployment();
+    }
+
+    /**
+     * 编译产物携带条件分支引用的路由字段清单时，发布应把去重后的清单序列化为 JSON 落库到
+     * {@code route_field_codes} 列；编译产物无条件分支（空清单）时该列保持为空
+     * （workflow-condition-payload-fields change design.md Decision 1）。
+     */
+    @Test
+    void publish_shouldPersistRouteFieldCodesJson_whenCompiledProcessHasRouteFields() {
+        ProcessModelEntity model = draftModel();
+        when(processModelMapper.selectById(1L)).thenReturn(model);
+        when(processDefinitionMapper.selectList(any())).thenReturn(List.of(existingDefinition(1)));
+
+        when(workflowModelCompiler.compile(any())).thenReturn(new CompiledProcess(
+                new BpmnModel(), List.of(), List.of(new cn.nihility.rbac.workflow.designer.dto.RouteFieldCode(
+                        "ORG", "riskLevel"))));
+
+        when(repositoryService.createDeployment()).thenReturn(deploymentBuilder);
+        when(deploymentBuilder.name(anyString())).thenReturn(deploymentBuilder);
+        when(deploymentBuilder.addBpmnModel(anyString(), any())).thenReturn(deploymentBuilder);
+        when(deploymentBuilder.deploy()).thenReturn(deployment);
+        when(deployment.getId()).thenReturn("deployment-1");
+        when(repositoryService.createProcessDefinitionQuery()).thenReturn(processDefinitionQuery);
+        when(processDefinitionQuery.deploymentId("deployment-1")).thenReturn(processDefinitionQuery);
+        when(processDefinitionQuery.singleResult()).thenReturn(flowableProcessDefinition);
+        when(flowableProcessDefinition.getKey()).thenReturn("MASTER_DATA_APPROVAL");
+        when(flowableProcessDefinition.getId()).thenReturn("MASTER_DATA_APPROVAL:2:abc");
+
+        org.mockito.ArgumentCaptor<ProcessDefinitionEntity> captor =
+                org.mockito.ArgumentCaptor.forClass(ProcessDefinitionEntity.class);
+        doAnswer(invocation -> {
+            ProcessDefinitionEntity entity = invocation.getArgument(0);
+            entity.setId(idSequence.incrementAndGet());
+            return 1;
+        }).when(processDefinitionMapper).insert(captor.capture());
+
+        service.publish(1L, 9L);
+
+        assertThat(captor.getValue().getRouteFieldCodes())
+                .isEqualTo("[{\"bizType\":\"ORG\",\"fieldCode\":\"riskLevel\"}]");
     }
 
     /** DSL 编译失败时不应发生任何部署动作。 */

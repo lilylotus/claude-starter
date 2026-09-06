@@ -192,6 +192,13 @@ public class WorkflowProcessModelServiceImpl implements WorkflowProcessModelServ
         CompiledProcess compiled = workflowModelCompiler.compile(dsl);
         ProcessDefinition flowableDefinition = deploy(model, nextVersion, resourceName, compiled.bpmnModel());
 
+        // 条件分支引用的路由字段清单随发布产物落库，运行时启动流程只需读这一列，不需要重新
+        // 解析整个 model_json_snapshot（workflow-condition-payload-fields change design.md
+        // Decision 1）。没有任何条件分支时为空，不强行落一个空数组。
+        String routeFieldCodesJson = compiled.routeFieldCodes().isEmpty()
+                ? null
+                : JacksonUtils.toJson(compiled.routeFieldCodes());
+
         ProcessDefinitionEntity definition = ProcessDefinitionEntity.builder()
                 .processModelId(model.getId())
                 .processCode(model.getProcessCode())
@@ -200,6 +207,7 @@ public class WorkflowProcessModelServiceImpl implements WorkflowProcessModelServ
                 .flowableDefinitionKey(flowableDefinition.getKey())
                 .flowableDefinitionId(flowableDefinition.getId())
                 .modelJsonSnapshot(model.getModelJson())
+                .routeFieldCodes(routeFieldCodesJson)
                 .status(ProcessModelStatus.PUBLISHED)
                 .publishedBy(operatorText)
                 .publishedTime(now)

@@ -4,6 +4,13 @@
 // 节点按 `type` 判别字段做多态区分，取值固定为 START/APPROVAL/CONDITION/END，
 // 与后端 ProcessNodeDsl 上 @JsonTypeInfo(property = "type") 的多态反序列化配置一致。
 
+import {
+  FORM_FIELD_CONTROL_TYPE_DATE,
+  FORM_FIELD_CONTROL_TYPE_NUMBER,
+  type FormFieldBizType,
+  type FormFieldDictOption,
+} from './formField'
+
 // ---- 审批人来源类型：对应后端 cn.nihility.rbac.workflow.constant.AssigneeType 枚举 ----
 export type AssigneeType =
   | 'USER'
@@ -58,6 +65,38 @@ export const CONDITION_OPERATOR_OPTIONS: Array<{ value: ConditionOperator; label
   { value: 'LTE', label: '小于等于' },
 ]
 
+// ---- 条件字段可选列表：合并组织/用户/任职/应用四类业务对象的表单字段渲染元数据
+//      （GET /api/form-fields/render-schema），供设计器条件分支"字段"下拉使用
+//      （workflow-condition-payload-fields change design.md Decision 6）。已过滤掉
+//      controlType=5（多选字典）的字段——无法做单值比较，不允许选为条件字段。 ----
+export interface ConditionFieldOption {
+  bizType: FormFieldBizType
+  fieldCode: string
+  fieldName: string
+  controlType: number
+  dictOptions: FormFieldDictOption[]
+}
+
+// 条件字段下拉按业务类型分组展示的分组标题
+export const CONDITION_FIELD_BIZ_TYPE_LABEL: Record<FormFieldBizType, string> = {
+  ORG: '组织',
+  USER: '用户',
+  POSITION: '任职',
+  APP: '应用',
+}
+
+// 按选中字段的 controlType 返回当前允许的比较符选项：数字框(2)/日期(4) 支持全部六个，
+// 文本框(1)/字典下拉(3)（以及未选中字段时的兜底）仅允许等于/不等于
+// （design.md Decision 4，与后端 ProcessModelDslValidator 的收窄规则保持一致）。
+export function getConditionOperatorOptions(
+  controlType: number | null | undefined,
+): Array<{ value: ConditionOperator; label: string }> {
+  if (controlType === FORM_FIELD_CONTROL_TYPE_NUMBER || controlType === FORM_FIELD_CONTROL_TYPE_DATE) {
+    return CONDITION_OPERATOR_OPTIONS
+  }
+  return CONDITION_OPERATOR_OPTIONS.filter((opt) => opt.value === 'EQ' || opt.value === 'NE')
+}
+
 // ---- DSL 节点定义（discriminated union，判别字段 type） ----
 
 export interface StartNodeDsl {
@@ -97,11 +136,15 @@ export interface ApprovalNodeDsl {
 
 export type ProcessNodeDsl = StartNodeDsl | ApprovalNodeDsl | ConditionNodeDsl | EndNodeDsl
 
-// 条件节点出边携带的分支条件，对应后端 EdgeConditionDsl。
+// 条件节点出边携带的分支条件，对应后端 EdgeConditionDsl。field 从自由文本改为必须从
+// fieldBizType 对应业务类型的表单字段定义中选择的 fieldCode（workflow-condition-payload-fields
+// change design.md Decision 2）；value 的具体类型随选中字段的 controlType 而定——文本框/
+// 字典下拉为 string，数字框为 number，日期为 "YYYY-MM-DD" 格式的 ISO 日期字符串。
 export interface EdgeConditionDsl {
+  fieldBizType: string
   field: string
   operator: ConditionOperator
-  value: string | number | boolean
+  value: unknown
 }
 
 // 连线，对应后端 EdgeDsl；condition 为空表示无条件流转（条件节点的兜底默认分支）。

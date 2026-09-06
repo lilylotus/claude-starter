@@ -1,5 +1,9 @@
 package cn.nihility.rbac.workflow.designer.compiler;
 
+import cn.nihility.rbac.formfield.constant.FormFieldControlType;
+import cn.nihility.rbac.formfield.dto.FormFieldRenderItemVO;
+import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
+import cn.nihility.rbac.formfield.support.FormFieldValueConverter;
 import cn.nihility.rbac.workflow.constant.ApprovalMode;
 import cn.nihility.rbac.workflow.designer.dto.ApprovalNodeDsl;
 import cn.nihility.rbac.workflow.designer.dto.ConditionNodeDsl;
@@ -8,6 +12,7 @@ import cn.nihility.rbac.workflow.designer.dto.EdgeDsl;
 import cn.nihility.rbac.workflow.designer.dto.EndNodeDsl;
 import cn.nihility.rbac.workflow.designer.dto.ProcessModelDsl;
 import cn.nihility.rbac.workflow.designer.dto.ProcessNodeDsl;
+import cn.nihility.rbac.workflow.designer.dto.RouteFieldCode;
 import cn.nihility.rbac.workflow.designer.dto.StartNodeDsl;
 import cn.nihility.rbac.workflow.engine.flowable.MultiInstanceCompletionEvaluator;
 import cn.nihility.rbac.workflow.exception.WorkflowModelValidationException;
@@ -17,9 +22,12 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import lombok.RequiredArgsConstructor;
 import org.flowable.bpmn.model.BpmnModel;
 import org.flowable.bpmn.model.EndEvent;
 import org.flowable.bpmn.model.ExclusiveGateway;
@@ -59,6 +67,7 @@ import org.springframework.stereotype.Component;
  * 共享同一套语义，避免两处实现逐渐漂移。
  */
 @Component
+@RequiredArgsConstructor
 public class WorkflowModelCompilerImpl implements WorkflowModelCompiler {
 
     /** 单人/候选组节点挂载的任务监听器类名。 */
@@ -89,12 +98,21 @@ public class WorkflowModelCompilerImpl implements WorkflowModelCompiler {
     /** Flowable 自带的流程结构二次校验器，无状态，实例可复用。 */
     private final ProcessValidator processValidator = new ProcessValidatorFactory().createDefaultProcessValidator();
 
+    /** DSL 结构与业务规则校验器，注入 {@link FormFieldDefinitionService} 校验条件字段真实
+     *  存在性，不再是纯静态工具类（workflow-condition-payload-fields change design.md
+     *  Decision 2/4）。 */
+    private final ProcessModelDslValidator processModelDslValidator;
+
+    /** 表单字段定义业务逻辑接口，编译条件表达式时按字段 {@code controlType} 决定比较值字面量
+     *  的编译方式（workflow-condition-payload-fields change design.md Decision 3）。 */
+    private final FormFieldDefinitionService formFieldDefinitionService;
+
     /**
      * {@inheritDoc}
      */
     @Override
     public CompiledProcess compile(ProcessModelDsl dsl) {
-        ProcessModelDslValidator.validate(dsl);
+        processModelDslValidator.validate(dsl);
 
         BpmnModel bpmnModel = new BpmnModel();
         Process process = new Process();
@@ -131,12 +149,14 @@ public class WorkflowModelCompilerImpl implements WorkflowModelCompiler {
         }
 
         int flowIndex = 0;
+        Set<RouteFieldCode> routeFieldCodes = new LinkedHashSet<>();
         for (EdgeDsl edge : dsl.getEdges()) {
             flowIndex++;
             SequenceFlow flow = new SequenceFlow(edge.getFrom(), edge.getTo());
             flow.setId("flow_" + flowIndex + "_" + edge.getFrom() + "_" + edge.getTo());
             if (edge.getCondition() != null) {
                 flow.setConditionExpression(buildConditionExpression(edge.getCondition()));
+                routeFieldCodes.add(new RouteFieldCode(edge.getCondition().getFieldBizType(), edge.getCondition().getField()));
             }
             process.addFlowElement(flow);
             linkSequenceFlow(process, flow);
@@ -155,7 +175,7 @@ public class WorkflowModelCompilerImpl implements WorkflowModelCompiler {
             throw new WorkflowModelValidationException(engineErrors);
         }
 
-        return new CompiledProcess(bpmnModel, assigneeRules);
+        return new CompiledProcess(bpmnModel, assigneeRules, List.copyOf(routeFieldCodes));
     }
 
     /**
@@ -268,11 +288,46 @@ public class WorkflowModelCompilerImpl implements WorkflowModelCompiler {
     /**
      * 按 {@code EQ}/{@code NE}/{@code GT}/{@code GTE}/{@code LT}/{@code LTE} 白名单比较符 +
      * 字段 + 比较值拼装 UEL 条件表达式，不接受任何自由表达式字符串
-     * （workflow-approval-engine change design.md Decision 10）。
+     * （workflow-approval-engine change design.md Decision 10）。Flowable 变量名按
+     * {@code fieldBizType + "_" + field} 命名空间化，避免不同业务类型共用同一流程模型时
+     * 字段码碰撞；表达式统一包裹为 null 安全形式，变量缺失（含"这次提交的业务类型根本没有
+     * 这个字段"的情况）时一律判定条件不满足，不因算符语义把 {@code NE} 在缺失时特殊处理成
+     * 满足（workflow-condition-payload-fields change design.md Decision 2/5）。
      */
     private String buildConditionExpression(EdgeConditionDsl condition) {
         String symbol = OPERATOR_SYMBOLS.get(condition.getOperator());
-        return "${" + condition.getField() + " " + symbol + " " + formatValue(condition.getValue()) + "}";
+        String variableName = condition.getFieldBizType() + "_" + condition.getField();
+        Integer controlType = resolveControlType(condition.getFieldBizType(), condition.getField());
+        String literal = formatConditionValue(controlType, condition.getValue());
+        return "${(" + variableName + " != null) && (" + variableName + " " + symbol + " " + literal + ")}";
+    }
+
+    /**
+     * 查询条件字段的控件类型，决定比较值字面量的编译方式；发布前
+     * {@link ProcessModelDslValidator} 已校验字段真实存在，这里查不到属于防御性场景。
+     */
+    private Integer resolveControlType(String fieldBizType, String fieldCode) {
+        return formFieldDefinitionService.buildRenderSchema(fieldBizType).stream()
+                .filter(item -> fieldCode.equals(item.getFieldCode()))
+                .map(FormFieldRenderItemVO::getControlType)
+                .findFirst()
+                .orElseThrow(() -> new WorkflowModelValidationException(
+                        "条件字段 " + fieldBizType + "." + fieldCode + " 不存在于表单字段定义中"));
+    }
+
+    /**
+     * 按字段控件类型格式化比较值字面量：数字框转 {@link java.math.BigDecimal} 数字字面量，
+     * 日期转 epoch day 数字字面量，文本框/字典下拉保持字符串字面量（加单引号转义）
+     * （workflow-condition-payload-fields change design.md Decision 3）。
+     */
+    private String formatConditionValue(Integer controlType, Object value) {
+        if (Objects.equals(controlType, FormFieldControlType.NUMBER)) {
+            return FormFieldValueConverter.toBigDecimal(value).toPlainString();
+        }
+        if (Objects.equals(controlType, FormFieldControlType.DATE)) {
+            return String.valueOf(FormFieldValueConverter.toEpochDay(value));
+        }
+        return formatValue(value);
     }
 
     /**

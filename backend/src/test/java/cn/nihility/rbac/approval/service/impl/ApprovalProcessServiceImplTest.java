@@ -5,6 +5,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import cn.nihility.rbac.formfield.dto.FormFieldRenderItemVO;
+import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
 import cn.nihility.rbac.workflow.constant.ExecutionMode;
 import cn.nihility.rbac.workflow.dslv2.binding.ProcessBindingResolutionService;
 import cn.nihility.rbac.workflow.dslv2.binding.ResolvedProcessBinding;
@@ -16,6 +18,9 @@ import cn.nihility.rbac.workflow.dto.WorkflowInstanceResult;
 import cn.nihility.rbac.workflow.engine.WorkflowService;
 import cn.nihility.rbac.workflow.entity.ProcessBindingEntity;
 import cn.nihility.rbac.workflow.entity.ProcessDefinitionEntity;
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -38,12 +43,16 @@ class ApprovalProcessServiceImplTest {
     @Mock
     private ProcessBindingResolutionService processBindingResolutionService;
 
+    @Mock
+    private FormFieldDefinitionService formFieldDefinitionService;
+
     private ApprovalProcessServiceImpl service;
 
     /** 构造被测服务。 */
     @BeforeEach
     void setUp() {
-        service = new ApprovalProcessServiceImpl(workflowService, processBindingResolutionService);
+        service = new ApprovalProcessServiceImpl(
+                workflowService, processBindingResolutionService, formFieldDefinitionService);
     }
 
     /** 启动流程时应按解析出的绑定/流程定义构造命令，透传业务参数。 */
@@ -58,7 +67,7 @@ class ApprovalProcessServiceImplTest {
         WorkflowInstanceResult expected = new WorkflowInstanceResult(1L, "flowable-1", "deptLeaderApprove", "部门负责人审批");
         when(workflowService.start(any())).thenReturn(expected);
 
-        WorkflowInstanceResult result = service.start(10L, "ORG", "CREATE", 1L, 100L);
+        WorkflowInstanceResult result = service.start(10L, "ORG", "CREATE", 1L, 100L, null);
 
         ArgumentCaptor<StartProcessCommand> captor = ArgumentCaptor.forClass(StartProcessCommand.class);
         verify(workflowService).start(captor.capture());
@@ -72,7 +81,83 @@ class ApprovalProcessServiceImplTest {
         assertThat(command.bindingId()).isEqualTo(88L);
         assertThat(command.bindingRevision()).isEqualTo(3L);
         assertThat(command.executionMode()).isEqualTo(ExecutionMode.LEGACY_SYNC);
+        assertThat(command.variables()).isNull();
         assertThat(result).isSameAs(expected);
+    }
+
+    /**
+     * 流程定义落库的路由字段清单里，字段所属业务类型与本次提交的 bizType 一致且值存在时，
+     * 应按该字段的 controlType 转换后设置为对应命名空间化变量
+     * （workflow-condition-payload-fields change design.md Decision 2/3）。
+     */
+    @Test
+    void start_shouldBuildRouteVariable_whenBizTypeMatchesAndFieldPresent() {
+        ProcessBindingEntity binding = ProcessBindingEntity.builder()
+                .id(88L).revision(3L).executionMode(ExecutionMode.LEGACY_SYNC).build();
+        ProcessDefinitionEntity definition = ProcessDefinitionEntity.builder()
+                .id(66L).processCode("MASTER_DATA_APPROVAL")
+                .routeFieldCodes("[{\"bizType\":\"ORG\",\"fieldCode\":\"riskAmount\"}]")
+                .build();
+        when(processBindingResolutionService.resolveForStart("ORG", "CREATE", 100L))
+                .thenReturn(new ResolvedProcessBinding(binding, definition));
+        when(formFieldDefinitionService.buildRenderSchema("ORG")).thenReturn(List.of(FormFieldRenderItemVO.builder()
+                .fieldCode("riskAmount").controlType(2).build()));
+        when(workflowService.start(any()))
+                .thenReturn(new WorkflowInstanceResult(1L, "flowable-1", "deptLeaderApprove", "部门负责人审批"));
+
+        service.start(10L, "ORG", "CREATE", 1L, 100L, Map.of("riskAmount", 1000));
+
+        ArgumentCaptor<StartProcessCommand> captor = ArgumentCaptor.forClass(StartProcessCommand.class);
+        verify(workflowService).start(captor.capture());
+        assertThat(captor.getValue().variables()).containsEntry("ORG_riskAmount", new BigDecimal("1000"));
+    }
+
+    /**
+     * 路由字段所属业务类型与本次提交的 bizType 不一致时，变量值一律为 {@code null}，不因
+     * 变量缺失中断流程（workflow-condition-payload-fields change design.md Decision 2）。
+     */
+    @Test
+    void start_shouldSetNullVariable_whenRouteFieldBizTypeMismatches() {
+        ProcessBindingEntity binding = ProcessBindingEntity.builder()
+                .id(88L).revision(3L).executionMode(ExecutionMode.LEGACY_SYNC).build();
+        ProcessDefinitionEntity definition = ProcessDefinitionEntity.builder()
+                .id(66L).processCode("MASTER_DATA_APPROVAL")
+                .routeFieldCodes("[{\"bizType\":\"ORG\",\"fieldCode\":\"riskAmount\"}]")
+                .build();
+        when(processBindingResolutionService.resolveForStart("USER", "CREATE", 100L))
+                .thenReturn(new ResolvedProcessBinding(binding, definition));
+        when(workflowService.start(any()))
+                .thenReturn(new WorkflowInstanceResult(1L, "flowable-1", "deptLeaderApprove", "部门负责人审批"));
+
+        service.start(10L, "USER", "CREATE", 1L, 100L, Map.of("riskAmount", 1000));
+
+        ArgumentCaptor<StartProcessCommand> captor = ArgumentCaptor.forClass(StartProcessCommand.class);
+        verify(workflowService).start(captor.capture());
+        assertThat(captor.getValue().variables()).containsEntry("ORG_riskAmount", null);
+    }
+
+    /**
+     * 路由字段所属业务类型与本次提交一致，但字段值在本次提交内容中缺失时，变量值同样为
+     * {@code null}（workflow-condition-payload-fields change design.md Decision 2）。
+     */
+    @Test
+    void start_shouldSetNullVariable_whenFieldMissingFromPayload() {
+        ProcessBindingEntity binding = ProcessBindingEntity.builder()
+                .id(88L).revision(3L).executionMode(ExecutionMode.LEGACY_SYNC).build();
+        ProcessDefinitionEntity definition = ProcessDefinitionEntity.builder()
+                .id(66L).processCode("MASTER_DATA_APPROVAL")
+                .routeFieldCodes("[{\"bizType\":\"ORG\",\"fieldCode\":\"riskAmount\"}]")
+                .build();
+        when(processBindingResolutionService.resolveForStart("ORG", "CREATE", 100L))
+                .thenReturn(new ResolvedProcessBinding(binding, definition));
+        when(workflowService.start(any()))
+                .thenReturn(new WorkflowInstanceResult(1L, "flowable-1", "deptLeaderApprove", "部门负责人审批"));
+
+        service.start(10L, "ORG", "CREATE", 1L, 100L, Map.of());
+
+        ArgumentCaptor<StartProcessCommand> captor = ArgumentCaptor.forClass(StartProcessCommand.class);
+        verify(workflowService).start(captor.capture());
+        assertThat(captor.getValue().variables()).containsEntry("ORG_riskAmount", null);
     }
 
     /** 审批通过应透传任务 id、操作人与意见。 */

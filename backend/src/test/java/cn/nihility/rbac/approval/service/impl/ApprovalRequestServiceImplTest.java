@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
@@ -225,7 +226,8 @@ class ApprovalRequestServiceImplTest {
             invocation.<ApprovalRequestEntity>getArgument(0).setId(10L);
             return 1;
         }).when(mapper).insert(any(ApprovalRequestEntity.class));
-        when(approvalProcessService.start(eq(10L), eq(FormFieldBizType.APP), eq(ApprovalOperationType.CREATE), eq(1L), any()))
+        when(approvalProcessService.start(
+                eq(10L), eq(FormFieldBizType.APP), eq(ApprovalOperationType.CREATE), eq(1L), any(), any()))
                 .thenReturn(new WorkflowInstanceResult(PROCESS_INSTANCE_ID, "flow-1", "deptLeaderApprove", "部门负责人审批"));
 
         WriteOperationResultVO<?> result = service.submit(
@@ -238,7 +240,8 @@ class ApprovalRequestServiceImplTest {
         assertThat(result.getApprovalRequest().getId()).isEqualTo(10L);
         assertThat(result.getApprovalRequest().getCurrentNodeName()).isEqualTo("部门负责人审批");
         verify(appService, never()).create(any());
-        verify(approvalProcessService).start(10L, FormFieldBizType.APP, ApprovalOperationType.CREATE, 1L, null);
+        verify(approvalProcessService).start(
+                eq(10L), eq(FormFieldBizType.APP), eq(ApprovalOperationType.CREATE), eq(1L), isNull(), any());
     }
 
     /**
@@ -256,7 +259,8 @@ class ApprovalRequestServiceImplTest {
             invocation.<ApprovalRequestEntity>getArgument(0).setId(10L);
             return 1;
         }).when(mapper).insert(captor.capture());
-        when(approvalProcessService.start(eq(10L), eq(FormFieldBizType.APP), eq(ApprovalOperationType.CREATE), eq(1L), any()))
+        when(approvalProcessService.start(
+                eq(10L), eq(FormFieldBizType.APP), eq(ApprovalOperationType.CREATE), eq(1L), any(), any()))
                 .thenReturn(new WorkflowInstanceResult(PROCESS_INSTANCE_ID, "flow-1", "deptLeaderApprove", "部门负责人审批"));
 
         service.submit(FormFieldBizType.APP, ApprovalOperationType.CREATE, null, request);
@@ -282,7 +286,8 @@ class ApprovalRequestServiceImplTest {
             invocation.<ApprovalRequestEntity>getArgument(0).setId(11L);
             return 1;
         }).when(mapper).insert(captor.capture());
-        when(approvalProcessService.start(eq(11L), eq(FormFieldBizType.ORG), eq(ApprovalOperationType.UPDATE), eq(1L), any()))
+        when(approvalProcessService.start(
+                eq(11L), eq(FormFieldBizType.ORG), eq(ApprovalOperationType.UPDATE), eq(1L), any(), any()))
                 .thenReturn(new WorkflowInstanceResult(PROCESS_INSTANCE_ID, "flow-1", "deptLeaderApprove", "部门负责人审批"));
 
         service.submit(FormFieldBizType.ORG, ApprovalOperationType.UPDATE, 99L, request);
@@ -337,7 +342,7 @@ class ApprovalRequestServiceImplTest {
                 .hasMessageContaining("应用名称不能为空");
 
         verify(mapper, never()).insert(any(ApprovalRequestEntity.class));
-        verify(approvalProcessService, never()).start(any(), any(), any(), any(), any());
+        verify(approvalProcessService, never()).start(any(), any(), any(), any(), any(), any());
     }
 
     /**
@@ -357,7 +362,7 @@ class ApprovalRequestServiceImplTest {
                 .hasMessageContaining("管辖范围");
 
         verify(mapper, never()).insert(any(ApprovalRequestEntity.class));
-        verify(approvalProcessService, never()).start(any(), any(), any(), any(), any());
+        verify(approvalProcessService, never()).start(any(), any(), any(), any(), any(), any());
     }
 
     /**
@@ -380,14 +385,14 @@ class ApprovalRequestServiceImplTest {
             invocation.<ApprovalRequestEntity>getArgument(0).setId(10L);
             return 1;
         }).when(mapper).insert(any(ApprovalRequestEntity.class));
-        when(approvalProcessService.start(eq(10L), eq(bizType), eq(operationType), anyLong(), any()))
+        when(approvalProcessService.start(eq(10L), eq(bizType), eq(operationType), anyLong(), any(), any()))
                 .thenReturn(new WorkflowInstanceResult(PROCESS_INSTANCE_ID, "flow-1", "deptLeaderApprove", "部门负责人审批"));
 
         WriteOperationResultVO<?> result = service.submit(bizType, operationType, targetId, payload);
 
         assertThat(result.isApprovalEnabled()).isTrue();
         assertThat(result.getApprovalRequest().getId()).isEqualTo(10L);
-        verify(approvalProcessService).start(eq(10L), eq(bizType), eq(operationType), eq(1L), any());
+        verify(approvalProcessService).start(eq(10L), eq(bizType), eq(operationType), eq(1L), any(), any());
     }
 
     /** 非最终节点通过时应仅推进流程、更新当前节点名称，不执行任何业务写操作。 */

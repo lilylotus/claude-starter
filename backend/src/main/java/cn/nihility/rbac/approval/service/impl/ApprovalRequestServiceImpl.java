@@ -185,7 +185,7 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
 
         Long applicantOrgId = resolveApplicantOrgId(applicantId);
         WorkflowInstanceResult process = approvalProcessService.start(
-                entity.getId(), bizType, operationType, applicantId, applicantOrgId);
+                entity.getId(), bizType, operationType, applicantId, applicantOrgId, typedPayload);
         entity.setProcessInstanceId(process.processInstanceId());
         entity.setFlowableProcessInstanceId(process.flowableProcessInstanceId());
         entity.setCurrentNodeName(process.currentNodeName());

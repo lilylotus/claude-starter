@@ -52,7 +52,7 @@ class ApprovalProcessServiceImplBindingIntegrationTest {
     void start_shouldSucceed_viaGlobalFallbackBindingSeededByMigration(String bizType) {
         Long businessId = BUSINESS_ID_SEQ.incrementAndGet();
 
-        WorkflowInstanceResult result = approvalProcessService.start(businessId, bizType, "CREATE", 1L, null);
+        WorkflowInstanceResult result = approvalProcessService.start(businessId, bizType, "CREATE", 1L, null, null);
 
         assertThat(result.processInstanceId()).isNotNull();
         assertThat(result.flowableProcessInstanceId()).isNotBlank();

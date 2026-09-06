@@ -116,6 +116,9 @@ function validateConditionNodes(nodes: ProcessNodeDsl[], outgoing: Map<string, E
       const condition = edge.condition
       if (!condition) continue
       const location = `边 ${edge.from}->${edge.to}`
+      if (!condition.fieldBizType) {
+        errors.push(`${location} 的条件缺少所属业务类型 fieldBizType`)
+      }
       if (!condition.field) {
         errors.push(`${location} 的条件缺少字段 field`)
       }

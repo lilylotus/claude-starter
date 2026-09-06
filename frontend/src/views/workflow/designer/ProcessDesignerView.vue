@@ -16,6 +16,8 @@ import '@vue-flow/controls/dist/style.css'
 // 注：@vue-flow/background 这个版本没有独立发布 dist/style.css（背景网格用内联 SVG
 // pattern 渲染，不依赖外部样式表），无需在这里额外 import。
 import * as workflowApi from '@/api/workflow'
+import { fetchFormFieldRenderSchema } from '@/api/formField'
+import { FORM_FIELD_CONTROL_TYPE_MULTI_DICT, type FormFieldBizType } from '@/types/formField'
 import { useWorkflowDesignerStore, type DesignerNodeType } from '@/stores/workflowDesigner'
 import { validateProcessModelDsl } from '@/utils/workflowValidation'
 import { usePermission } from '@/composables/usePermission'
@@ -25,7 +27,7 @@ import ConditionNode from './nodes/ConditionNode.vue'
 import EndNode from './nodes/EndNode.vue'
 import NodePropertyPanel from './panels/NodePropertyPanel.vue'
 import VersionHistoryDialog from '../process-model/VersionHistoryDialog.vue'
-import type { EdgeConditionDsl } from '@/types/workflow'
+import type { ConditionFieldOption, EdgeConditionDsl } from '@/types/workflow'
 
 const route = useRoute()
 const router = useRouter()
@@ -50,6 +52,10 @@ const loadNotice = ref('')
 const savingDraft = ref(false)
 const publishing = ref(false)
 const versionDialogVisible = ref(false)
+
+// 条件分支"字段"下拉的数据源：合并组织/用户/任职/应用四类业务对象的表单字段渲染元数据，
+// 传给 NodePropertyPanel.vue（workflow-condition-payload-fields change design.md Decision 6）。
+const conditionFieldOptions = ref<ConditionFieldOption[]>([])
 
 const { project, screenToFlowCoordinate } = useVueFlow()
 const flowWrapperRef = ref<HTMLDivElement | null>(null)
@@ -104,7 +110,33 @@ async function loadModel() {
   }
 }
 
-onMounted(loadModel)
+// 并行拉取四类业务对象的表单字段渲染元数据，合并为条件字段可选列表；过滤掉
+// controlType=5（多选字典）——无法做单值比较，不允许选为条件字段（tasks.md 4.1）。
+async function loadConditionFieldOptions() {
+  const bizTypes: FormFieldBizType[] = ['ORG', 'USER', 'POSITION', 'APP']
+  try {
+    const results = await Promise.all(bizTypes.map((bizType) => fetchFormFieldRenderSchema(bizType)))
+    conditionFieldOptions.value = results.flatMap((items, index) =>
+      items
+        .filter((item) => item.controlType !== FORM_FIELD_CONTROL_TYPE_MULTI_DICT)
+        .map((item) => ({
+          bizType: bizTypes[index],
+          fieldCode: item.fieldCode,
+          fieldName: item.fieldName,
+          controlType: item.controlType,
+          dictOptions: item.dictOptions,
+        })),
+    )
+  } catch {
+    // 拉取失败不阻断设计器主流程加载，条件字段下拉退化为空列表，管理员仍可编辑其余节点属性；
+    // 保存/发布前的结构校验会在真正引用了无效字段时兜底拦截
+  }
+}
+
+onMounted(() => {
+  loadModel()
+  loadConditionFieldOptions()
+})
 
 // ---- 拖拽添加节点 ----
 
@@ -346,6 +378,7 @@ function goBack() {
           :node="selectedNode"
           :outgoing-edges="designerStore.outgoingEdges(selectedNode.id)"
           :node-label="nodeLabel"
+          :condition-field-options="conditionFieldOptions"
           :readonly="!canEdit"
           @update-node="handleUpdateNode"
           @update-edge-condition="handleUpdateEdgeCondition"

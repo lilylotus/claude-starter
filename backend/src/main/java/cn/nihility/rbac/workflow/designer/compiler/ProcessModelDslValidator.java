@@ -1,5 +1,9 @@
 package cn.nihility.rbac.workflow.designer.compiler;
 
+import cn.nihility.rbac.formfield.constant.FormFieldBizType;
+import cn.nihility.rbac.formfield.constant.FormFieldControlType;
+import cn.nihility.rbac.formfield.dto.FormFieldRenderItemVO;
+import cn.nihility.rbac.formfield.service.FormFieldDefinitionService;
 import cn.nihility.rbac.workflow.constant.ApprovalMode;
 import cn.nihility.rbac.workflow.constant.AssigneeType;
 import cn.nihility.rbac.workflow.designer.dto.ApprovalNodeDsl;
@@ -14,11 +18,14 @@ import cn.nihility.rbac.workflow.exception.WorkflowModelValidationException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 /**
@@ -26,17 +33,29 @@ import org.springframework.util.StringUtils;
  * 与本类保持一致，避免前后端校验规则漂移，workflow-approval-engine change design.md
  * Decision 9 / specs/workflow-process-designer"发布前结构与业务规则的强制校验"Requirement）。
  * 校验规则：唯一开始节点、至少一个结束节点、节点 id 唯一、边引用的节点必须存在、开始到结束
- * 存在可达路径、条件节点存在兜底默认边、审批节点审批人来源相关必填字段完整。所有校验失败
- * 一次性收集后统一抛出，携带具体节点/连线定位信息，不是发现第一个错误就短路返回。
+ * 存在可达路径、条件节点存在兜底默认边且引用字段真实存在于对应业务类型的启用表单字段定义中
+ * （workflow-condition-payload-fields change design.md Decision 2/4）、审批节点审批人来源
+ * 相关必填字段完整。所有校验失败一次性收集后统一抛出，携带具体节点/连线定位信息，不是发现
+ * 第一个错误就短路返回。
+ * <p>
+ * 注入 {@link FormFieldDefinitionService} 校验条件字段的真实存在性，不再是纯静态工具类。
  */
-public final class ProcessModelDslValidator {
+@Component
+@RequiredArgsConstructor
+public class ProcessModelDslValidator {
 
     /** 条件比较符白名单，禁止使用者直接输入自由表达式字符串。 */
     private static final Set<String> ALLOWED_OPERATORS = Set.of("EQ", "NE", "GT", "GTE", "LT", "LTE");
 
-    /** 工具类不允许实例化。 */
-    private ProcessModelDslValidator() {
-    }
+    /** 文本框/字典下拉字段仅允许的比较符：只能判等/判不等，大小比较对这两类控件类型无意义。 */
+    private static final Set<String> TEXT_LIKE_ALLOWED_OPERATORS = Set.of("EQ", "NE");
+
+    /** 允许作为条件字段所属的业务对象类型。 */
+    private static final Set<String> ALLOWED_FIELD_BIZ_TYPES = Set.of(
+            FormFieldBizType.ORG, FormFieldBizType.USER, FormFieldBizType.POSITION, FormFieldBizType.APP);
+
+    /** 表单字段定义业务逻辑接口，用于校验条件字段真实存在于对应业务类型的启用字段定义中。 */
+    private final FormFieldDefinitionService formFieldDefinitionService;
 
     /**
      * 校验流程模型 DSL，校验失败抛出携带全部错误明细的
@@ -44,7 +63,7 @@ public final class ProcessModelDslValidator {
      *
      * @param dsl 待校验的流程模型 DSL
      */
-    public static void validate(ProcessModelDsl dsl) {
+    public void validate(ProcessModelDsl dsl) {
         List<String> errors = new ArrayList<>();
         if (dsl == null || dsl.getNodes() == null || dsl.getNodes().isEmpty()) {
             throw new WorkflowModelValidationException("流程模型 DSL 不能为空，至少需要包含节点定义");
@@ -159,10 +178,13 @@ public final class ProcessModelDslValidator {
     }
 
     /**
-     * 校验条件节点的出边：至少一条兜底默认分支，携带条件的出边字段/比较符/比较值完整合法。
+     * 校验条件节点的出边：至少一条兜底默认分支，携带条件的出边字段/比较符/比较值完整合法，
+     * 字段须存在于对应业务类型的启用表单字段定义中且非多选字典，比较符按字段控件类型收窄
+     * （workflow-condition-payload-fields change design.md Decision 2/4）。
      */
-    private static List<String> validateConditionNodes(List<ProcessNodeDsl> nodes, Map<String, List<EdgeDsl>> outgoing) {
+    private List<String> validateConditionNodes(List<ProcessNodeDsl> nodes, Map<String, List<EdgeDsl>> outgoing) {
         List<String> errors = new ArrayList<>();
+        Map<String, List<FormFieldRenderItemVO>> renderSchemaCache = new HashMap<>();
         for (ProcessNodeDsl node : nodes) {
             if (!(node instanceof ConditionNodeDsl)) {
                 continue;
@@ -178,18 +200,79 @@ public final class ProcessModelDslValidator {
                     continue;
                 }
                 String edgeLocation = "边 " + edge.getFrom() + "->" + edge.getTo();
-                if (!StringUtils.hasText(condition.getField())) {
-                    errors.add(edgeLocation + " 的条件缺少字段 field");
-                }
-                if (!StringUtils.hasText(condition.getOperator()) || !ALLOWED_OPERATORS.contains(condition.getOperator())) {
-                    errors.add(edgeLocation + " 的比较符不在允许范围内（仅支持 EQ/NE/GT/GTE/LT/LTE）：" + condition.getOperator());
-                }
-                if (condition.getValue() == null) {
-                    errors.add(edgeLocation + " 的条件缺少比较值 value");
-                }
+                errors.addAll(validateCondition(edgeLocation, condition, renderSchemaCache));
             }
         }
         return errors;
+    }
+
+    /**
+     * 校验单条条件边的字段/比较符/比较值。
+     */
+    private List<String> validateCondition(
+            String edgeLocation,
+            EdgeConditionDsl condition,
+            Map<String, List<FormFieldRenderItemVO>> renderSchemaCache) {
+        List<String> errors = new ArrayList<>();
+        if (!StringUtils.hasText(condition.getFieldBizType())
+                || !ALLOWED_FIELD_BIZ_TYPES.contains(condition.getFieldBizType())) {
+            errors.add(edgeLocation + " 的条件字段所属业务对象类型 fieldBizType 不合法（仅支持 ORG/USER/POSITION/APP）："
+                    + condition.getFieldBizType());
+        }
+        if (!StringUtils.hasText(condition.getField())) {
+            errors.add(edgeLocation + " 的条件缺少字段 field");
+        }
+        if (!StringUtils.hasText(condition.getOperator()) || !ALLOWED_OPERATORS.contains(condition.getOperator())) {
+            errors.add(edgeLocation + " 的比较符不在允许范围内（仅支持 EQ/NE/GT/GTE/LT/LTE）：" + condition.getOperator());
+        }
+        if (condition.getValue() == null) {
+            errors.add(edgeLocation + " 的条件缺少比较值 value");
+        }
+
+        if (!errors.isEmpty()) {
+            // 字段所属业务对象类型或字段本身缺失/非法时，无法继续查找字段定义，避免连带误报。
+            return errors;
+        }
+
+        FormFieldRenderItemVO field = findField(condition.getFieldBizType(), condition.getField(), renderSchemaCache);
+        if (field == null) {
+            errors.add(edgeLocation + " 引用的字段 " + condition.getFieldBizType() + "." + condition.getField()
+                    + " 不存在于该业务类型的启用表单字段定义中");
+            return errors;
+        }
+        if (Integer.valueOf(FormFieldControlType.MULTI_DICT).equals(field.getControlType())) {
+            errors.add(edgeLocation + " 引用的字段 " + condition.getField() + " 是多选字典类型，不能作为条件字段");
+            return errors;
+        }
+        if (isTextLikeControlType(field.getControlType())
+                && ALLOWED_OPERATORS.contains(condition.getOperator())
+                && !TEXT_LIKE_ALLOWED_OPERATORS.contains(condition.getOperator())) {
+            errors.add(edgeLocation + " 引用的字段 " + condition.getField()
+                    + " 是文本框/字典下拉类型，比较符仅允许 EQ/NE：" + condition.getOperator());
+        }
+        return errors;
+    }
+
+    /**
+     * 判断控件类型是否为文本框或字典下拉（比较符限定为 EQ/NE）。
+     */
+    private boolean isTextLikeControlType(Integer controlType) {
+        return Integer.valueOf(FormFieldControlType.TEXT).equals(controlType)
+                || Integer.valueOf(FormFieldControlType.DICT).equals(controlType);
+    }
+
+    /**
+     * 按业务类型 + 字段标识查找字段渲染元数据，业务类型维度的查询结果按调用方传入的缓存
+     * 复用，避免同一业务类型的多条条件边重复查询。
+     */
+    private FormFieldRenderItemVO findField(
+            String fieldBizType, String fieldCode, Map<String, List<FormFieldRenderItemVO>> renderSchemaCache) {
+        List<FormFieldRenderItemVO> schema = renderSchemaCache.computeIfAbsent(
+                fieldBizType, formFieldDefinitionService::buildRenderSchema);
+        return schema.stream()
+                .filter(item -> fieldCode.equals(item.getFieldCode()))
+                .findFirst()
+                .orElse(null);
     }
 
     /**
