@@ -115,7 +115,8 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
      * 未命中的路径（存量接口）保持"用 {@code menu} 头值做权限校验"的既有行为不变，不在本轮
      * 重新梳理全部存量接口（工作量超出本轮范围）。覆盖范围限定在本 change（含前置
      * {@code workflow-approval-engine}/本 change 第4节）新增的流程设计/发布审核/业务绑定/
-     * 试运行/模型启停接口，以及既有的审批 approve/reject 接口。
+     * 试运行/模型启停接口，既有的审批 approve/reject 接口，以及本 change 第6节新增的运维
+     * 终止流程实例接口（tasks.md 6.8）。
      */
     private static final List<PermissionMapping> FIXED_PERMISSION_MAPPINGS = List.of(
             new PermissionMapping("GET", "/api/workflow/process-models", "WorkflowDesign:model:view"),
@@ -138,7 +139,9 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
             new PermissionMapping("POST", "/api/workflow/process-bindings/*/enable", "WorkflowDesign:binding:edit"),
             new PermissionMapping("POST", "/api/workflow/process-bindings/*/disable", "WorkflowDesign:binding:edit"),
             new PermissionMapping("POST", "/api/approval-requests/*/approve", "ApprovalManagement:request:approve"),
-            new PermissionMapping("POST", "/api/approval-requests/*/reject", "ApprovalManagement:request:approve"));
+            new PermissionMapping("POST", "/api/approval-requests/*/reject", "ApprovalManagement:request:approve"),
+            new PermissionMapping("POST", "/api/v1/workflow/process-instances/*/terminate",
+                    "WorkflowDesign:instance:terminate"));
 
     /** 会话令牌业务逻辑接口。 */
     private final TokenService tokenService;

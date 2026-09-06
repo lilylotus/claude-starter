@@ -132,6 +132,77 @@ class TaskOperationsIntegrationTest extends AbstractWorkflowEngineIntegrationTes
     }
 
     /**
+     * design.md 第7节"delegate/resolve……禁止……链式委派"（tasks.md 6.5，此前实现遗漏）：
+     * 受托人在归还（resolve）之前不能把同一任务再次委派给第三人。
+     */
+    @Test
+    void delegate_shouldBeRejected_whenTaskAlreadyDelegatedAndPending() {
+        ProcessFixture fixture = deployAndSeed(TRANSFER_DELEGATE_RETURN_BPMN, threeLevelNodeSeeds());
+        WorkflowInstanceResult started = workflowService.start(new StartProcessCommand(
+                fixture.processCode(), "TEST", 1L, "集成测试流程", 849999L, null, null, null,
+                fixture.processDefinitionId(), null, null, ExecutionMode.LEGACY_SYNC));
+
+        Long taskId = singleTaskId(started.processInstanceId(), "levelOne");
+        workflowService.delegate(new DelegateCommand(taskId, 710001L, 718001L, "外出学习，委托代为审批", null));
+
+        assertThatThrownBy(() -> workflowService.delegate(
+                new DelegateCommand(taskId, 718001L, 718002L, "我也很忙，转手委托", null)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("链式委派");
+
+        // 被拒绝的链式委派不改变任务状态：仍然委派给最初的受托人，归还路径不受影响
+        ApprovalTaskEntity stillDelegated = approvalTaskMapper.selectById(taskId);
+        assertThat(stillDelegated.getAssigneeId()).isEqualTo(718001L);
+        Task flowableTask = taskService.createTaskQuery().taskId(stillDelegated.getFlowableTaskId()).singleResult();
+        assertThat(flowableTask.getDelegationState()).isEqualTo(DelegationState.PENDING);
+        assertThat(flowableTask.getOwner()).isEqualTo("710001");
+    }
+
+    /**
+     * design.md 第8节"候选人只对未分配任务有权；认领后原候选人不能抢着完成"（tasks.md 6.5，
+     * 此前实现遗漏：{@code TaskAuthorizationService} 只要操作人命中候选人表就放行，未校验
+     * 任务是否已经分配给了别人）。用转办（而非直接 approve）把任务分配给一个不在原候选人集合
+     * 中的第三人，验证原候选池里的另一位候选人此后无法再操作该任务——转办不像
+     * approve/reject 那样会立即消费掉 Flowable 任务，能干净地构造出"已分配但未完成"这一中间
+     * 状态。
+     */
+    @Test
+    void candidatePoolTask_shouldRejectOtherCandidate_afterAssignedToSomeoneElse() {
+        ProcessFixture fixture = deployAndSeed(TRANSFER_DELEGATE_RETURN_BPMN, List.of(
+                new NodeSeed("levelOne", "第一级审批(候选池)", ApprovalMode.SINGLE, null,
+                        "851001,851002", true, false, false, false),
+                new NodeSeed("levelTwo", "第二级审批", ApprovalMode.SINGLE, null, "710002",
+                        false, false, false, false),
+                new NodeSeed("levelThree", "第三级审批", ApprovalMode.SINGLE, null, "710003",
+                        false, false, false, false)));
+        WorkflowInstanceResult started = workflowService.start(new StartProcessCommand(
+                fixture.processCode(), "TEST", 1L, "集成测试流程", 859999L, null, null, null,
+                fixture.processDefinitionId(), null, null, ExecutionMode.LEGACY_SYNC));
+
+        Long taskId = singleTaskId(started.processInstanceId(), "levelOne");
+        ApprovalTaskEntity beforeAssign = approvalTaskMapper.selectById(taskId);
+        assertThat(beforeAssign.getAssigneeId()).isNull();
+
+        // 候选人 851001 把任务转办给候选池之外的第三人 861001，任务不再无主
+        workflowService.transfer(new TransferCommand(taskId, 851001L, 861001L, "转给专项负责人", null));
+        assertThat(approvalTaskMapper.selectById(taskId).getAssigneeId()).isEqualTo(861001L);
+
+        // 另一位原候选人 851002 仍然留在 tab_wf_approval_task_candidate，但任务已不再无主，
+        // 不应再被放行
+        assertThatThrownBy(() -> workflowService.approve(new ApproveCommand(taskId, 851002L, "同意", null)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权限");
+        assertThatThrownBy(() -> workflowService.transfer(
+                new TransferCommand(taskId, 851002L, 862001L, "抢转办", null)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权限");
+
+        // 真正的现任处理人可以正常审批推进
+        workflowService.approve(new ApproveCommand(taskId, 861001L, "同意", null));
+        assertThat(tasksOf(started.processInstanceId(), "levelTwo")).hasSize(1);
+    }
+
+    /**
      * spec.md Scenario"会签节点加签"：审批人对配置 {@code allow_add_sign=true} 的会签节点
      * 执行加签操作，新增一个待处理的审批任务分支，原有候选人的任务与完成条件判定不受影响。
      */

@@ -1,43 +1,27 @@
 package cn.nihility.rbac.approval.service.impl;
 
-import cn.nihility.rbac.app.dto.AppCreateRequest;
-import cn.nihility.rbac.app.dto.AppUpdateRequest;
-import cn.nihility.rbac.app.dto.AppVO;
-import cn.nihility.rbac.app.service.AppService;
 import cn.nihility.rbac.approval.constant.ApprovalOperationType;
 import cn.nihility.rbac.approval.constant.ApprovalRequestStatus;
 import cn.nihility.rbac.approval.dto.ApprovalRequestVO;
 import cn.nihility.rbac.approval.dto.ApprovalSubmitRequest;
 import cn.nihility.rbac.approval.dto.WriteOperationResultVO;
 import cn.nihility.rbac.approval.entity.ApprovalRequestEntity;
+import cn.nihility.rbac.approval.execution.MasterDataOperationExecutor;
 import cn.nihility.rbac.approval.mapper.ApprovalRequestMapper;
 import cn.nihility.rbac.approval.mapstruct.ApprovalConvert;
 import cn.nihility.rbac.approval.service.ApprovalProcessService;
 import cn.nihility.rbac.approval.service.ApprovalRequestService;
 import cn.nihility.rbac.auth.context.CurrentUserContext;
-import cn.nihility.rbac.auth.service.OrgScopeService;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.util.JacksonUtils;
 import cn.nihility.rbac.formfield.constant.FormFieldBizType;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
-import cn.nihility.rbac.org.dto.OrgCreateRequest;
-import cn.nihility.rbac.org.dto.OrgUpdateRequest;
-import cn.nihility.rbac.org.dto.OrgVO;
-import cn.nihility.rbac.org.service.OrgService;
 import cn.nihility.rbac.user.constant.PositionStatus;
-import cn.nihility.rbac.user.dto.PositionCreateRequest;
-import cn.nihility.rbac.user.dto.PositionUpdateRequest;
-import cn.nihility.rbac.user.dto.PositionVO;
-import cn.nihility.rbac.user.dto.UserCreateRequest;
-import cn.nihility.rbac.user.dto.UserUpdateRequest;
-import cn.nihility.rbac.user.dto.UserVO;
 import cn.nihility.rbac.user.entity.UserPositionEntity;
 import cn.nihility.rbac.user.mapper.UserPositionMapper;
-import cn.nihility.rbac.user.service.PositionService;
 import cn.nihility.rbac.user.service.UserDisplayService;
-import cn.nihility.rbac.user.service.UserService;
 import cn.nihility.rbac.workflow.assignee.support.TaskAuthorizationService;
 import cn.nihility.rbac.workflow.dslv2.form.WorkflowFormVersionService;
 import cn.nihility.rbac.workflow.constant.ApprovalAction;
@@ -113,20 +97,9 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
     /** 用户任职记录数据访问接口，用于提交申请时解析发起人所属组织。 */
     private final UserPositionMapper userPositionMapper;
 
-    /** 组织业务接口。 */
-    private final OrgService orgService;
-
-    /** 用户业务接口。 */
-    private final UserService userService;
-
-    /** 任职业务接口。 */
-    private final PositionService positionService;
-
-    /** 应用业务接口。 */
-    private final AppService appService;
-
-    /** 管辖组织范围接口。 */
-    private final OrgScopeService orgScopeService;
+    /** ORG/USER/POSITION/APP 主数据写操作的转换/管辖范围校验/执行公共组件，同步与异步执行路径
+     *  共用（production-approval-lifecycle change tasks.md 7.3）。 */
+    private final MasterDataOperationExecutor masterDataOperationExecutor;
 
     /** Bean Validation 校验器。 */
     private final Validator validator;
@@ -170,13 +143,13 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
             Long targetId,
             Object payload) {
         validateTypesAndTarget(bizType, operationType, targetId);
-        Object typedPayload = convertPayload(bizType, operationType, payload);
+        Object typedPayload = masterDataOperationExecutor.convertPayload(bizType, operationType, payload);
         validatePayload(typedPayload);
 
-        validateScope(bizType, operationType, targetId, typedPayload);
         LocalDateTime now = LocalDateTime.now();
         Long applicantId = requireCurrentUserId();
         String currentUserId = applicantId.toString();
+        masterDataOperationExecutor.validateScope(applicantId, bizType, operationType, targetId, typedPayload);
 
         // 提交时落库本次命中的不可变表单版本，以及冻结的变更前/变更后快照（design.md
         // Decision 5"申请保存完整业务快照、表单版本、before/after"）：变更前快照取自当前
@@ -186,7 +159,7 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
         Long formVersionId = workflowFormVersionService.ensureCurrentVersion(bizType).getId();
         Object beforeSnapshotSource = Objects.equals(operationType, ApprovalOperationType.CREATE)
                 ? null
-                : getCurrentTarget(bizType, targetId);
+                : masterDataOperationExecutor.getCurrentTarget(bizType, targetId);
         String requestPayloadJson = typedPayload == null ? null : JacksonUtils.toJson(typedPayload);
         ApprovalRequestEntity entity = ApprovalRequestEntity.builder()
                 .bizType(bizType)
@@ -270,18 +243,21 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
      * 推进一并回滚（本项目 Flowable 与业务表共用同一 DataSource/事务管理器，见最终报告说明）。
      */
     private void finalizeApproval(ApprovalRequestEntity entity, Long approverId, String opinion) {
-        Object payload = convertPayload(entity.getBizType(), entity.getOperationType(), entity.getRequestPayload());
+        Object payload = masterDataOperationExecutor.convertPayload(
+                entity.getBizType(), entity.getOperationType(), entity.getRequestPayload());
         Long submitterId = parseUserId(entity.getCreateBy());
         Object result;
         try {
             CurrentUserContext.setUserId(submitterId);
-            validateScope(entity.getBizType(), entity.getOperationType(), entity.getTargetId(), payload);
-            result = executeWrite(entity.getBizType(), entity.getOperationType(), entity.getTargetId(), payload);
+            masterDataOperationExecutor.validateScope(
+                    submitterId, entity.getBizType(), entity.getOperationType(), entity.getTargetId(), payload);
+            result = masterDataOperationExecutor.executeWrite(
+                    entity.getBizType(), entity.getOperationType(), entity.getTargetId(), payload);
         } finally {
             CurrentUserContext.setUserId(approverId);
         }
 
-        Long resultTargetId = extractTargetId(result);
+        Long resultTargetId = masterDataOperationExecutor.extractTargetId(result);
         LocalDateTime now = LocalDateTime.now();
         LambdaUpdateWrapper<ApprovalRequestEntity> wrapper = new LambdaUpdateWrapper<ApprovalRequestEntity>()
                 .eq(ApprovalRequestEntity::getId, entity.getId())
@@ -531,7 +507,8 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
             vo.setCreateByName(displayNames.getOrDefault(entity.getCreateBy(), "未知用户"));
         }
         if (Objects.equals(entity.getOperationType(), ApprovalOperationType.UPDATE)) {
-            vo.setTargetSnapshot(getCurrentTarget(entity.getBizType(), entity.getTargetId()));
+            vo.setTargetSnapshot(
+                    masterDataOperationExecutor.getCurrentTarget(entity.getBizType(), entity.getTargetId()));
         }
         return vo;
     }
@@ -564,54 +541,6 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
                 payload.remove(fieldCode);
             }
         });
-    }
-
-    /**
-     * 读取更新申请目标记录当前值。
-     */
-    private Object getCurrentTarget(String bizType, Long targetId) {
-        try {
-            return switch (bizType) {
-                case FormFieldBizType.ORG -> orgService.getById(targetId);
-                case FormFieldBizType.USER -> userService.getById(targetId);
-                case FormFieldBizType.POSITION -> positionService.getById(targetId);
-                case FormFieldBizType.APP -> appService.getById(targetId);
-                default -> null;
-            };
-        } catch (BusinessException exception) {
-            return null;
-        }
-    }
-
-    /**
-     * 将通用请求体转换为对应模块的 DTO。
-     */
-    private Object convertPayload(String bizType, String operationType, Object payload) {
-        if (!Objects.equals(operationType, ApprovalOperationType.CREATE)
-                && !Objects.equals(operationType, ApprovalOperationType.UPDATE)) {
-            return null;
-        }
-        if (payload == null) {
-            throw new BusinessException("创建或更新操作的请求内容不能为空");
-        }
-        Class<?> targetClass = switch (bizType + ':' + operationType) {
-            case FormFieldBizType.ORG + ":" + ApprovalOperationType.CREATE -> OrgCreateRequest.class;
-            case FormFieldBizType.ORG + ":" + ApprovalOperationType.UPDATE -> OrgUpdateRequest.class;
-            case FormFieldBizType.USER + ":" + ApprovalOperationType.CREATE -> UserCreateRequest.class;
-            case FormFieldBizType.USER + ":" + ApprovalOperationType.UPDATE -> UserUpdateRequest.class;
-            case FormFieldBizType.POSITION + ":" + ApprovalOperationType.CREATE -> PositionCreateRequest.class;
-            case FormFieldBizType.POSITION + ":" + ApprovalOperationType.UPDATE -> PositionUpdateRequest.class;
-            case FormFieldBizType.APP + ":" + ApprovalOperationType.CREATE -> AppCreateRequest.class;
-            case FormFieldBizType.APP + ":" + ApprovalOperationType.UPDATE -> AppUpdateRequest.class;
-            default -> throw new BusinessException("不支持的审批申请类型");
-        };
-        if (targetClass.isInstance(payload)) {
-            return payload;
-        }
-        if (payload instanceof String json) {
-            return JacksonUtils.toObj(json, targetClass);
-        }
-        return JacksonUtils.convert(payload, targetClass);
     }
 
     /**
@@ -650,134 +579,6 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
     }
 
     /**
-     * 在提交与审批通过时按提交人身份执行管辖组织范围校验。
-     */
-    private void validateScope(String bizType, String operationType, Long targetId, Object payload) {
-        Long userId = requireCurrentUserId();
-        if (Objects.equals(bizType, FormFieldBizType.USER)) {
-            return;
-        }
-        if (Objects.equals(bizType, FormFieldBizType.ORG)) {
-            validateOrgScope(userId, operationType, targetId, payload);
-            return;
-        }
-        if (Objects.equals(bizType, FormFieldBizType.POSITION)) {
-            PositionVO current = targetId == null ? null : positionService.getById(targetId);
-            Long orgId = payload instanceof PositionCreateRequest request
-                    ? request.getOrgId()
-                    : payload instanceof PositionUpdateRequest request ? request.getOrgId() : current.getOrgId();
-            assertOrgAllowed(userId, orgId);
-            return;
-        }
-        AppVO current = targetId == null ? null : appService.getById(targetId);
-        Long orgId = payload instanceof AppCreateRequest request
-                ? request.getOrgId()
-                : payload instanceof AppUpdateRequest request ? request.getOrgId() : current.getOrgId();
-        assertOrgAllowed(userId, orgId);
-    }
-
-    /**
-     * 校验组织申请的管辖范围。
-     */
-    private void validateOrgScope(Long userId, String operationType, Long targetId, Object payload) {
-        if (Objects.equals(operationType, ApprovalOperationType.CREATE)) {
-            assertOrgAllowed(userId, ((OrgCreateRequest) payload).getParentId());
-            return;
-        }
-        OrgVO current = orgService.getById(targetId);
-        assertOrgAllowed(userId, targetId);
-        if (Objects.equals(operationType, ApprovalOperationType.UPDATE)) {
-            Long newParentId = ((OrgUpdateRequest) payload).getParentId();
-            if (!Objects.equals(current.getParentId(), newParentId)) {
-                assertOrgAllowed(userId, newParentId);
-            }
-        }
-    }
-
-    /**
-     * 断言组织 id 位于当前用户管辖范围。
-     */
-    private void assertOrgAllowed(Long userId, Long orgId) {
-        if (!orgScopeService.isOrgIdAllowed(userId, orgId)) {
-            throw new BusinessException("无权限操作管辖范围之外的组织");
-        }
-    }
-
-    /**
-     * 调用四个模块既有 Service 方法执行真实写操作。
-     */
-    private Object executeWrite(String bizType, String operationType, Long targetId, Object payload) {
-        return switch (bizType + ':' + operationType) {
-            case FormFieldBizType.ORG + ":" + ApprovalOperationType.CREATE ->
-                    orgService.create((OrgCreateRequest) payload);
-            case FormFieldBizType.ORG + ":" + ApprovalOperationType.UPDATE ->
-                    orgService.update(targetId, (OrgUpdateRequest) payload);
-            case FormFieldBizType.ORG + ":" + ApprovalOperationType.ENABLE -> orgService.enable(targetId);
-            case FormFieldBizType.ORG + ":" + ApprovalOperationType.DISABLE -> orgService.disable(targetId);
-            case FormFieldBizType.ORG + ":" + ApprovalOperationType.DELETE -> deleteOrg(targetId);
-            case FormFieldBizType.USER + ":" + ApprovalOperationType.CREATE ->
-                    userService.create((UserCreateRequest) payload);
-            case FormFieldBizType.USER + ":" + ApprovalOperationType.UPDATE ->
-                    userService.update(targetId, (UserUpdateRequest) payload);
-            case FormFieldBizType.USER + ":" + ApprovalOperationType.ENABLE -> userService.enable(targetId);
-            case FormFieldBizType.USER + ":" + ApprovalOperationType.DISABLE -> userService.disable(targetId);
-            case FormFieldBizType.USER + ":" + ApprovalOperationType.DELETE -> deleteUser(targetId);
-            case FormFieldBizType.POSITION + ":" + ApprovalOperationType.CREATE ->
-                    positionService.create((PositionCreateRequest) payload);
-            case FormFieldBizType.POSITION + ":" + ApprovalOperationType.UPDATE ->
-                    positionService.update(targetId, (PositionUpdateRequest) payload);
-            case FormFieldBizType.POSITION + ":" + ApprovalOperationType.ENABLE -> positionService.enable(targetId);
-            case FormFieldBizType.POSITION + ":" + ApprovalOperationType.DISABLE -> positionService.disable(targetId);
-            case FormFieldBizType.POSITION + ":" + ApprovalOperationType.DELETE -> deletePosition(targetId);
-            case FormFieldBizType.APP + ":" + ApprovalOperationType.CREATE ->
-                    appService.create((AppCreateRequest) payload);
-            case FormFieldBizType.APP + ":" + ApprovalOperationType.UPDATE ->
-                    appService.update(targetId, (AppUpdateRequest) payload);
-            case FormFieldBizType.APP + ":" + ApprovalOperationType.ENABLE -> appService.enable(targetId);
-            case FormFieldBizType.APP + ":" + ApprovalOperationType.DISABLE -> appService.disable(targetId);
-            case FormFieldBizType.APP + ":" + ApprovalOperationType.DELETE -> deleteApp(targetId);
-            default -> throw new BusinessException("不支持的审批申请类型");
-        };
-    }
-
-    /** 删除组织并返回空结果。 */
-    private Object deleteOrg(Long id) {
-        orgService.delete(id);
-        return null;
-    }
-
-    /** 删除用户并返回空结果。 */
-    private Object deleteUser(Long id) {
-        userService.delete(id);
-        return null;
-    }
-
-    /** 删除任职并返回空结果。 */
-    private Object deletePosition(Long id) {
-        positionService.delete(id);
-        return null;
-    }
-
-    /** 删除应用并返回空结果。 */
-    private Object deleteApp(Long id) {
-        appService.delete(id);
-        return null;
-    }
-
-    /**
-     * 从创建结果提取主键 id。
-     */
-    private Long extractTargetId(Object result) {
-        return switch (result) {
-            case OrgVO value -> value.getId();
-            case UserVO value -> value.getId();
-            case PositionVO value -> value.getId();
-            case AppVO value -> value.getId();
-            case null, default -> null;
-        };
-    }
-
-    /**
      * 查询审批申请。
      */
     private ApprovalRequestEntity getExisting(Long id) {
@@ -789,30 +590,47 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
     }
 
     /**
-     * 查询申请当前所处节点下、状态仍为待处理（{@code PENDING}/{@code CLAIMED}）的审批任务。
-     * 正常情况下同一时刻一条申请只对应唯一一条开放任务；查不到说明任务已被处理或申请尚未
-     * 成功接入引擎。
+     * 查询申请当前所处节点下、状态仍为待处理（{@code PENDING}/{@code CLAIMED}）的唯一审批任务。
+     * 查不到说明任务已被处理或申请尚未成功接入引擎；并行分叉场景下同一流程实例可能同时存在
+     * 多条开放任务，此时"按申请 id 审批"这条旧接口无法确定操作的是哪一条任务，直接消歧拒绝，
+     * 引导调用方改用按 taskId 明确操作的既有接口（production-approval-lifecycle change
+     * tasks.md 6.9）。
      */
     private ApprovalTaskEntity requireCurrentTask(Long processInstanceId) {
-        ApprovalTaskEntity task = findOpenTask(processInstanceId);
-        if (task == null) {
+        List<ApprovalTaskEntity> openTasks = findOpenTasks(processInstanceId);
+        if (openTasks.isEmpty()) {
             throw new BusinessException("审批任务已被处理");
         }
-        return task;
+        if (openTasks.size() > 1) {
+            throw new BusinessException("当前流程实例存在多个待处理任务，无法通过申请 id 确定操作目标，"
+                    + "请改用 POST /api/v1/workflow/tasks/{taskId}/approve 或"
+                    + " /api/v1/workflow/tasks/{taskId}/reject 接口按任务 id 明确操作");
+        }
+        return openTasks.get(0);
     }
 
     /**
-     * 查询流程实例当前开放（{@code PENDING}/{@code CLAIMED}）的审批任务，不存在时返回
-     * {@code null}。
+     * 查询流程实例当前开放（{@code PENDING}/{@code CLAIMED}）的任意一条审批任务，不存在时返回
+     * {@code null}。仅用于 {@link #submit} 流程发起后填充展示用的 {@code flowableTaskId} 字段，
+     * 不涉及鉴权/操作目标确定；即便首节点恰好是并行分叉、发起后同时产生多条开放任务，这里也只是
+     * "取一条用于展示"，刻意保留"任取其一"的语义，不需要跟着 {@link #requireCurrentTask}
+     * 一起改为消歧报错（production-approval-lifecycle change tasks.md 6.9）。
      */
     private ApprovalTaskEntity findOpenTask(Long processInstanceId) {
+        List<ApprovalTaskEntity> openTasks = findOpenTasks(processInstanceId);
+        return openTasks.isEmpty() ? null : openTasks.get(0);
+    }
+
+    /**
+     * 查询流程实例当前全部开放（{@code PENDING}/{@code CLAIMED}）审批任务。
+     */
+    private List<ApprovalTaskEntity> findOpenTasks(Long processInstanceId) {
         if (processInstanceId == null) {
-            return null;
+            return List.of();
         }
-        return approvalTaskMapper.selectOne(new LambdaQueryWrapper<ApprovalTaskEntity>()
+        return approvalTaskMapper.selectList(new LambdaQueryWrapper<ApprovalTaskEntity>()
                 .eq(ApprovalTaskEntity::getProcessInstanceId, processInstanceId)
-                .in(ApprovalTaskEntity::getStatus, TaskStatus.PENDING, TaskStatus.CLAIMED)
-                .last("LIMIT 1"));
+                .in(ApprovalTaskEntity::getStatus, TaskStatus.PENDING, TaskStatus.CLAIMED));
     }
 
     /**

@@ -37,6 +37,15 @@ public class TaskAuthorizationService {
         if (Objects.equals(task.getAssigneeId(), operatorId)) {
             return true;
         }
+        if (task.getAssigneeId() != null) {
+            // 任务已经分配给他人（认领、审批人解析直接命中单人、转办、委派均会写入
+            // assigneeId）：候选人身份仅对"未分配"任务有权（design.md 第8节"候选人只对未分配
+            // 任务有权；认领后原候选人不能抢着完成"），此处必须直接拒绝，不能再落到下面的候选人
+            // 表查询——否则任何仍留在 tab_wf_approval_task_candidate 里的原候选人（认领/分配后
+            // 从不清理该表）都能对一个已经属于别人的任务发起 transfer/delegate/addSign/return
+            // 等操作，是真实越权（tasks.md 6.5，此前实现遗漏）。
+            return false;
+        }
         boolean userCandidateHit = approvalTaskCandidateMapper.exists(new LambdaQueryWrapper<ApprovalTaskCandidateEntity>()
                 .eq(ApprovalTaskCandidateEntity::getTaskId, task.getId())
                 .eq(ApprovalTaskCandidateEntity::getCandidateType, CandidateType.USER)

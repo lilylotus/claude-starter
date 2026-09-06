@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 我的待办/已办分页查询：排序、去重、分页全部下推数据库层（production-approval-lifecycle
+     change design.md 第309行禁止加载全量到 Java 后内存过滤分页）。JOIN 只放关联键，过滤条件
+     统一放在 WHERE（含子查询自身的 WHERE）里，避免 JOIN ON 写查询条件导致语法歧义。 -->
+<mapper namespace="cn.nihility.rbac.workflow.mapper.ApprovalTaskMapper">
+
+    <!-- 待办分页：候选任务 id 集合已在 Service 层解析完成，这里只做业务对象类型过滤 +
+         稳定排序（create_time DESC, id DESC）+ 分页；businessType 为空表示不过滤。 -->
+    <select id="selectTodoPage" resultType="cn.nihility.rbac.workflow.entity.ApprovalTaskEntity">
+        SELECT t.*
+        FROM tab_wf_approval_task t
+        INNER JOIN tab_wf_process_instance p ON p.id = t.process_instance_id
+        WHERE t.id IN
+        <foreach collection="taskIds" item="taskId" open="(" separator="," close=")">#{taskId}</foreach>
+        <if test="businessType != null">AND p.business_type = #{businessType}</if>
+        ORDER BY t.create_time DESC, t.id DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <!-- 已办分页："每组最新一条记录"用自关联子查询 GROUP BY MAX(id) 实现（仓库约定禁止
+         MySQL 8.0+ 窗口函数，目标库 5.7）：先在子查询里按 operatorId + actions 过滤出
+         每个 taskId 命中的最新一条审批轨迹 id，再关联出该轨迹行与对应任务行；业务对象类型
+         过滤、排序（按轨迹发生时间 create_time DESC, id DESC）、分页均在外层完成。 -->
+    <select id="selectDonePage" resultType="cn.nihility.rbac.workflow.entity.ApprovalTaskEntity">
+        SELECT t.*
+        FROM tab_wf_approval_task t
+        INNER JOIN (
+            SELECT r.task_id, MAX(r.id) AS max_id
+            FROM tab_wf_approval_record r
+            WHERE r.operator_id = #{operatorId}
+            AND r.task_id IS NOT NULL
+            AND r.action IN
+            <foreach collection="actions" item="action" open="(" separator="," close=")">#{action}</foreach>
+            GROUP BY r.task_id
+        ) latest ON t.id = latest.task_id
+        INNER JOIN tab_wf_approval_record rec ON rec.id = latest.max_id
+        INNER JOIN tab_wf_process_instance p ON p.id = t.process_instance_id
+        <where>
+            <if test="businessType != null">AND p.business_type = #{businessType}</if>
+        </where>
+        ORDER BY rec.create_time DESC, rec.id DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+</mapper>

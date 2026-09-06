@@ -3,7 +3,9 @@ package cn.nihility.rbac.workflow.dslv2;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import cn.nihility.rbac.workflow.constant.ExecutionMode;
+import cn.nihility.rbac.workflow.constant.ProcessInstanceStatus;
 import cn.nihility.rbac.workflow.constant.ProcessModelStatus;
+import cn.nihility.rbac.workflow.constant.TaskStatus;
 import cn.nihility.rbac.workflow.designer.compiler.NodeAssigneeRuleDraft;
 import cn.nihility.rbac.workflow.dslv2.compiler.CompiledProcessV2;
 import cn.nihility.rbac.workflow.dslv2.compiler.WorkflowModelCompilerV2;
@@ -11,6 +13,7 @@ import cn.nihility.rbac.workflow.dslv2.constant.AssigneeTypeV2;
 import cn.nihility.rbac.workflow.dslv2.constant.ConditionLogic;
 import cn.nihility.rbac.workflow.dslv2.constant.ConditionOperator;
 import cn.nihility.rbac.workflow.dslv2.constant.EmptyPolicy;
+import cn.nihility.rbac.workflow.dslv2.constant.RejectPolicy;
 import cn.nihility.rbac.workflow.dslv2.constant.VoteExecution;
 import cn.nihility.rbac.workflow.dslv2.constant.VoteMode;
 import cn.nihility.rbac.workflow.dslv2.dto.ActionsConfigDsl;
@@ -30,6 +33,7 @@ import cn.nihility.rbac.workflow.dslv2.dto.StartNodeDslV2;
 import cn.nihility.rbac.workflow.dslv2.dto.VoteConfigDsl;
 import cn.nihility.rbac.workflow.dslv2.engine.WorkflowV2ReassignmentService;
 import cn.nihility.rbac.workflow.dto.ApproveCommand;
+import cn.nihility.rbac.workflow.dto.RejectCommand;
 import cn.nihility.rbac.workflow.dto.StartProcessCommand;
 import cn.nihility.rbac.workflow.dto.WorkflowInstanceResult;
 import cn.nihility.rbac.workflow.engine.WorkflowService;
@@ -89,6 +93,8 @@ class WorkflowModelCompilerV2IntegrationTest {
     private ApprovalTaskMapper approvalTaskMapper;
     @Autowired
     private CcRecordMapper ccRecordMapper;
+    @Autowired
+    private org.flowable.engine.TaskService taskService;
 
     private static final AtomicInteger PROCESS_CODE_SEQ = new AtomicInteger();
 
@@ -145,6 +151,163 @@ class WorkflowModelCompilerV2IntegrationTest {
         List<CcRecordEntity> ccRecords = ccRecordMapper.selectList(new LambdaQueryWrapper<CcRecordEntity>()
                 .eq(CcRecordEntity::getInstanceId, started.processInstanceId()));
         assertThat(ccRecords).extracting(CcRecordEntity::getRecipientId).containsExactly(910004L);
+    }
+
+    /**
+     * 并行块内一个会签分支（VETO 策略）反对票终止整个实例：验证仍处于开放状态的另一分支
+     * （单人审批，尚未处理）与本分支内其余未决候选人的任务均被引擎真实取消
+     * （{@code taskService.createTaskQuery()} 归零），业务投影同步记为
+     * {@link TaskStatus#CANCELLED} 并携带取消原因，不能误记为已完成/已同意（design.md 第7节
+     * "任一分支终止拒绝必须结束整个实例……不能仅把该分支导向普通 EndEvent 后遗留其他分支"，
+     * tasks.md 6.4）。{@code completeV2VoteTask} 的终止分支直接
+     * {@code runtimeService.deleteProcessInstance} 整个流程实例（比 BPMN
+     * {@code TerminateEventDefinition} 更彻底，天然覆盖跨并行分支），验证的正是
+     * {@code closeOpenTasks} 此前把取消任务误记为 {@code COMPLETED} 这一真实缺陷的修复
+     * （tasks.md 6.4 本轮修复）。
+     */
+    @Test
+    void parallelBranchVoteRejected_shouldCancelSiblingBranchTask_andMarkCancelledNotApproved() {
+        String processCode = "TEST_V2_PARALLEL_VOTE_REJECT_" + PROCESS_CODE_SEQ.incrementAndGet();
+        ApprovalNodeDslV2 branchBVote = voteApprovalNode(
+                "branchB", "分支B会签", "962001,962002", voteConfig(VoteMode.ALL, VoteExecution.PARALLEL, null));
+        ProcessModelDslV2 dsl = ProcessModelDslV2.builder()
+                .schemaVersion(2)
+                .processCode(processCode)
+                .processName("v2 并行分支会签反对票终止测试")
+                .nodes(List.of(
+                        node(new StartNodeDslV2(), "start"),
+                        node(splitNode("split", "join"), "split"),
+                        approvalNode("branchA", "分支A审批", 961001L, null),
+                        branchBVote,
+                        node(joinNode("join", "split"), "join"),
+                        endNode("end", "APPROVED")))
+                .edges(List.of(
+                        edge("e1", "start", "split", null, null),
+                        edge("e2", "split", "branchA", null, null),
+                        edge("e3", "split", "branchB", null, null),
+                        edge("e4", "branchA", "join", null, null),
+                        edge("e5", "branchB", "join", null, null),
+                        edge("e6", "join", "end", null, null)))
+                .build();
+
+        CompiledProcessV2 compiled = compiler.compile(dsl);
+        var fixture = deployAndSeed(processCode, compiled);
+
+        WorkflowInstanceResult started = workflowService.start(new StartProcessCommand(
+                processCode, "TEST", 1L, "v2 并行分支反对票终止测试", 969999L, null, null, null,
+                fixture.definitionId(), null, null, ExecutionMode.LEGACY_SYNC));
+
+        List<ApprovalTaskEntity> branchATasks = tasksOf(started.processInstanceId(), "branchA");
+        List<ApprovalTaskEntity> branchBTasks = tasksOf(started.processInstanceId(), "branchB");
+        assertThat(branchATasks).hasSize(1);
+        assertThat(branchBTasks).hasSize(2);
+        // 分支A故意不处理，验证它作为"另一并行分支的开放任务"会被联动取消。
+        ApprovalTaskEntity branchB962001 = branchBTasks.stream()
+                .filter(t -> java.util.Objects.equals(t.getAssigneeId(), 962001L))
+                .findFirst().orElseThrow();
+
+        workflowService.reject(new RejectCommand(branchB962001.getId(), 962001L, "不同意", null));
+
+        ProcessInstanceEntity finished = processInstanceMapper.selectById(started.processInstanceId());
+        assertThat(finished.getStatus()).isEqualTo("REJECTED");
+        assertThat(taskService.createTaskQuery().processInstanceId(started.flowableProcessInstanceId()).count())
+                .isEqualTo(0);
+
+        ApprovalTaskEntity branchAAfter = approvalTaskMapper.selectById(branchATasks.get(0).getId());
+        assertThat(branchAAfter.getStatus()).isEqualTo(TaskStatus.CANCELLED);
+        assertThat(branchAAfter.getCancelReason()).isNotBlank();
+
+        ApprovalTaskEntity branchB962002After = approvalTaskMapper.selectById(branchBTasks.stream()
+                .filter(t -> java.util.Objects.equals(t.getAssigneeId(), 962002L))
+                .findFirst().orElseThrow().getId());
+        assertThat(branchB962002After.getStatus()).isEqualTo(TaskStatus.CANCELLED);
+        assertThat(branchB962002After.getCancelReason()).isNotBlank();
+
+        ApprovalTaskEntity rejectedTask = approvalTaskMapper.selectById(branchB962001.getId());
+        assertThat(rejectedTask.getStatus()).isEqualTo(TaskStatus.COMPLETED);
+    }
+
+    /**
+     * 混合并行分支：一个 VETO 会签分支 + 一个 THRESHOLD 会签分支同时进行
+     * （tasks.md 6.4"两个并行分支，一个 VETO 一个 THRESHOLD"混合场景）。THRESHOLD 分支已有 1 票
+     * 真实同意（应保留为 {@code COMPLETED}，不能被联动取消逻辑误伤为 {@code CANCELLED}）、尚有
+     * 2 票未决时，VETO 分支第一票反对立即终止整个实例；验证 VETO 分支自身未决候选人与
+     * THRESHOLD 分支未决候选人均被取消，THRESHOLD 分支已经真实完成的那一票不受影响。
+     */
+    @Test
+    void mixedVetoAndThresholdParallelBranches_shouldTerminateAndCancelOnlyUndecidedTasks() {
+        String processCode = "TEST_V2_PARALLEL_MIXED_VOTE_" + PROCESS_CODE_SEQ.incrementAndGet();
+        ApprovalNodeDslV2 branchAVote = voteApprovalNode(
+                "branchA", "分支A会签(VETO)", "965001,965002", voteConfig(VoteMode.ALL, VoteExecution.PARALLEL, null));
+        ApprovalNodeDslV2 branchBVote = voteApprovalNode(
+                "branchB", "分支B会签(THRESHOLD)", "966001,966002,966003",
+                voteConfig(VoteMode.PERCENT, VoteExecution.PARALLEL, 60));
+        branchBVote.getVote().setRejectPolicy(RejectPolicy.THRESHOLD);
+        ProcessModelDslV2 dsl = ProcessModelDslV2.builder()
+                .schemaVersion(2)
+                .processCode(processCode)
+                .processName("v2 混合 VETO+THRESHOLD 并行分支测试")
+                .nodes(List.of(
+                        node(new StartNodeDslV2(), "start"),
+                        node(splitNode("split", "join"), "split"),
+                        branchAVote,
+                        branchBVote,
+                        node(joinNode("join", "split"), "join"),
+                        endNode("end", "APPROVED")))
+                .edges(List.of(
+                        edge("e1", "start", "split", null, null),
+                        edge("e2", "split", "branchA", null, null),
+                        edge("e3", "split", "branchB", null, null),
+                        edge("e4", "branchA", "join", null, null),
+                        edge("e5", "branchB", "join", null, null),
+                        edge("e6", "join", "end", null, null)))
+                .build();
+
+        CompiledProcessV2 compiled = compiler.compile(dsl);
+        var fixture = deployAndSeed(processCode, compiled);
+
+        WorkflowInstanceResult started = workflowService.start(new StartProcessCommand(
+                processCode, "TEST", 1L, "v2 混合并行会签测试", 979999L, null, null, null,
+                fixture.definitionId(), null, null, ExecutionMode.LEGACY_SYNC));
+
+        List<ApprovalTaskEntity> branchATasks = tasksOf(started.processInstanceId(), "branchA");
+        List<ApprovalTaskEntity> branchBTasks = tasksOf(started.processInstanceId(), "branchB");
+        assertThat(branchATasks).hasSize(2);
+        assertThat(branchBTasks).hasSize(3);
+
+        // THRESHOLD 分支先真实同意 1 票（K=2，未达阈值，节点保持等待）
+        ApprovalTaskEntity branchB966001 = branchBTasks.stream()
+                .filter(t -> java.util.Objects.equals(t.getAssigneeId(), 966001L)).findFirst().orElseThrow();
+        workflowService.approve(new ApproveCommand(branchB966001.getId(), 966001L, "同意", null));
+        assertThat(processInstanceMapper.selectById(started.processInstanceId()).getStatus())
+                .isEqualTo(ProcessInstanceStatus.RUNNING);
+
+        // VETO 分支第一票反对，立即终止整个实例
+        ApprovalTaskEntity branchA965001 = branchATasks.stream()
+                .filter(t -> java.util.Objects.equals(t.getAssigneeId(), 965001L)).findFirst().orElseThrow();
+        workflowService.reject(new RejectCommand(branchA965001.getId(), 965001L, "不同意", null));
+
+        ProcessInstanceEntity finished = processInstanceMapper.selectById(started.processInstanceId());
+        assertThat(finished.getStatus()).isEqualTo("REJECTED");
+        assertThat(taskService.createTaskQuery().processInstanceId(started.flowableProcessInstanceId()).count())
+                .isEqualTo(0);
+
+        // VETO 分支自身未决候选人被取消
+        ApprovalTaskEntity branchA965002After = approvalTaskMapper.selectById(branchATasks.stream()
+                .filter(t -> java.util.Objects.equals(t.getAssigneeId(), 965002L)).findFirst().orElseThrow().getId());
+        assertThat(branchA965002After.getStatus()).isEqualTo(TaskStatus.CANCELLED);
+
+        // THRESHOLD 分支两个未决候选人被取消
+        for (Long assigneeId : List.of(966002L, 966003L)) {
+            ApprovalTaskEntity after = approvalTaskMapper.selectById(branchBTasks.stream()
+                    .filter(t -> java.util.Objects.equals(t.getAssigneeId(), assigneeId)).findFirst().orElseThrow().getId());
+            assertThat(after.getStatus()).as("候选人 %s 的未决任务应被取消", assigneeId).isEqualTo(TaskStatus.CANCELLED);
+            assertThat(after.getCancelReason()).isNotBlank();
+        }
+
+        // THRESHOLD 分支已真实完成的那一票不受联动取消影响
+        ApprovalTaskEntity branchB966001After = approvalTaskMapper.selectById(branchB966001.getId());
+        assertThat(branchB966001After.getStatus()).isEqualTo(TaskStatus.COMPLETED);
     }
 
     @Test
@@ -413,6 +576,24 @@ class WorkflowModelCompilerV2IntegrationTest {
         approval.setEmptyPolicy(EmptyPolicy.BLOCK);
         ActionsConfigDsl actions = new ActionsConfigDsl();
         approval.setActions(actions);
+        return approval;
+    }
+
+    /**
+     * 构造多候选人会签审批节点（逗号分隔用户 id），与单人/角色 {@link #approvalNode} 平行独立。
+     */
+    private ApprovalNodeDslV2 voteApprovalNode(String id, String name, String candidateUserIds, VoteConfigDsl vote) {
+        ApprovalNodeDslV2 approval = new ApprovalNodeDslV2();
+        approval.setId(id);
+        approval.setType("APPROVAL");
+        approval.setName(name);
+        AssigneeConfigDsl assignee = new AssigneeConfigDsl();
+        assignee.setType(AssigneeTypeV2.USER);
+        assignee.setValue(candidateUserIds);
+        approval.setAssignee(assignee);
+        approval.setVote(vote);
+        approval.setEmptyPolicy(EmptyPolicy.BLOCK);
+        approval.setActions(new ActionsConfigDsl());
         return approval;
     }
 

@@ -2,6 +2,27 @@
 
 本方案回答“业务管理员怎样自己画审批流程，并把画出的流程安全地用于实际审批”。目标读者为流程管理员、前后端开发、测试与运维；以下为待实施设计，不代表已经上线。
 
+### 当前实施状态（截至 2026-09-05，用户主动收尾）
+
+本方案第1-6节（数据模型、DSL v2 编译器、设计/发布/绑定接口、表单/身份/安全、运行时
+与复杂任务）与第7节前三项（Outbox 同事务写入+CAS 租约领取+退避重试/死信、消费唯一键
+去重+过期租约 fencing+原子提交、ORG/USER 可靠执行适配器）已按 tasks.md 记录真实编码
+完成并有真实测试佐证。用户在此基础上明确决定本轮编码到此为止，第7节剩余部分
+（7.4-7.7：POSITION/APP 适配、LEGACY_SYNC/RELIABLE_ASYNC 路由分流与冻结校验、抄送/
+通知、AUTO 异步确认）与第8-10节（前端完整体验、超时与运维、真实验收上线）转入
+"已识别、未实施"状态，详见 `tasks.md` 中 7.3 之后的范围收敛说明；这是主动的范围
+决策，不是本方案在架构上不可行或存在缺陷。下文第3-13节描述的仍是完整方案（包括
+尚未实施部分），作为未来如果继续推进 7.4 及以后工作时的有效蓝图，不因本次收尾而
+改写架构本身。
+
+**需要如实澄清的一点**：第7节已交付的三项（7.1-7.3）目前只是"基础设施已具备"，
+**尚未接入生产路由**——`ApprovalRequestServiceImpl.finalizeApproval` 仍完全走
+`LEGACY_SYNC` 同步执行路径；`ProcessBindingResolutionService.resolveForStart`
+（第4节已实现）仍会对 `execution_mode=RELIABLE_ASYNC` 的绑定直接拒绝并抛出"可靠
+异步执行尚未实现"异常。这个拒绝在 7.5（按 execution_mode 做路由分流、冻结与前置
+校验）完成前依然是正确行为，`RELIABLE_ASYNC` 从生产可用性角度依然不可用，不应把
+"Outbox/消费编排/ORG/USER 适配器代码已经存在"等同于"可靠异步执行已经生产可用"。
+
 ### 现有基础与实际缺口
 
 2026-09-04 读取工作树发现已有大量未提交的流程开发内容；这里只记录读取时的快照，不覆盖既有工作。
@@ -266,7 +287,7 @@ MI 完成条件只结束本组；取消剩余任务由引擎完成，业务投�
 
 事件类型覆盖 TASK_CREATED/ASSIGNED/CANCELLED、PROCESS_APPROVED/REJECTED、BUSINESS_SUCCEEDED/FAILED、CC_CREATED。事务写入保证不丢；数据库轮询至少一次投递，不能承诺网络 exactly-once。
 
-MySQL 5.7 领取方式：按索引读取到期候选 ID，逐条条件 UPDATE 抢占租约（status、lease_until、revision），检查影响行数；没有抢到则跳过。租约 token 用于完成/续期 CAS，防旧 worker 覆盖新 worker。失败指数退避+抖动，建议最多8次/24小时后人工处理，可配置。消费者按 eventId+consumerCode 去重。
+MySQL 5.7 领取方式：按索引读取到期候选 ID，逐条条件 UPDATE 抢占租约（status、lease_until、lease_token），检查影响行数；没有抢到则跳过。**实施澄清（tasks.md 7.1 已核实）**：`tab_wf_outbox_event` 实际未建独立 `revision` 列，CAS 精确匹配条件为 `id + status='LEASED' + lease_token`（而非 revision 字段），完成/续期同样以此三条件精确匹配防旧 worker 覆盖新 worker。失败指数退避+抖动，建议最多8次/24小时后人工处理，可配置（已按 `OutboxRetryProperties` 落地为可配置项）。消费者按 eventId+consumerCode 去重。
 
 同库业务 executor 以申请行锁+成功标记保证正式变更一次落库；崩溃后重领仍需读取成功结果。外部渠道以 eventId 作为外部幂等键，超时结果未知时查询外部结果再重试；无幂等/查询能力的外部动作不得宣称可安全自动重试，应进入人工确认。
 
@@ -290,7 +311,9 @@ AUTO 只允许预注册 actionCode 与参数 schema。纯内部快速计算可�
 
 ### 12. API 与页面契约
 
-保持已存在前缀，避免为统一命名破坏调用者。所有响应沿用 `{code,message,data}`，非零错误由统一拦截器显示。以下表中“新增”为拟增加接口，非当前已可调用。
+保持已存在前缀，避免为统一命名破坏调用者。所有响应沿用 `{code,message,data}`，非零错误由统一拦截器显示。以下表为编码前的整体接口规划，“新增”指规划新增而非当前已可调用；**实施后现状（按实际路由核实，未逐行假设已实现）**：本方案第1-6节、第7节前三项范围内已真实落地并可调用的具体路径以 `tasks.md` 对应编号（4.1-4.6/5.x/6.x）为准，不完全等同于下表逐行罗列——例如下表列出的独立
+`/validate` 路径实际未单独实现（结构校验目前只内嵌在保存草稿/发布/试运行几个已有接口内部，未暴露独立端点）；`GET .../operations/exceptions`（空审批人待分配查询）与 `POST .../process-instances/{id}/terminate`（管理终止）已实现；同一行的 `remind`（催办）、`GET .../cc`（抄送列表）、`POST .../operations/{id}/retry`、`reassign`（`reassign` 目前只有
+`WorkflowV2ReassignmentService` 服务方法、未暴露独立 REST 端点）仍是"已识别、未实施"（分别属于第9节 9.1/9.2 范围）。
 
 | 方法与路径 | 状态 | 核心内容 |
 | --- | --- | --- |

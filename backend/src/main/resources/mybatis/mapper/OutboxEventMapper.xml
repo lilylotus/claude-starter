@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- Outbox 事件到期候选扫描（production-approval-lifecycle change design.md 第10节，
+     tasks.md 7.1）：PENDING 状态且到期，或 LEASED 状态且租约已过期，按 id 升序取前 limit
+     条，具体的原子抢占（UPDATE ... WHERE id=? AND (status='PENDING' OR (status='LEASED'
+     AND lease_until < NOW()))）由 OutboxEventServiceImpl 另行逐条执行，本查询本身不加锁、
+     不修改数据。套用 AppNotifyRecordMapper#selectDueTasks 已验证的模式，不使用窗口函数/
+     CTE，兼容 MySQL 5.7。 -->
+<mapper namespace="cn.nihility.rbac.workflow.outbox.mapper.OutboxEventMapper">
+
+    <select id="selectDueEvents" resultType="cn.nihility.rbac.workflow.outbox.entity.OutboxEventEntity">
+        SELECT *
+        FROM tab_wf_outbox_event
+        WHERE (status = 'PENDING' AND next_retry_time &lt;= #{now})
+           OR (status = 'LEASED' AND lease_until IS NOT NULL AND lease_until &lt; #{now})
+        ORDER BY id ASC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

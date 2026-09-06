@@ -10,6 +10,7 @@ import cn.nihility.rbac.workflow.dto.RejectCommand;
 import cn.nihility.rbac.workflow.dto.ReturnTaskCommand;
 import cn.nihility.rbac.workflow.dto.StartProcessCommand;
 import cn.nihility.rbac.workflow.dto.TaskQuery;
+import cn.nihility.rbac.workflow.dto.TerminateCommand;
 import cn.nihility.rbac.workflow.dto.TransferCommand;
 import cn.nihility.rbac.workflow.dto.WithdrawCommand;
 import cn.nihility.rbac.workflow.dto.WorkflowInstanceResult;
@@ -68,6 +69,15 @@ public interface WorkflowService {
      * @param command 撤回命令
      */
     void withdraw(WithdrawCommand command);
+
+    /**
+     * 运维强制终止流程实例：独立运维权限点控制、终止原因必填，结束流程并取消全部开放任务，
+     * 不触发任何业务执行事件（production-approval-lifecycle change design.md 第7节，
+     * tasks.md 6.8）。已结束（非 {@code RUNNING}）的流程实例拒绝重复终止。
+     *
+     * @param command 终止命令
+     */
+    void terminate(TerminateCommand command);
 
     /**
      * 转办当前任务给指定处理人。

@@ -14,6 +14,7 @@ import cn.nihility.rbac.workflow.dslv2.compiler.WorkflowModelCompilerV2;
 import cn.nihility.rbac.workflow.dslv2.constant.AssigneeTypeV2;
 import cn.nihility.rbac.workflow.dslv2.constant.EmptyPolicy;
 import cn.nihility.rbac.workflow.dslv2.constant.RejectPolicy;
+import cn.nihility.rbac.workflow.dslv2.constant.SelfPolicy;
 import cn.nihility.rbac.workflow.dslv2.constant.VoteExecution;
 import cn.nihility.rbac.workflow.dslv2.constant.VoteMode;
 import cn.nihility.rbac.workflow.dslv2.dto.ActionsConfigDsl;
@@ -222,6 +223,65 @@ class WorkflowV2VoteCountingIntegrationTest {
     }
 
     /**
+     * 串行会签（{@code vote.execution=SEQUENTIAL}）与 THRESHOLD 计票组合（tasks.md 6.4）：
+     * 候选人任务逐个创建而非一次性全部创建（与 {@code PARALLEL} 执行方式的核心区别），
+     * {@code tab_wf_node_run} 的计票判定（{@code totalCount}/阈值 K）在轮次开启时一次性按候选人
+     * 集合总数算好，不受"任务是否已实际创建"影响，达到阈值后立即完成本节点，尚未轮到的候选人
+     * 不会再创建任务，验证与 6.3 新计票逻辑正确组合。
+     */
+    @Test
+    void sequentialThreeCandidates_shouldPass_whenTwoOfThreeApprove_withoutCreatingThirdTaskUpfront() {
+        String processCode = "TEST_V2_VOTE_SEQUENTIAL_" + PROCESS_CODE_SEQ.incrementAndGet();
+        ApprovalNodeDslV2 miNode = approvalNode(
+                "mi", "串行会签审批", "988001,988002,988003", VoteMode.PERCENT, 60, RejectPolicy.THRESHOLD);
+        miNode.getVote().setExecution(VoteExecution.SEQUENTIAL);
+        ProcessModelDslV2 dsl = ProcessModelDslV2.builder()
+                .schemaVersion(2)
+                .processCode(processCode)
+                .processName("v2 串行会签计票测试")
+                .nodes(List.of(node(new StartNodeDslV2(), "start"), miNode, endNode("end", "APPROVED")))
+                .edges(List.of(edge("e1", "start", "mi"), edge("e2", "mi", "end")))
+                .build();
+        CompiledProcessV2 compiled = compiler.compile(dsl);
+        Fixture fixture = deployAndSeed(processCode, compiled);
+        WorkflowInstanceResult started = workflowService.start(new StartProcessCommand(
+                processCode, "TEST", 1L, "v2 串行会签计票测试", 0L, null, null, null,
+                fixture.definitionId(), null, null, ExecutionMode.LEGACY_SYNC));
+
+        // 串行：只有第一个候选人的任务被创建（具体是候选集合中的哪一位由
+        // AssigneeResolverRegistry 内部 Set 顺序决定，本测试只关心"逐个创建"这一串行特征，
+        // 不假设具体顺序），其余两人尚未轮到
+        List<ApprovalTaskEntity> initialTasks = tasksOf(started.processInstanceId(), "mi");
+        assertThat(initialTasks).hasSize(1);
+        Long firstAssignee = initialTasks.get(0).getAssigneeId();
+
+        workflowService.approve(new ApproveCommand(initialTasks.get(0).getId(), firstAssignee, "同意", null));
+
+        // 未达 K=2（1/3=33%<60%），轮到第二人，第三人仍未创建
+        List<ApprovalTaskEntity> afterFirstTasks = tasksOf(started.processInstanceId(), "mi");
+        assertThat(afterFirstTasks).hasSize(2);
+        ApprovalTaskEntity secondTask = afterFirstTasks.stream()
+                .filter(t -> !t.getId().equals(initialTasks.get(0).getId()))
+                .findFirst().orElseThrow();
+        assertThat(processInstanceMapper.selectById(started.processInstanceId()).getStatus())
+                .isEqualTo(ProcessInstanceStatus.RUNNING);
+
+        workflowService.approve(new ApproveCommand(secondTask.getId(), secondTask.getAssigneeId(), "同意", null));
+
+        // 2/3=67%>=60%（K=2），节点完成，第三人的任务始终未被创建
+        assertThat(processInstanceMapper.selectById(started.processInstanceId()).getStatus())
+                .isEqualTo(ProcessInstanceStatus.APPROVED);
+        List<ApprovalTaskEntity> finalTasks = tasksOf(started.processInstanceId(), "mi");
+        assertThat(finalTasks).hasSize(2);
+        assertThat(taskService.createTaskQuery().processInstanceId(started.flowableProcessInstanceId()).count())
+                .isEqualTo(0);
+        NodeRunEntity round = latestRound(started.processInstanceId(), "mi");
+        assertThat(round.getTotalCount()).isEqualTo(3);
+        assertThat(round.getAgreeCount()).isEqualTo(2);
+        assertThat(round.getRunStatus()).isEqualTo("COMPLETED");
+    }
+
+    /**
      * VETO 模式：3 人候选，第一票反对立即终止整个流程实例，不等待其余候选人处理。
      */
     @Test
@@ -264,8 +324,26 @@ class WorkflowV2VoteCountingIntegrationTest {
      */
     @Test
     void delegateResolve_shouldNotCountAsVote() {
-        WorkflowInstanceResult started = startVoteProcess(
-                "TEST_V2_VOTE_DELEGATE_RESOLVE", "986001,986002,986003", VoteMode.PERCENT, 60, RejectPolicy.THRESHOLD);
+        String processCode = "TEST_V2_VOTE_DELEGATE_RESOLVE_" + PROCESS_CODE_SEQ.incrementAndGet();
+        // 会签节点默认不允许委派（ActionsConfigDsl.delegate 默认 null/false），本测试关注的是
+        // "委派归还不计票"这一计票语义，需要显式放开 delegate 动作开关，不能依赖 startVoteProcess
+        // 共用夹具的默认关闭行为。
+        ApprovalNodeDslV2 miNode = approvalNode(
+                "mi", "会签审批", "986001,986002,986003", VoteMode.PERCENT, 60, RejectPolicy.THRESHOLD);
+        miNode.getActions().setDelegate(true);
+        ProcessModelDslV2 dsl = ProcessModelDslV2.builder()
+                .schemaVersion(2)
+                .processCode(processCode)
+                .processName("v2 会签计票测试-委派归还")
+                .nodes(List.of(node(new StartNodeDslV2(), "start"), miNode, endNode("end", "APPROVED")))
+                .edges(List.of(edge("e1", "start", "mi"), edge("e2", "mi", "end")))
+                .build();
+        CompiledProcessV2 compiled = compiler.compile(dsl);
+        Fixture fixture = deployAndSeed(processCode, compiled);
+        WorkflowInstanceResult started = workflowService.start(new StartProcessCommand(
+                processCode, "TEST", 1L, "v2 会签计票测试", 0L, null, null, null,
+                fixture.definitionId(), null, null, ExecutionMode.LEGACY_SYNC));
+
         List<ApprovalTaskEntity> tasks = tasksOf(started.processInstanceId(), "mi");
         Long taskId = taskOf(tasks, 986001L);
 
@@ -297,6 +375,9 @@ class WorkflowV2VoteCountingIntegrationTest {
         miNode.getActions().setReturnAllowed(true);
         ApprovalNodeDslV2 afterNode = approvalNode("after", "退回发起节点", "987999", null, null, null);
         afterNode.getActions().setReturnAllowed(false);
+        // "after" 节点故意把审批人配置为发起人本人（退回发起节点场景），显式放开自审排除，
+        // 否则默认 SelfPolicy.EXCLUDE 会把发起人从候选人集合中原地剔除，任务无人可处理。
+        afterNode.setSelfPolicy(SelfPolicy.ALLOW);
 
         ProcessModelDslV2 dsl = ProcessModelDslV2.builder()
                 .schemaVersion(2)

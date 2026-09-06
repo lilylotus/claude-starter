@@ -350,6 +350,55 @@ class IdentityAuthFilterTest {
     }
 
     /**
+     * 伪造低权限 {@code menu} 头调用运维强制终止流程实例接口必须被拒绝：过滤器应忽略
+     * {@code menu} 头的值，改用映射表配置的固定权限编码
+     * {@code WorkflowDesign:instance:terminate} 做校验（production-approval-lifecycle change
+     * tasks.md 6.8 新增运维终止接口，与 5.5 固定权限映射表同一模式）。
+     */
+    @Test
+    void doFilter_shouldReturnForbidden_whenUserLacksTerminatePermission() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST",
+                "/api/v1/workflow/process-instances/1/terminate");
+        request.addHeader("identity-token", "valid-access-key");
+        request.addHeader("menu", "WorkflowDesign:model:view");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain filterChain = org.mockito.Mockito.mock(FilterChain.class);
+        when(tokenService.verifyAccessKey("valid-access-key")).thenReturn(Optional.of(1L));
+        when(passwordService.isFirstLogin(1L)).thenReturn(false);
+        when(authorizationService.hasPermission(1L, "WorkflowDesign:instance:terminate")).thenReturn(false);
+
+        filter.doFilter(request, response, filterChain);
+
+        verify(filterChain, never()).doFilter(any(), any());
+        assertThat(response.getContentAsString()).contains("\"code\":" + AuthErrorCode.FORBIDDEN);
+        verify(authorizationService).hasPermission(1L, "WorkflowDesign:instance:terminate");
+        verify(authorizationService, never()).hasPermission(1L, "WorkflowDesign:model:view");
+    }
+
+    /**
+     * 持有 {@code WorkflowDesign:instance:terminate} 权限点时，运维强制终止流程实例接口应正常
+     * 放行。
+     */
+    @Test
+    void doFilter_shouldPass_whenUserHoldsTerminatePermission() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST",
+                "/api/v1/workflow/process-instances/1/terminate");
+        request.addHeader("identity-token", "valid-access-key");
+        request.addHeader("menu", "WorkflowDesign:model:view");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain filterChain = org.mockito.Mockito.mock(FilterChain.class);
+        when(tokenService.verifyAccessKey("valid-access-key")).thenReturn(Optional.of(1L));
+        when(passwordService.isFirstLogin(1L)).thenReturn(false);
+        when(authorizationService.hasPermission(1L, "WorkflowDesign:instance:terminate")).thenReturn(true);
+
+        filter.doFilter(request, response, filterChain);
+
+        verify(filterChain).doFilter(request, response);
+    }
+
+    /**
      * “我的申请”属于登录用户自助查询，应绕过角色权限点判断。
      */
     @Test

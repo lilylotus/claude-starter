@@ -78,13 +78,27 @@ class TaskAuthorizationServiceTest {
         assertThat(service.isAuthorized(task, 300L)).isTrue();
     }
 
-    /** 三维度均未命中时应拒绝。 */
+    /** 未分配任务、三维度均未命中时应拒绝。 */
     @Test
     void isAuthorized_shouldRejectWhenNoneMatches() {
         setUp();
-        ApprovalTaskEntity task = ApprovalTaskEntity.builder().id(1L).assigneeId(100L).build();
+        ApprovalTaskEntity task = ApprovalTaskEntity.builder().id(1L).assigneeId(null).build();
         when(approvalTaskCandidateMapper.exists(any(LambdaQueryWrapper.class))).thenReturn(false);
         when(approvalTaskCandidateMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
+
+        assertThat(service.isAuthorized(task, 999L)).isFalse();
+    }
+
+    /**
+     * 任务已分配给他人时，即便操作人仍留在候选人明细表里（认领/分配后从不清理该表），也应直接
+     * 拒绝，不再查询候选人维度——候选人身份只对"未分配"任务有权（design.md 第8节，tasks.md
+     * 6.5，此前实现遗漏：只要 operatorId 命中候选人表就放行，未校验任务是否已经分配给了别人）。
+     * 不 stub 候选人/角色查询方法，用来证明短路发生在查询候选人表之前。
+     */
+    @Test
+    void isAuthorized_shouldRejectOtherCandidate_whenAlreadyAssignedToSomeoneElse() {
+        setUp();
+        ApprovalTaskEntity task = ApprovalTaskEntity.builder().id(1L).assigneeId(100L).build();
 
         assertThat(service.isAuthorized(task, 999L)).isFalse();
     }

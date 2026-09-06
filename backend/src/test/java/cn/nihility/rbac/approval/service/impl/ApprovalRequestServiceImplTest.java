@@ -23,6 +23,7 @@ import cn.nihility.rbac.approval.constant.ApprovalRequestStatus;
 import cn.nihility.rbac.approval.dto.ApprovalRequestVO;
 import cn.nihility.rbac.approval.dto.WriteOperationResultVO;
 import cn.nihility.rbac.approval.entity.ApprovalRequestEntity;
+import cn.nihility.rbac.approval.execution.MasterDataOperationExecutor;
 import cn.nihility.rbac.approval.mapper.ApprovalRequestMapper;
 import cn.nihility.rbac.approval.service.ApprovalProcessService;
 import cn.nihility.rbac.auth.context.CurrentUserContext;
@@ -157,6 +158,11 @@ class ApprovalRequestServiceImplTest {
     @Mock
     private BusinessLockService businessLockService;
 
+    /** 被测服务依赖的 ORG/USER/POSITION/APP 主数据写操作公共组件，用真实实例（内部持有本类的
+     *  mock Service）构造，保持对 {@code orgService}/{@code userService} 等既有 mock 断言不变
+     *  （production-approval-lifecycle change tasks.md 7.3 抽取该组件后的测试适配）。 */
+    private MasterDataOperationExecutor masterDataOperationExecutor;
+
     private ApprovalRequestServiceImpl service;
 
     /** 初始化 MyBatis-Plus Lambda 列缓存，覆盖本类实现中构造 {@code LambdaQueryWrapper}/
@@ -181,6 +187,8 @@ class ApprovalRequestServiceImplTest {
     /** 构造被测服务与通用桩。 */
     @BeforeEach
     void setUp() {
+        masterDataOperationExecutor =
+                new MasterDataOperationExecutor(orgService, userService, positionService, appService, orgScopeService);
         service = new ApprovalRequestServiceImpl(
                 mapper,
                 approvalProcessService,
@@ -189,11 +197,7 @@ class ApprovalRequestServiceImplTest {
                 approvalRecordMapper,
                 taskAuthorizationService,
                 userPositionMapper,
-                orgService,
-                userService,
-                positionService,
-                appService,
-                orgScopeService,
+                masterDataOperationExecutor,
                 validator,
                 userDisplayService,
                 operationLogRecorder,
@@ -391,9 +395,9 @@ class ApprovalRequestServiceImplTest {
     void approve_shouldOnlyAdvanceNode_whenNotFinalNode() {
         ApprovalRequestEntity entity = buildPendingEntity();
         when(mapper.selectById(10L)).thenReturn(entity);
-        when(approvalTaskMapper.selectOne(any(LambdaQueryWrapper.class)))
-                .thenReturn(ApprovalTaskEntity.builder().id(TASK_ID).processInstanceId(PROCESS_INSTANCE_ID)
-                        .status(TaskStatus.PENDING).build());
+        when(approvalTaskMapper.selectList(any(LambdaQueryWrapper.class)))
+                .thenReturn(List.of(ApprovalTaskEntity.builder().id(TASK_ID).processInstanceId(PROCESS_INSTANCE_ID)
+                        .status(TaskStatus.PENDING).build()));
         when(processInstanceMapper.selectById(PROCESS_INSTANCE_ID)).thenReturn(ProcessInstanceEntity.builder()
                 .id(PROCESS_INSTANCE_ID).status(ProcessInstanceStatus.RUNNING).currentNodeName("安全管理员审批").build());
         when(mapper.update(eq(null), any(LambdaUpdateWrapper.class))).thenReturn(1);
@@ -545,6 +549,27 @@ class ApprovalRequestServiceImplTest {
         verify(approvalProcessService, never()).approve(any(), any(), any());
     }
 
+    /**
+     * 并行分叉场景下同一流程实例同时存在多条开放任务时，旧的"按申请 id 审批"接口无法确定
+     * 操作目标，应消歧拒绝并引导调用方改用按 taskId 明确操作的既有接口
+     * （production-approval-lifecycle change tasks.md 6.9）。
+     */
+    @Test
+    void approve_shouldRejectAmbiguously_whenMultipleOpenTasksExist() {
+        when(mapper.selectById(10L)).thenReturn(buildPendingEntity());
+        when(approvalTaskMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(
+                ApprovalTaskEntity.builder().id(TASK_ID).processInstanceId(PROCESS_INSTANCE_ID)
+                        .status(TaskStatus.PENDING).build(),
+                ApprovalTaskEntity.builder().id(TASK_ID + 1).processInstanceId(PROCESS_INSTANCE_ID)
+                        .status(TaskStatus.PENDING).build()));
+
+        assertThatThrownBy(() -> service.approve(10L, "同意"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("多个待处理任务")
+                .hasMessageContaining("/api/v1/workflow/tasks/{taskId}/approve");
+        verify(approvalProcessService, never()).approve(any(), any(), any());
+    }
+
     /** 拒绝时必须提供非空意见。 */
     @Test
     void reject_shouldRequireOpinion() {
@@ -557,9 +582,9 @@ class ApprovalRequestServiceImplTest {
     @Test
     void reject_shouldTerminateWithoutBusinessWrite() {
         when(mapper.selectById(10L)).thenReturn(buildPendingEntity());
-        when(approvalTaskMapper.selectOne(any(LambdaQueryWrapper.class)))
-                .thenReturn(ApprovalTaskEntity.builder().id(TASK_ID).processInstanceId(PROCESS_INSTANCE_ID)
-                        .status(TaskStatus.PENDING).build());
+        when(approvalTaskMapper.selectList(any(LambdaQueryWrapper.class)))
+                .thenReturn(List.of(ApprovalTaskEntity.builder().id(TASK_ID).processInstanceId(PROCESS_INSTANCE_ID)
+                        .status(TaskStatus.PENDING).build()));
         when(mapper.update(eq(null), any(LambdaUpdateWrapper.class))).thenReturn(1);
         CurrentUserContext.setUserId(2L);
 
@@ -567,6 +592,27 @@ class ApprovalRequestServiceImplTest {
 
         verify(approvalProcessService).reject(TASK_ID, 2L, "信息不完整");
         verify(appService, never()).create(any());
+    }
+
+    /**
+     * 拒绝操作同样需要消歧：并行分叉场景下同一流程实例同时存在多条开放任务时应拒绝，而不是
+     * 任取其一（production-approval-lifecycle change tasks.md 6.9）。
+     */
+    @Test
+    void reject_shouldRejectAmbiguously_whenMultipleOpenTasksExist() {
+        when(mapper.selectById(10L)).thenReturn(buildPendingEntity());
+        when(approvalTaskMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(
+                ApprovalTaskEntity.builder().id(TASK_ID).processInstanceId(PROCESS_INSTANCE_ID)
+                        .status(TaskStatus.PENDING).build(),
+                ApprovalTaskEntity.builder().id(TASK_ID + 1).processInstanceId(PROCESS_INSTANCE_ID)
+                        .status(TaskStatus.CLAIMED).build()));
+        CurrentUserContext.setUserId(2L);
+
+        assertThatThrownBy(() -> service.reject(10L, "信息不完整"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("多个待处理任务")
+                .hasMessageContaining("/api/v1/workflow/tasks/{taskId}/reject");
+        verify(approvalProcessService, never()).reject(any(), any(), any());
     }
 
     /** 非提交人不能撤回申请。 */
@@ -741,11 +787,11 @@ class ApprovalRequestServiceImplTest {
         assertThat(returnedPayload).containsKey("name");
     }
 
-    /** 为审批相关测试统一桩出"命中开放任务 + 流程实例已到达最终已通过状态"。 */
+    /** 为审批相关测试统一桩出"命中唯一开放任务 + 流程实例已到达最终已通过状态"。 */
     private void stubOpenTaskAndFinalInstance() {
-        when(approvalTaskMapper.selectOne(any(LambdaQueryWrapper.class)))
-                .thenReturn(ApprovalTaskEntity.builder().id(TASK_ID).processInstanceId(PROCESS_INSTANCE_ID)
-                        .status(TaskStatus.PENDING).build());
+        when(approvalTaskMapper.selectList(any(LambdaQueryWrapper.class)))
+                .thenReturn(List.of(ApprovalTaskEntity.builder().id(TASK_ID).processInstanceId(PROCESS_INSTANCE_ID)
+                        .status(TaskStatus.PENDING).build()));
         when(processInstanceMapper.selectById(PROCESS_INSTANCE_ID)).thenReturn(ProcessInstanceEntity.builder()
                 .id(PROCESS_INSTANCE_ID).status(ProcessInstanceStatus.APPROVED).build());
     }

@@ -6,6 +6,7 @@ import cn.nihility.rbac.workflow.constant.CandidateType;
 import cn.nihility.rbac.workflow.constant.TaskStatus;
 import cn.nihility.rbac.workflow.dto.ApprovalRecordVO;
 import cn.nihility.rbac.workflow.dto.ApprovalTaskVO;
+import cn.nihility.rbac.workflow.dto.OpenNodeVO;
 import cn.nihility.rbac.workflow.dto.ProcessInstanceDetailVO;
 import cn.nihility.rbac.workflow.dto.TaskQuery;
 import cn.nihility.rbac.workflow.entity.ApprovalRecordEntity;
@@ -21,9 +22,10 @@ import cn.nihility.rbac.workflow.service.WorkflowTaskService;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.user.service.UserDisplayService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import java.util.Comparator;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -38,6 +40,11 @@ import org.springframework.stereotype.Service;
 @Service
 @RequiredArgsConstructor
 public class WorkflowTaskServiceImpl implements WorkflowTaskService {
+
+    /** 计入"已办"的动作类型集合。 */
+    private static final List<String> DONE_ACTIONS = List.of(
+            ApprovalAction.APPROVE, ApprovalAction.REJECT, ApprovalAction.RETURN,
+            ApprovalAction.TRANSFER, ApprovalAction.DELEGATE, ApprovalAction.ADD_SIGN);
 
     /** 审批任务数据访问接口。 */
     private final ApprovalTaskMapper approvalTaskMapper;
@@ -95,8 +102,9 @@ public class WorkflowTaskServiceImpl implements WorkflowTaskService {
         if (taskIds.isEmpty()) {
             return List.of();
         }
-        List<ApprovalTaskEntity> tasks = approvalTaskMapper.selectByIds(taskIds);
-        return buildTaskVOList(tasks, query, true);
+        List<ApprovalTaskEntity> tasks = approvalTaskMapper.selectTodoPage(
+                taskIds, query.businessType(), offset(query), query.effectivePageSize());
+        return buildTaskVOList(tasks);
     }
 
     /**
@@ -104,42 +112,19 @@ public class WorkflowTaskServiceImpl implements WorkflowTaskService {
      */
     @Override
     public List<ApprovalTaskVO> findDoneTasks(Long userId, TaskQuery query) {
-        List<ApprovalRecordEntity> records = approvalRecordMapper.selectList(new LambdaQueryWrapper<ApprovalRecordEntity>()
-                .eq(ApprovalRecordEntity::getOperatorId, userId)
-                .isNotNull(ApprovalRecordEntity::getTaskId)
-                .in(ApprovalRecordEntity::getAction, ApprovalAction.APPROVE, ApprovalAction.REJECT,
-                        ApprovalAction.RETURN, ApprovalAction.TRANSFER, ApprovalAction.DELEGATE,
-                        ApprovalAction.ADD_SIGN)
-                .orderByDesc(ApprovalRecordEntity::getCreateTime)
-                .orderByDesc(ApprovalRecordEntity::getId));
-        if (records.isEmpty()) {
+        List<ApprovalTaskEntity> tasks = approvalTaskMapper.selectDonePage(
+                userId, DONE_ACTIONS, query.businessType(), offset(query), query.effectivePageSize());
+        if (tasks.isEmpty()) {
             return List.of();
         }
-        Set<Long> taskIds = records.stream().map(ApprovalRecordEntity::getTaskId).collect(Collectors.toSet());
-        Map<Long, ApprovalTaskEntity> taskById = approvalTaskMapper.selectByIds(taskIds).stream()
-                .collect(Collectors.toMap(ApprovalTaskEntity::getId, task -> task, (a, b) -> a));
+        return buildTaskVOList(tasks);
+    }
 
-        Set<Long> processInstanceIds = taskById.values().stream()
-                .map(ApprovalTaskEntity::getProcessInstanceId)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
-        Map<Long, ProcessInstanceEntity> instanceById = processInstanceIds.isEmpty()
-                ? Map.of()
-                : processInstanceMapper.selectByIds(processInstanceIds).stream()
-                        .collect(Collectors.toMap(ProcessInstanceEntity::getId, instance -> instance, (a, b) -> a));
-
-        Map<String, String> displayNames = resolveDisplayNames(instanceById.values());
-
-        List<ApprovalTaskVO> result = records.stream()
-                .map(ApprovalRecordEntity::getTaskId)
-                .distinct()
-                .map(taskById::get)
-                .filter(Objects::nonNull)
-                .filter(task -> query.businessType() == null
-                        || matchesBusinessType(task, instanceById, query.businessType()))
-                .map(task -> toVO(task, instanceById.get(task.getProcessInstanceId()), displayNames))
-                .collect(Collectors.toList());
-        return paginate(result, query);
+    /**
+     * 按 {@link TaskQuery} 的页码/每页大小换算数据库分页偏移量。
+     */
+    private int offset(TaskQuery query) {
+        return (query.effectivePage() - 1) * query.effectivePageSize();
     }
 
     /**
@@ -194,6 +179,7 @@ public class WorkflowTaskServiceImpl implements WorkflowTaskService {
                 .status(instance.getStatus())
                 .currentNodeId(instance.getCurrentNodeId())
                 .currentNodeName(instance.getCurrentNodeName())
+                .openNodes(resolveOpenNodes(processInstanceId))
                 .startedTime(instance.getStartedTime())
                 .finishedTime(instance.getFinishedTime())
                 .records(recordVOs)
@@ -201,9 +187,29 @@ public class WorkflowTaskServiceImpl implements WorkflowTaskService {
     }
 
     /**
-     * 组装待办任务列表：批量补齐流程实例信息与展示名后过滤、排序、分页。
+     * 聚合流程实例当前全部开放节点：查询状态为 {@code PENDING}/{@code CLAIMED} 的审批任务，
+     * 按 {@code (nodeId, nodeName)} 去重；并行分叉场景下同一时刻可能同时存在多个节点各自的
+     * 开放任务，流程已结束时结果为空列表。
      */
-    private List<ApprovalTaskVO> buildTaskVOList(List<ApprovalTaskEntity> tasks, TaskQuery query, boolean sortDesc) {
+    private List<OpenNodeVO> resolveOpenNodes(Long processInstanceId) {
+        List<ApprovalTaskEntity> openTasks = approvalTaskMapper.selectList(new LambdaQueryWrapper<ApprovalTaskEntity>()
+                .eq(ApprovalTaskEntity::getProcessInstanceId, processInstanceId)
+                .in(ApprovalTaskEntity::getStatus, TaskStatus.PENDING, TaskStatus.CLAIMED));
+        Map<String, OpenNodeVO> openNodeByKey = new LinkedHashMap<>();
+        for (ApprovalTaskEntity task : openTasks) {
+            String key = task.getNodeId() + "::" + task.getNodeName();
+            openNodeByKey.putIfAbsent(key,
+                    OpenNodeVO.builder().nodeId(task.getNodeId()).nodeName(task.getNodeName()).build());
+        }
+        return new ArrayList<>(openNodeByKey.values());
+    }
+
+    /**
+     * 组装任务视图列表：批量补齐流程实例信息与展示名。排序/过滤/分页已在
+     * {@link ApprovalTaskMapper#selectTodoPage}/{@link ApprovalTaskMapper#selectDonePage} 的
+     * SQL 层完成，这里只做 VO 组装，不再重复过滤或排序，保持数据库返回的顺序。
+     */
+    private List<ApprovalTaskVO> buildTaskVOList(List<ApprovalTaskEntity> tasks) {
         Set<Long> processInstanceIds = tasks.stream()
                 .map(ApprovalTaskEntity::getProcessInstanceId)
                 .filter(Objects::nonNull)
@@ -222,26 +228,9 @@ public class WorkflowTaskServiceImpl implements WorkflowTaskService {
             }
         }
 
-        List<ApprovalTaskVO> result = tasks.stream()
-                .filter(task -> query.businessType() == null
-                        || matchesBusinessType(task, instanceById, query.businessType()))
+        return tasks.stream()
                 .map(task -> toVO(task, instanceById.get(task.getProcessInstanceId()), displayNames))
                 .collect(Collectors.toList());
-        result.sort(sortDesc
-                ? Comparator.comparing(ApprovalTaskVO::getCreateTime, Comparator.nullsLast(Comparator.reverseOrder()))
-                : Comparator.comparing(ApprovalTaskVO::getCreateTime, Comparator.nullsLast(Comparator.naturalOrder())));
-        return paginate(result, query);
-    }
-
-    /**
-     * 按业务对象类型过滤。
-     */
-    private boolean matchesBusinessType(
-            ApprovalTaskEntity task,
-            Map<Long, ProcessInstanceEntity> instanceById,
-            String businessType) {
-        ProcessInstanceEntity instance = instanceById.get(task.getProcessInstanceId());
-        return instance != null && Objects.equals(instance.getBusinessType(), businessType);
     }
 
     /**
@@ -281,16 +270,5 @@ public class WorkflowTaskServiceImpl implements WorkflowTaskService {
             return new HashMap<>();
         }
         return new HashMap<>(userDisplayService.resolveDisplayNames(userIdTexts));
-    }
-
-    /**
-     * 按 {@link TaskQuery} 的页码/每页大小对结果列表做内存分页。
-     */
-    private List<ApprovalTaskVO> paginate(List<ApprovalTaskVO> list, TaskQuery query) {
-        int page = query.effectivePage();
-        int pageSize = query.effectivePageSize();
-        int fromIndex = Math.min((page - 1) * pageSize, list.size());
-        int toIndex = Math.min(fromIndex + pageSize, list.size());
-        return list.subList(fromIndex, toIndex);
     }
 }

@@ -290,6 +290,11 @@ WorkflowDesign（流程设计器，见 openspec/changes/workflow-approval-engine
   .../process-bindings/{bindingId}/enable、POST
   .../process-bindings/{bindingId}/disable；production-approval-lifecycle change
   tasks.md 5.5，本轮补齐种子数据，原因同上）
+- WorkflowDesign:instance:terminate  运维强制终止流程实例（POST
+  /api/v1/workflow/process-instances/{id}/terminate；独立运维权限点，不要求操作人是流程
+  发起人/参与者，终止原因必填，结束流程并取消全部开放任务，不触发任何业务执行事件；
+  production-approval-lifecycle change design.md 第7节/第12节，tasks.md 6.8 新增。前端
+  运维终止入口尚未实现，属于后续批次）
 前端落地为侧边栏"流程设计"一级菜单下的"流程模型"页面（/workflow/models，Vue Flow 画布见
 /workflow/designer/:id，不单独登记菜单，通过列表页"进入设计器"跳转）；后端流程模型的
 "分页列出全部流程模型"接口尚未提供（仅有草稿保存/发布/下线/启用/版本历史五个依赖已知 id
@@ -309,7 +314,9 @@ IdentityAuthFilter 完全信任客户端 menu 请求头决定校验哪个权限�
 新增了"HTTP 方法+路径 -> 固定权限编码"静态映射表，覆盖本节及前置第4节新增的流程设计/
 发布审核/业务绑定/试运行/模型启停接口，以及既有的审批 approve/reject 接口：命中映射表的
 路径按固定编码校验、忽略 menu 头具体值；未命中的存量接口仍按 menu 头值校验，行为不变。
-以上新增/沿用的权限编码即该映射表引用的固定编码，不需要额外新增。
+以上新增/沿用的权限编码即该映射表引用的固定编码，不需要额外新增。tasks.md 6.8 新增运维
+终止接口时同一映射表补了一条 POST /api/v1/workflow/process-instances/*/terminate ->
+WorkflowDesign:instance:terminate。
 
 
 聊天

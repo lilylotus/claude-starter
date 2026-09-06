@@ -18,6 +18,8 @@ import cn.nihility.rbac.workflow.dto.RejectRequest;
 import cn.nihility.rbac.workflow.dto.ReturnTaskCommand;
 import cn.nihility.rbac.workflow.dto.ReturnTaskRequest;
 import cn.nihility.rbac.workflow.dto.TaskQuery;
+import cn.nihility.rbac.workflow.dto.TerminateCommand;
+import cn.nihility.rbac.workflow.dto.TerminateRequest;
 import cn.nihility.rbac.workflow.dto.TransferCommand;
 import cn.nihility.rbac.workflow.dto.TransferRequest;
 import cn.nihility.rbac.workflow.dto.WithdrawCommand;
@@ -249,6 +251,28 @@ public class WorkflowTaskController {
             @RequestHeader(value = "X-Request-Id", required = false) String requestId) {
         workflowService.withdraw(new WithdrawCommand(processInstanceId, requireCurrentUserId(),
                 request == null ? null : request.getRemark(), requestId));
+        return Result.success();
+    }
+
+    /**
+     * 运维强制终止流程实例：独立运维权限点 {@code WorkflowDesign:instance:terminate} 控制
+     * （在 {@code IdentityAuthFilter} 固定权限映射表校验，不要求操作人是流程发起人/参与者），
+     * 终止原因必填，结束流程并取消全部开放任务，不触发任何业务执行事件
+     * （production-approval-lifecycle change design.md 第7节，tasks.md 6.8）。
+     *
+     * @param processInstanceId 流程实例 id
+     * @param request           请求体，终止原因必填
+     * @param requestId         幂等键，可为空
+     * @return 无业务数据的成功响应
+     */
+    @Operation(summary = "运维强制终止流程实例")
+    @PostMapping("/api/v1/workflow/process-instances/{processInstanceId}/terminate")
+    public Result<Void> terminate(
+            @Parameter(description = "流程实例 id", required = true) @PathVariable Long processInstanceId,
+            @Valid @RequestBody TerminateRequest request,
+            @RequestHeader(value = "X-Request-Id", required = false) String requestId) {
+        workflowService.terminate(new TerminateCommand(processInstanceId, requireCurrentUserId(),
+                request.getReason(), requestId));
         return Result.success();
     }
 

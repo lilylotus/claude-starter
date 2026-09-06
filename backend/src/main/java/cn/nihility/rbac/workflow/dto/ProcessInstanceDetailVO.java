@@ -40,11 +40,18 @@ public class ProcessInstanceDetailVO {
     /** 流程实例状态。 */
     private String status;
 
-    /** 当前所在节点 id，结束后为空。 */
+    /** 当前所在节点 id，结束后为空；并行分叉场景下只反映最近一次被写入的某一分支节点，
+     *  不代表全部并行分支，需要完整开放节点集合请使用 {@link #openNodes}。 */
     private String currentNodeId;
 
-    /** 当前所在节点名称，结束后为空。 */
+    /** 当前所在节点名称，结束后为空；并行分叉场景下同 {@link #currentNodeId} 的局限。 */
     private String currentNodeName;
+
+    /** 当前全部开放节点集合：按 {@code tab_wf_approval_task} 状态为 {@code PENDING}/
+     *  {@code CLAIMED} 的记录聚合、按 {@code (nodeId, nodeName)} 去重，并行分叉场景下可能
+     *  同时包含多个节点；流程已结束时为空列表。与 {@link #currentNodeId}/
+     *  {@link #currentNodeName} 共存，不替代原有单值字段。 */
+    private List<OpenNodeVO> openNodes;
 
     /** 启动时间。 */
     private LocalDateTime startedTime;
