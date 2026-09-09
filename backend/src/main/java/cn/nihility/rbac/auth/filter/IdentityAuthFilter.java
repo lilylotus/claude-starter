@@ -73,7 +73,9 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
      * 会话的 {@code identity-token}/{@code menu} 校验（app-sync-notify-pull-api change
      * design.md Decision 9）。{@code /api/authn/**}（SSO 专用登录、CAS、OAuth2 协议端点）
      * 面向外部浏览器/应用，鉴权走本过滤器机制之外的 SSO Cookie 会话，同样不适用
-     * （app-sso-protocol-runtime change design.md Decision 7）。
+     * （app-sso-protocol-runtime change design.md Decision 7）。{@code /api/captcha/image}
+     * 是图形验证码生成接口，语义上就是给未登录场景使用的人机识别能力，必须在登录之前即可
+     * 访问（add-captcha-rate-limit change spec.md "图形验证码生成" Requirement）。
      */
     private static final List<String> FULL_WHITELIST = List.of(
             "/api/auth/public-key",
@@ -86,7 +88,8 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
             "/swagger-resources/**",
             "/webjars/**",
             "/open/api/sync/**",
-            "/api/authn/**");
+            "/api/authn/**",
+            "/api/captcha/image");
 
     /**
      * 仍需 {@code identity-token}/{@code menu} 校验，但豁免"首登强制改密"拦截与

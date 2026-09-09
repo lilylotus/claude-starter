@@ -244,6 +244,29 @@ rbac:
     # 二维码登录会话有效期（秒），默认 300 秒（5 分钟）。
     session-expire-seconds: 300
 
+  # 图形验证码配置（add-captcha-rate-limit change tasks.md 1.1），全部为默认值，
+  # 此处显式列出便于按需覆盖；生成/校验能力尚未接入任何现有登录接口。
+  captcha:
+    # 验证码类型：CHARACTER（大小写字母+数字混合字符）或 ARITHMETIC（加减乘除算式）。
+    type: CHARACTER
+    # 字符模式下的字符个数，默认 4 个。
+    character-length: 4
+    # 验证码图片宽度（像素），默认 120。
+    image-width: 120
+    # 验证码图片高度（像素），默认 40。
+    image-height: 40
+    # 验证码有效期（秒），默认 300 秒（5 分钟）。
+    expire-seconds: 300
+
+  # 接口调用频率限制全局默认配置（add-captcha-rate-limit change tasks.md 3.1），
+  # 未在 @RateLimit 注解上显式覆盖时间窗口/最大请求次数时使用；本次尚未在任何现有接口上
+  # 标注该注解。
+  rate-limit:
+    # 全局默认时间窗口秒数，默认 60 秒。
+    window-seconds: 60
+    # 全局默认时间窗口内最大请求次数，默认 60 次。
+    max-requests: 60
+
   # 登录日志/操作日志定期清理配置（close-sso-log-and-policy-gaps change design.md
   # Decision 4），两张表共用同一份 cron/保留天数配置，全部为默认值，此处显式列出便于按需覆盖。
   log-cleanup:
