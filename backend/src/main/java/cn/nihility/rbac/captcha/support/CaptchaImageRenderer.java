@@ -15,8 +15,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * 基于 JDK 内置 {@code java.awt}（{@link BufferedImage}/{@link Graphics2D}）把验证码文本
- * 渲染成图片并输出为 base64 字符串，附加基础干扰线/噪点（add-captcha-rate-limit change
- * design.md Decision 1，不引入第三方验证码库）。
+ * 渲染成图片并输出为带 {@code data:image/<type>;base64,} 前缀的完整 data URI，附加基础
+ * 干扰线/噪点（add-captcha-rate-limit change design.md Decision 1，不引入第三方验证码库）。
  */
 @Component
 public class CaptchaImageRenderer {
@@ -40,13 +40,14 @@ public class CaptchaImageRenderer {
     private static final int NOISE_DOT_COUNT = 40;
 
     /**
-     * 把展示文本渲染成指定宽高的验证码图片，返回不含 {@code data:image/...;base64,} 前缀的
-     * base64 编码字符串。
+     * 把展示文本渲染成指定宽高的验证码图片，返回带 {@code data:image/<type>;base64,} 前缀的
+     * 完整 data URI 字符串（{@code <type>} 由 {@link #IMAGE_FORMAT} 推导，当前为 {@code png}），
+     * 前端可不做拼接直接作为 {@code <img>} 的 {@code src}。
      *
      * @param displayText 需要渲染的展示文本（字符模式的随机字符串，或算式模式的算式文本）
      * @param width       图片宽度（像素）
      * @param height      图片高度（像素）
-     * @return base64 编码的 PNG 图片数据
+     * @return 带 {@code data:image/png;base64,} 前缀的完整 data URI
      */
     public String renderToBase64(String displayText, int width, int height) {
         BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
@@ -133,15 +134,17 @@ public class CaptchaImageRenderer {
     }
 
     /**
-     * 把图片编码为 base64 字符串。
+     * 把图片编码为带 {@code data:image/<type>;base64,} 前缀的完整 data URI，MIME 类型随
+     * {@link #IMAGE_FORMAT} 推导，避免上层硬编码导致格式改动时前缀不同步。
      *
      * @param image 待编码图片
-     * @return base64 编码字符串
+     * @return 完整 data URI 字符串
      */
     private String toBase64(BufferedImage image) {
         try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
             ImageIO.write(image, IMAGE_FORMAT, outputStream);
-            return Base64.getEncoder().encodeToString(outputStream.toByteArray());
+            String encoded = Base64.getEncoder().encodeToString(outputStream.toByteArray());
+            return "data:image/" + IMAGE_FORMAT + ";base64," + encoded;
         } catch (IOException e) {
             throw new IllegalStateException("图形验证码渲染失败", e);
         }

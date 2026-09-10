@@ -26,7 +26,9 @@ public class ImageCaptchaController {
      *
      * @return 验证码 id 与 base64 图片
      */
-    @Operation(summary = "生成图形验证码", description = "响应仅包含验证码 id 与图片，不包含明文答案")
+    @Operation(summary = "生成图形验证码",
+            description = "响应仅包含验证码 id 与图片，不包含明文答案；图片字段为带 data:image/png;base64, "
+                    + "前缀的完整 data URI，前端可直接作为 <img> 的 src")
     @GetMapping("/api/captcha/image")
     public CaptchaImageVO generate() {
         return imageCaptchaService.generate();

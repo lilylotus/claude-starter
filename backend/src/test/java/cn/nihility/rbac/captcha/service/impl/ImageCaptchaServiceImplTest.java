@@ -110,7 +110,7 @@ class ImageCaptchaServiceImplTest {
         CaptchaImageVO vo = imageCaptchaService.generate();
 
         assertThat(vo.getCaptchaId()).isNotBlank();
-        assertThat(vo.getImageBase64()).isNotBlank();
+        assertThat(vo.getImageBase64()).startsWith("data:image/png;base64,");
         CaptchaAnswerPayload payload = readPayload(vo.getCaptchaId());
         assertThat(payload.type()).isEqualTo(CaptchaType.CHARACTER);
         assertThat(payload.answer()).hasSize(4);
