@@ -83,6 +83,11 @@ new PermissionMapping("DELETE", "/api/workflow/process-bindings/*", "WorkflowDes
 
 同一脚本内追加 `WorkflowDesign:binding:delete` 的 `tab_menu`/`tab_permission` 种子数据插入，写法与 V1 里 `WorkflowDesign:binding:edit` 的插入语句一致（`parent_id` 挂在 `WorkflowDesign:binding:view` 菜单节点下，`resource_type=2`，`show_order` 取 `:edit` 的下一个序号，`NOT EXISTS` 幂等守卫）。
 
+### Decision 7（实现中发现的遗留缺口）：单独补授 `V5__grant_binding_delete_permission.sql`
+自测时发现：V4 只登记了 `WorkflowDesign:binding:delete` 的 `tab_menu`/`tab_permission` 种子数据，没有给任何角色授权。V1 里 `WorkflowDesign:binding:edit`/`:view` 等权限点是在同一脚本内、"授权 `SUPER_ADMIN` 全部权限点"的 `INSERT...SELECT` **之前**插入的，因此天然被那条一次性授权语句覆盖；但 V4 是独立的后续迁移脚本，不会被 V1 那条语句影响，导致 `WorkflowDesign:binding:delete` 这个权限点虽然在 `tab_permission`/`tab_menu` 里存在，却没有任何角色（含 `SUPER_ADMIN`）拥有它——现象是业务绑定管理页面对所有用户都只显示切换版本/启用/停用，看不到删除按钮。
+
+修复方式：新增 `V5__grant_binding_delete_permission.sql`，单独给 `SUPER_ADMIN` 角色补一条 `tab_role_permission` 记录（`NOT EXISTS` 幂等守卫，`role_id`/`permission_id` 均用子查询按 `code` 定位，避免硬编码 id）。这是本次实现过程中发现的遗留缺口修复，不改变 Decision 4/5 里已确定的接口行为与迁移步骤。
+
 ### Decision 6：前端改动
 `api/processBinding.ts` 新增：
 ```typescript

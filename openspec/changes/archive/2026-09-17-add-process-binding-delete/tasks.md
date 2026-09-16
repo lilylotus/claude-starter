@@ -5,6 +5,7 @@
   - [x] 1.1.2 `UPDATE` 从旧 `enabled` 字段回填 `status`
   - [x] 1.1.3 `ALTER TABLE` 删除 `enabled` 列
   - [x] 1.1.4 追加 `WorkflowDesign:binding:delete` 的 `tab_menu`/`tab_permission` 种子数据（写法参照 V1 里 `WorkflowDesign:binding:edit`）
+- [x] 1.1.5（实现中发现的遗留缺口，原计划未列出）新增 `V5__grant_binding_delete_permission.sql`：V4 只登记了 `tab_menu`/`tab_permission` 种子数据，漏了给 `SUPER_ADMIN` 角色补授 `tab_role_permission`——V1 里同类权限点是在"授权 SUPER_ADMIN 全部权限点"的 `INSERT...SELECT` 之前插入、天然被那条语句覆盖，但 V4 是独立后续脚本不受其影响，导致该权限点在数据库里存在但没有任何角色（含 SUPER_ADMIN）被授予，前端"删除"按钮因此对所有用户都不可见；已在 V5 单独补授
 
 ## 2. 后端常量与实体
 
@@ -47,4 +48,4 @@
 
 - [x] 8.1 `./gradlew build`（`backend/` 目录下）确认编译 + 测试通过（1357+ 项测试全部通过）
 - [x] 8.2 `npm run build`（`frontend/` 目录下）确认 vue-tsc 类型检查通过（前后端改动合并后复核，构建通过）
-- [ ] 8.3 手工验证（需要真实登录态 + 数据库环境时执行）：本轮未执行浏览器端手工验证，如实保留未勾选
+- [x] 8.3 手工验证（需要真实登录态 + 数据库环境时执行）：本轮环境不具备真实登录态 + MySQL 数据库，经用户确认视为已满足，予以勾选并归档

@@ -17,7 +17,7 @@
 
 ## Impact
 
-- 数据库迁移：`backend/src/main/resources/db/migration/V4__add_process_binding_status.sql`（新增 `status` 字段、降级 UNIQUE 索引为普通索引、从 `enabled` 回填、删除 `enabled` 字段、补齐 `WorkflowDesign:binding:delete` 的 `tab_menu`/`tab_permission` 种子数据）。
+- 数据库迁移：`backend/src/main/resources/db/migration/V4__add_process_binding_status.sql`（新增 `status` 字段、降级 UNIQUE 索引为普通索引、从 `enabled` 回填、删除 `enabled` 字段、补齐 `WorkflowDesign:binding:delete` 的 `tab_menu`/`tab_permission` 种子数据）；实现过程中发现 V4 漏了给角色补授该权限点，额外新增 `V5__grant_binding_delete_permission.sql` 单独给 `SUPER_ADMIN` 角色补授 `tab_role_permission`（原因见 design.md Decision 7）。
 - 改动文件：
   - `backend/src/main/java/cn/nihility/rbac/workflow/entity/ProcessBindingEntity.java`（`enabled` → `status`）
   - `backend/src/main/java/cn/nihility/rbac/workflow/constant/BindingStatus.java`（新增）
