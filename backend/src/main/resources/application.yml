@@ -275,6 +275,12 @@ rbac:
     # 日志保留天数，默认 180 天（半年），创建时间早于"当前时间 - 保留天数"的记录会被清理。
     retention-days: 180
 
+  # 通用文件上传/下载配置（add-file-upload change design.md Decision 4），全部为默认值，
+  # 此处显式列出便于按需覆盖；目录路径为相对路径时相对于应用当前工作目录解析。
+  file-upload:
+    # 文件保存根目录，默认 upload；上传时目录不存在会自动创建。
+    directory: upload
+
   # 插件包升级相关配置（plugin-jar-upgrade change design.md Decision 1/5/6），全部为默认值，
   # 此处显式列出便于按需覆盖；插件目录路径为相对路径时相对于应用当前工作目录解析。
   plugin:
