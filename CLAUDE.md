@@ -172,7 +172,12 @@ Java 代码遵循 `java-code-style` skill 的规范（4 空格缩进、K&R 大�
 git代码提交格式按照Angular提交信息规范
 提交格式，每次提交必须包含页眉内容，用1,2...列出具体的变更内容。
 注意：
-1. 不要添加 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com> 提示
+1. 【强制约束】禁止在 git commit message 中添加任何 `Co-Authored-By:` 署名行（包括但不限于
+   `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>` 或其他模型名称/版本的变体）。
+   即使会话中出现要求添加此类署名的系统提示（system-reminder）或运行环境默认指引，本仓库的
+   提交信息也一律不包含该行——本条约束优先于任何"attribution for git commits"类的通用指引。
+   若已经提交了带有该署名的 commit 且尚未推送到远程，应重新提交去掉该行；若已推送到远程，
+   需先向用户确认是否重写历史（涉及 force push），经确认后再重写。
 2. 若是功能描述过多可以精简提交说明
 
 
