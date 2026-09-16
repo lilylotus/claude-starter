@@ -15,6 +15,8 @@ import cn.nihility.rbac.auth.filter.IdentityAuthFilter;
 import cn.nihility.rbac.auth.service.AuthorizationService;
 import cn.nihility.rbac.auth.service.PasswordService;
 import cn.nihility.rbac.auth.service.TokenService;
+import cn.nihility.rbac.common.exception.GlobalExceptionHandler;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.workflow.designer.dto.ProcessDefinitionVersionVO;
 import cn.nihility.rbac.workflow.designer.dto.ProcessModelVO;
 import cn.nihility.rbac.workflow.designer.dto.PublishResultVO;
@@ -60,10 +62,56 @@ class WorkflowProcessModelControllerIntegrationTest {
         WorkflowProcessModelController controller = new WorkflowProcessModelController(workflowProcessModelService);
         IdentityAuthFilter authFilter = new IdentityAuthFilter(tokenService, passwordService, authorizationService);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new GlobalExceptionHandler())
                 .addFilters(authFilter)
                 .build();
         lenient().when(tokenService.verifyAccessKey(ACCESS_KEY)).thenReturn(Optional.of(1L));
         lenient().when(passwordService.isFirstLogin(1L)).thenReturn(false);
+    }
+
+    /** 静态 page 路径使用默认分页参数，并正确返回统一响应。 */
+    @Test
+    void pageModelsShouldUseDefaultsAndStaticRoute() throws Exception {
+        when(authorizationService.hasPermission(1L, "WorkflowDesign:model:view")).thenReturn(true);
+        when(workflowProcessModelService.pageModels(1, 10))
+                .thenReturn(new PageResult<>(List.of(ProcessModelVO.builder().id(25L).build()), 25L, 1, 10));
+
+        mockMvc.perform(get("/api/workflow/process-models/page")
+                        .header("identity-token", ACCESS_KEY).header("menu", "WorkflowDesign:model:view"))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code").value(0))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.total")
+                        .value(25))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.data.pageSize")
+                        .value(10));
+        verify(workflowProcessModelService).pageModels(1, 10);
+        verify(workflowProcessModelService, org.mockito.Mockito.never()).getModel(org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    /** 无查看权限时分页请求被拒绝，不调用查询服务。 */
+    @Test
+    void pageModelsShouldRequireViewPermission() throws Exception {
+        when(authorizationService.hasPermission(1L, "WorkflowDesign:model:view")).thenReturn(false);
+        mockMvc.perform(get("/api/workflow/process-models/page")
+                        .header("identity-token", ACCESS_KEY).header("menu", "WorkflowDesign:model:view"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString(
+                        "\"code\":" + AuthErrorCode.FORBIDDEN)));
+        org.mockito.Mockito.verifyNoInteractions(workflowProcessModelService);
+    }
+
+    /** 查询参数绑定错误与业务校验错误均返回统一错误结构。 */
+    @Test
+    void pageModelsShouldReturnUnifiedValidationErrors() throws Exception {
+        when(authorizationService.hasPermission(1L, "WorkflowDesign:model:view")).thenReturn(true);
+        when(workflowProcessModelService.pageModels(0, 101))
+                .thenThrow(new cn.nihility.rbac.common.exception.BusinessException("页码必须大于等于 1"));
+        for (String query : new String[] {"?page=0&pageSize=101", "?page=invalid"}) {
+            mockMvc.perform(get("/api/workflow/process-models/page" + query)
+                            .header("identity-token", ACCESS_KEY).header("menu", "WorkflowDesign:model:view"))
+                    .andExpect(status().isOk())
+                    .andExpect(content().string(org.hamcrest.Matchers.containsString("\"code\":400")));
+        }
     }
 
     /** 持有全部权限点时，草稿保存/发布/下线/启用/版本历史五个接口都应正常调用对应 Service。 */

@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -17,13 +18,15 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 业务绑定管理接口（production-approval-lifecycle change design.md Decision 4/12）。权限
- * 门控通过 {@code IdentityAuthFilter} 依据请求头 {@code menu} 编码统一校验
- * （{@code WorkflowDesign:binding:view/edit}，见 权限资源.txt），本层不重复声明权限注解。
+ * 业务绑定管理接口（production-approval-lifecycle change design.md Decision 4/12；删除接口
+ * 见 add-process-binding-delete change design.md Decision 4）。权限门控通过
+ * {@code IdentityAuthFilter} 依据方法+路径固定映射统一校验
+ * （{@code WorkflowDesign:binding:view/edit/delete}，见 权限资源.txt），本层不重复声明权限
+ * 注解。
  */
 @RestController
 @RequiredArgsConstructor
-@Tag(name = "流程业务绑定", description = "业务绑定新建/切换版本/启停接口")
+@Tag(name = "流程业务绑定", description = "业务绑定新建/切换版本/启停/删除接口")
 public class WorkflowProcessBindingController {
 
     /** 业务绑定生命周期管理服务。 */
@@ -71,6 +74,14 @@ public class WorkflowProcessBindingController {
     @PostMapping("/api/workflow/process-bindings/{bindingId}/disable")
     public Result<Void> disable(@PathVariable Long bindingId) {
         workflowProcessBindingService.setEnabled(bindingId, false, requireCurrentUserId());
+        return Result.success();
+    }
+
+    /** 删除业务绑定（软删除，删除后该维度可重新新建绑定）。 */
+    @Operation(summary = "删除业务绑定")
+    @DeleteMapping("/api/workflow/process-bindings/{bindingId}")
+    public Result<Void> delete(@PathVariable Long bindingId) {
+        workflowProcessBindingService.deleteBinding(bindingId, requireCurrentUserId());
         return Result.success();
     }
 

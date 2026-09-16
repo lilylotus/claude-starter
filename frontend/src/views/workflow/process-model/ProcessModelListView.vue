@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as workflowApi from '@/api/workflow'
 import { usePermission } from '@/composables/usePermission'
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import { PROCESS_MODEL_STATUS_LABEL, type ProcessModelRow, type ProcessModelStatus } from '@/types/workflow'
 import VersionHistoryDialog from './VersionHistoryDialog.vue'
 
@@ -13,19 +14,42 @@ const { hasPermission } = usePermission()
 
 const loading = ref(false)
 const models = ref<ProcessModelRow[]>([])
+const page = ref(1)
+const pageSize = ref<number>(DEFAULT_PAGE_SIZE)
+const total = ref(0)
+let latestRequestId = 0
 const createDialogVisible = ref(false)
 const creating = ref(false)
 const createForm = reactive({ processCode: '', processName: '' })
 
 async function fetchModels() {
+  const requestId = ++latestRequestId
   loading.value = true
   try {
-    models.value = await workflowApi.listProcessModels()
+    const result = await workflowApi.pageProcessModels({ page: page.value, pageSize: pageSize.value })
+    if (requestId !== latestRequestId) return
+    models.value = result.records
+    total.value = result.total
   } catch {
+    if (requestId !== latestRequestId) return
     models.value = []
+    total.value = 0
   } finally {
-    loading.value = false
+    if (requestId === latestRequestId) loading.value = false
   }
+}
+
+function handlePageChange(value: number) {
+  if (value === page.value) return
+  page.value = value
+  return fetchModels()
+}
+
+function handlePageSizeChange(value: number) {
+  if (value === pageSize.value) return
+  pageSize.value = value
+  page.value = 1
+  return fetchModels()
 }
 
 fetchModels()
@@ -151,6 +175,18 @@ const canDisable = computed(() => hasPermission('WorkflowDesign:model:disable'))
       </el-table-column>
     </el-table>
 
+    <el-pagination
+      class="process-model-panel__pagination"
+      background
+      layout="sizes, prev, pager, next, total"
+      :page-sizes="[...PAGE_SIZE_OPTIONS]"
+      :current-page="page"
+      :page-size="pageSize"
+      :total="total"
+      @current-change="handlePageChange"
+      @size-change="handlePageSizeChange"
+    />
+
     <VersionHistoryDialog v-if="historyModelId" v-model="historyDialogVisible" :model-id="historyModelId" />
 
     <el-dialog v-model="createDialogVisible" title="新建流程模型" width="440px" :close-on-click-modal="false">
@@ -190,6 +226,13 @@ const canDisable = computed(() => hasPermission('WorkflowDesign:model:disable'))
   font-size: 15px;
   color: var(--color-ink);
   margin: 0;
+}
+
+.process-model-panel__pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+  overflow-x: auto;
 }
 
 :deep(.el-table .el-button + .el-button) {

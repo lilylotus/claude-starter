@@ -17,6 +17,7 @@ import '@vue-flow/controls/dist/style.css'
 // pattern 渲染，不依赖外部样式表），无需在这里额外 import。
 import * as workflowApi from '@/api/workflow'
 import { fetchFormFieldRenderSchema } from '@/api/formField'
+import * as roleApi from '@/api/role'
 import { FORM_FIELD_CONTROL_TYPE_MULTI_DICT, type FormFieldBizType } from '@/types/formField'
 import { useWorkflowDesignerStore, type DesignerNodeType } from '@/stores/workflowDesigner'
 import { validateProcessModelDsl } from '@/utils/workflowValidation'
@@ -28,6 +29,7 @@ import EndNode from './nodes/EndNode.vue'
 import NodePropertyPanel from './panels/NodePropertyPanel.vue'
 import VersionHistoryDialog from '../process-model/VersionHistoryDialog.vue'
 import type { ConditionFieldOption, EdgeConditionDsl } from '@/types/workflow'
+import type { RoleOption } from '@/types/role'
 
 const route = useRoute()
 const router = useRouter()
@@ -56,6 +58,10 @@ const versionDialogVisible = ref(false)
 // 条件分支"字段"下拉的数据源：合并组织/用户/任职/应用四类业务对象的表单字段渲染元数据，
 // 传给 NodePropertyPanel.vue（workflow-condition-payload-fields change design.md Decision 6）。
 const conditionFieldOptions = ref<ConditionFieldOption[]>([])
+
+// 审批节点"指定角色"/组织负责人系"要求持有的角色"下拉数据源，传给 NodePropertyPanel.vue
+// （improve-workflow-assignee-pickers change design.md Decision 2）。
+const roleOptions = ref<RoleOption[]>([])
 
 const { project, screenToFlowCoordinate } = useVueFlow()
 const flowWrapperRef = ref<HTMLDivElement | null>(null)
@@ -133,9 +139,20 @@ async function loadConditionFieldOptions() {
   }
 }
 
+// 一次性加载全量角色选项（未删除且启用），供"指定角色"/组织负责人系"要求持有的角色"
+// 下拉使用；与 loadConditionFieldOptions 并列，互不阻塞，失败时退化为空数组不阻断设计器加载。
+async function loadRoleOptions() {
+  try {
+    roleOptions.value = await roleApi.getRoleOptions()
+  } catch {
+    roleOptions.value = []
+  }
+}
+
 onMounted(() => {
   loadModel()
   loadConditionFieldOptions()
+  loadRoleOptions()
 })
 
 // ---- 拖拽添加节点 ----
@@ -379,6 +396,7 @@ function goBack() {
           :outgoing-edges="designerStore.outgoingEdges(selectedNode.id)"
           :node-label="nodeLabel"
           :condition-field-options="conditionFieldOptions"
+          :role-options="roleOptions"
           :readonly="!canEdit"
           @update-node="handleUpdateNode"
           @update-edge-condition="handleUpdateEdgeCondition"

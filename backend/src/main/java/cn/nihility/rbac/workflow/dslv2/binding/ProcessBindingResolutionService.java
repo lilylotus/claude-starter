@@ -3,6 +3,7 @@ package cn.nihility.rbac.workflow.dslv2.binding;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.org.entity.OrgEntity;
 import cn.nihility.rbac.org.mapper.OrgMapper;
+import cn.nihility.rbac.workflow.constant.BindingStatus;
 import cn.nihility.rbac.workflow.constant.ExecutionMode;
 import cn.nihility.rbac.workflow.constant.ProcessModelStatus;
 import cn.nihility.rbac.workflow.entity.ProcessBindingEntity;
@@ -167,7 +168,7 @@ public class ProcessBindingResolutionService {
                 .eq(ProcessBindingEntity::getOperationType, operationType)
                 .eq(ProcessBindingEntity::getScopeType, scopeType)
                 .eq(ProcessBindingEntity::getScopeId, scopeId)
-                .eq(ProcessBindingEntity::getEnabled, true);
+                .eq(ProcessBindingEntity::getStatus, BindingStatus.ENABLED);
         wrapper.last(forUpdate ? "LIMIT 1 FOR UPDATE" : "LIMIT 1");
         return processBindingMapper.selectOne(wrapper);
     }

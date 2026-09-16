@@ -1,5 +1,11 @@
 import request from './request'
-import type { ProcessDefinitionVersionVO, ProcessModelRow, PublishResultVO } from '@/types/workflow'
+import type {
+  ProcessDefinitionVersionVO,
+  ProcessModelPageQuery,
+  ProcessModelPageResult,
+  ProcessModelRow,
+  PublishResultVO,
+} from '@/types/workflow'
 
 // 流程设计器相关接口封装，组件/store 不直接调用 axios。
 // 五个生命周期接口的路径/请求响应结构均以后端
@@ -39,6 +45,11 @@ export function listProcessModelVersions(id: number): Promise<ProcessDefinitionV
 // WorkflowDesign:model:edit。
 export function listProcessModels(): Promise<ProcessModelRow[]> {
   return request.get('/workflow/process-models')
+}
+
+// 管理列表按页查询；业务绑定选择器继续使用上面的全量列表接口。
+export function pageProcessModels(params: ProcessModelPageQuery): Promise<ProcessModelPageResult> {
+  return request.get('/workflow/process-models/page', { params })
 }
 
 export function getProcessModel(id: number): Promise<ProcessModelRow> {

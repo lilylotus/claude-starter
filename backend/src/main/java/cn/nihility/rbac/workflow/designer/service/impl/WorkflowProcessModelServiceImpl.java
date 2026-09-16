@@ -1,6 +1,7 @@
 package cn.nihility.rbac.workflow.designer.service.impl;
 
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.util.JacksonUtils;
 import cn.nihility.rbac.workflow.constant.ProcessModelStatus;
 import cn.nihility.rbac.workflow.designer.compiler.CompiledProcess;
@@ -24,6 +25,7 @@ import cn.nihility.rbac.workflow.mapper.ProcessDefinitionMapper;
 import cn.nihility.rbac.workflow.mapper.ProcessModelMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -79,6 +81,22 @@ public class WorkflowProcessModelServiceImpl implements WorkflowProcessModelServ
                         .orderByDesc(ProcessModelEntity::getUpdateTime)
                         .orderByDesc(ProcessModelEntity::getId))
                 .stream().map(this::toModelVO).toList();
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public PageResult<ProcessModelVO> pageModels(Integer page, Integer pageSize) {
+        if (page == null || page < 1) {
+            throw new BusinessException("页码必须大于等于 1");
+        }
+        if (pageSize == null || pageSize < 1 || pageSize > 100) {
+            throw new BusinessException("每页条数必须在 1–100 之间");
+        }
+        Page<ProcessModelEntity> modelPage = processModelMapper.selectPage(new Page<>(page, pageSize),
+                new LambdaQueryWrapper<ProcessModelEntity>()
+                        .orderByDesc(ProcessModelEntity::getUpdateTime)
+                        .orderByDesc(ProcessModelEntity::getId));
+        return PageResult.of(modelPage.getRecords().stream().map(this::toModelVO).toList(), modelPage);
     }
 
     /** {@inheritDoc} */

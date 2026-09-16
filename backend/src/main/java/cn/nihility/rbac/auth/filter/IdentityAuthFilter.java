@@ -141,6 +141,7 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
             new PermissionMapping("PUT", "/api/workflow/process-bindings/*", "WorkflowDesign:binding:edit"),
             new PermissionMapping("POST", "/api/workflow/process-bindings/*/enable", "WorkflowDesign:binding:edit"),
             new PermissionMapping("POST", "/api/workflow/process-bindings/*/disable", "WorkflowDesign:binding:edit"),
+            new PermissionMapping("DELETE", "/api/workflow/process-bindings/*", "WorkflowDesign:binding:delete"),
             new PermissionMapping("POST", "/api/approval-requests/*/approve", "ApprovalManagement:request:approve"),
             new PermissionMapping("POST", "/api/approval-requests/*/reject", "ApprovalManagement:request:approve"),
             new PermissionMapping("POST", "/api/v1/workflow/process-instances/*/terminate",

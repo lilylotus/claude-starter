@@ -2,6 +2,7 @@ package cn.nihility.rbac.workflow.designer.controller;
 
 import cn.nihility.rbac.auth.context.CurrentUserContext;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.result.Result;
 import cn.nihility.rbac.workflow.designer.dto.ProcessDefinitionVersionVO;
 import cn.nihility.rbac.workflow.designer.dto.CreateProcessModelRequest;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -43,6 +45,15 @@ public class WorkflowProcessModelController {
     @GetMapping("/api/workflow/process-models")
     public Result<List<ProcessModelVO>> listModels() {
         return Result.success(workflowProcessModelService.listModels());
+    }
+
+    /** 分页查询流程模型，沿用模型查看权限。 */
+    @Operation(summary = "分页查询流程模型", description = "按更新时间、主键倒序，返回当前页记录与总数")
+    @GetMapping("/api/workflow/process-models/page")
+    public Result<PageResult<ProcessModelVO>> pageModels(
+            @Parameter(description = "页码，从 1 开始，默认 1") @RequestParam(defaultValue = "1") Integer page,
+            @Parameter(description = "每页条数，范围 1–100，默认 10") @RequestParam(defaultValue = "10") Integer pageSize) {
+        return Result.success(workflowProcessModelService.pageModels(page, pageSize));
     }
 
     /** 查询流程模型详情。 */

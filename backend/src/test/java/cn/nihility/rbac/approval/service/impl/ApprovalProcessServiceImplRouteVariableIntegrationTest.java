@@ -12,6 +12,7 @@ import cn.nihility.rbac.metadata.entity.MetadataFieldEntity;
 import cn.nihility.rbac.metadata.mapper.MetadataFieldMapper;
 import cn.nihility.rbac.workflow.constant.ApprovalMode;
 import cn.nihility.rbac.workflow.constant.AssigneeType;
+import cn.nihility.rbac.workflow.constant.BindingStatus;
 import cn.nihility.rbac.workflow.constant.EmptyAssigneeStrategy;
 import cn.nihility.rbac.workflow.designer.dto.ApprovalNodeDsl;
 import cn.nihility.rbac.workflow.designer.dto.ConditionNodeDsl;
@@ -212,7 +213,7 @@ class ApprovalProcessServiceImplRouteVariableIntegrationTest {
                 .definitionId(definitionId)
                 .executionMode("LEGACY_SYNC")
                 .revision(1L)
-                .enabled(true)
+                .status(BindingStatus.ENABLED)
                 .createBy("test")
                 .createTime(now)
                 .updateBy("test")

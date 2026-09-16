@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.org.entity.OrgEntity;
 import cn.nihility.rbac.org.mapper.OrgMapper;
+import cn.nihility.rbac.workflow.constant.BindingStatus;
 import cn.nihility.rbac.workflow.constant.ExecutionMode;
 import cn.nihility.rbac.workflow.constant.ProcessModelStatus;
 import cn.nihility.rbac.workflow.entity.ProcessBindingEntity;
@@ -92,7 +93,7 @@ class ProcessBindingResolutionServiceTest {
     void resolve_shouldIgnoreDisabledBinding() {
         OrgEntity root = insertOrg("V2BindRoot5", null, null);
         ProcessBindingEntity disabled = insertBinding("TEST_RESOLVE_BIZ3", "TEST_RESOLVE_OP3", "ORG", root.getId(), 731L);
-        disabled.setEnabled(false);
+        disabled.setStatus(BindingStatus.DISABLED);
         processBindingMapper.updateById(disabled);
         insertBinding("TEST_RESOLVE_BIZ3", "TEST_RESOLVE_OP3", "GLOBAL", 0L, 732L);
 
@@ -227,7 +228,7 @@ class ProcessBindingResolutionServiceTest {
                 .definitionId(definitionId)
                 .executionMode("LEGACY_SYNC")
                 .revision(1L)
-                .enabled(true)
+                .status(BindingStatus.ENABLED)
                 .createBy("test").createTime(now).updateBy("test").updateTime(now)
                 .build();
         processBindingMapper.insert(entity);

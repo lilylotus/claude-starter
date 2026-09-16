@@ -5,7 +5,7 @@
 //   tab_wf_node_assignee_rule 各列（workflow-approval-engine change design.md Decision 9/11）。
 // - CONDITION：编辑该节点全部出边的分支条件（字段/比较符/比较值），支持添加/删除分支，
 //   并高亮标记哪一条是"不带 condition"的兜底默认分支；发布前必须至少保留一条。
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { DesignerEdge, DesignerNode, DesignerNodeType } from '@/stores/workflowDesigner'
 import {
   APPROVAL_MODE_OPTIONS,
@@ -23,6 +23,8 @@ import {
   FORM_FIELD_CONTROL_TYPE_NUMBER,
   type FormFieldBizType,
 } from '@/types/formField'
+import * as userApi from '@/api/user'
+import type { RoleOption } from '@/types/role'
 
 const props = defineProps<{
   node: DesignerNode
@@ -31,6 +33,10 @@ const props = defineProps<{
   // 条件分支"字段"下拉的数据源：组织/用户/任职/应用四类业务对象的表单字段定义合并列表，
   // 已过滤掉多选字典类型字段，由 ProcessDesignerView.vue 并行请求 render-schema 后传入。
   conditionFieldOptions: ConditionFieldOption[]
+  // "指定角色"/组织负责人系"要求持有的角色"下拉的数据源（未删除且启用的全量角色），
+  // 由 ProcessDesignerView.vue 一次性加载后传入（improve-workflow-assignee-pickers
+  // change design.md Decision 2）。
+  roleOptions: RoleOption[]
   readonly?: boolean
 }>()
 
@@ -50,6 +56,90 @@ function updateLabel(value: string) {
 function updateField(field: string, value: unknown) {
   emit('update-node', { [field]: value })
 }
+
+// ---- 审批人来源为"指定人员"（USER）：多选远程搜索（improve-workflow-assignee-pickers
+// change design.md Decision 1，复用 AdminManagementView.vue"关联用户远程搜索选择器"的模式）----
+// 输入内容形如手机号（11 位、1 开头）时按 mobile 搜索，否则按 name 搜索；
+// name/mobile 后端是"与"关系，不能同时传，否则会搜不到人。
+const MOBILE_PATTERN = /^1\d{10}$/
+
+interface UserOption {
+  id: number
+  name: string
+  mobile: string
+}
+
+const userOptions = ref<UserOption[]>([])
+const userSearchLoading = ref(false)
+
+async function remoteSearchUsers(query: string) {
+  if (!query) {
+    userOptions.value = []
+    return
+  }
+  userSearchLoading.value = true
+  try {
+    const params = MOBILE_PATTERN.test(query) ? { mobile: query, pageSize: 20 } : { name: query, pageSize: 20 }
+    const result = await userApi.getUserPage(params)
+    userOptions.value = result.records.map((user) => ({ id: user.id, name: user.name, mobile: user.mobile }))
+  } finally {
+    userSearchLoading.value = false
+  }
+}
+
+// assigneeValue 存储为逗号分隔的用户 id 字符串，el-select 多选需要 number[] 作为 model-value
+const selectedUserIds = computed<number[]>(() => {
+  const raw = props.node.data?.assigneeValue
+  if (!raw) return []
+  return raw
+    .split(',')
+    .map((item) => Number(item.trim()))
+    .filter((id) => Number.isFinite(id))
+})
+
+function updateUserAssignees(ids: number[]) {
+  updateField('assigneeValue', ids.join(','))
+}
+
+// 属性面板不会在切节点时销毁重建（只是 node prop 变化），因此新增一个按 node.id 变化的
+// watcher：切换到一个 assigneeType=USER 且已有 assigneeValue 的节点时，把不在当前
+// userOptions 缓存里的 id 并发调用 GET /api/users/{id} 补齐姓名，合并进本地选项缓存，
+// 保证 el-select 能正确渲染已选中用户的姓名标签而不是空白（design.md Decision 1）。
+watch(
+  () => props.node.id,
+  async () => {
+    if (props.node.data?.assigneeType !== 'USER') return
+    const ids = selectedUserIds.value
+    const missingIds = ids.filter((id) => !userOptions.value.some((opt) => opt.id === id))
+    if (missingIds.length === 0) return
+    const fetched = await Promise.all(
+      missingIds.map((id) =>
+        userApi
+          .getUserById(id)
+          .then((user) => ({ id: user.id, name: user.name, mobile: user.mobile }))
+          .catch(() => null),
+      ),
+    )
+    const resolved = fetched.filter((opt): opt is UserOption => opt !== null)
+    if (resolved.length > 0) {
+      userOptions.value = [...userOptions.value, ...resolved]
+    }
+  },
+  { immediate: true },
+)
+
+// ---- 审批人来源为"指定角色"（ROLE）及组织负责人系"要求持有的角色"：本地筛选单选
+// （design.md Decision 2/4，两处共用同一个数据源与标签格式）----
+function roleOptionLabel(role: RoleOption): string {
+  return `${role.name}（${role.code}）`
+}
+
+// ---- 审批人来源为"指定岗位"（POSITION）：复用已加载的条件字段选项，不新增请求
+// （design.md Decision 3）----
+const positionTypeOption = computed(() =>
+  props.conditionFieldOptions.find((opt) => opt.bizType === 'POSITION' && opt.fieldCode === 'positionType'),
+)
+const positionTypeDictOptions = computed(() => positionTypeOption.value?.dictOptions ?? [])
 
 const hasDefaultBranch = computed(() => props.outgoingEdges.some((edge) => !edge.data?.condition))
 
@@ -151,16 +241,50 @@ function handleFieldSelect(edge: DesignerEdge, compositeKey: string) {
             <el-option v-for="opt in ASSIGNEE_TYPE_OPTIONS" :key="opt.value" :label="opt.label" :value="opt.value" />
           </el-select>
         </el-form-item>
-        <el-form-item
-          v-if="node.data?.assigneeType === 'ROLE' || node.data?.assigneeType === 'USER'"
-          :label="node.data?.assigneeType === 'ROLE' ? '角色编码' : '用户 id'"
-          required
-        >
-          <el-input
+        <el-form-item v-if="node.data?.assigneeType === 'USER'" label="指定人员" required>
+          <el-select
+            :model-value="selectedUserIds"
+            multiple
+            filterable
+            remote
+            reserve-keyword
+            placeholder="输入姓名或手机号搜索人员"
+            :remote-method="remoteSearchUsers"
+            :loading="userSearchLoading"
+            style="width: 100%"
+            @update:model-value="(v: number[]) => updateUserAssignees(v)"
+          >
+            <el-option
+              v-for="opt in userOptions"
+              :key="opt.id"
+              :label="opt.mobile ? `${opt.name}（${opt.mobile}）` : opt.name"
+              :value="opt.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-else-if="node.data?.assigneeType === 'ROLE'" label="审批角色" required>
+          <el-select
             :model-value="node.data?.assigneeValue"
-            :placeholder="node.data?.assigneeType === 'ROLE' ? '如：SECURITY_ADMIN' : '用户 id，多个以逗号分隔'"
+            filterable
+            placeholder="输入角色名称或编码搜索"
+            style="width: 100%"
             @update:model-value="(v: string) => updateField('assigneeValue', v)"
-          />
+          >
+            <el-option v-for="opt in roleOptions" :key="opt.id" :label="roleOptionLabel(opt)" :value="opt.code" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-else-if="node.data?.assigneeType === 'POSITION'" label="岗位类型" required>
+          <el-select
+            :model-value="node.data?.assigneeValue"
+            placeholder="请选择岗位类型"
+            style="width: 100%"
+            @update:model-value="(v: string) => updateField('assigneeValue', v)"
+          >
+            <el-option v-for="opt in positionTypeDictOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+          </el-select>
+          <p v-if="!positionTypeOption" class="node-property-panel__hint">
+            岗位类型字典未配置或已停用，请联系管理员在表单字段管理中检查
+          </p>
         </el-form-item>
         <el-form-item
           v-else-if="
@@ -168,13 +292,19 @@ function handleFieldSelect(edge: DesignerEdge, compositeKey: string) {
             node.data?.assigneeType === 'APPLICANT_DEPT_LEADER' ||
             node.data?.assigneeType === 'APPLICANT_DEPT_PARENT_LEADER'
           "
-          label="要求的管理员角色"
+          label="要求持有的角色"
         >
-          <el-input
+          <el-select
             :model-value="node.data?.assigneeValue"
-            placeholder="要求持有的管理员角色编码，如：DEPT_LEADER"
+            filterable
+            clearable
+            placeholder="输入角色名称或编码搜索，不填时使用默认角色"
+            style="width: 100%"
             @update:model-value="(v: string) => updateField('assigneeValue', v)"
-          />
+          >
+            <el-option v-for="opt in roleOptions" :key="opt.id" :label="roleOptionLabel(opt)" :value="opt.code" />
+          </el-select>
+          <p class="node-property-panel__hint">不填时使用默认角色</p>
         </el-form-item>
 
         <el-form-item label="会签模式" required>

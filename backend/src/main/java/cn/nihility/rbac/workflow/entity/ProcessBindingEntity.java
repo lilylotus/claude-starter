@@ -50,8 +50,8 @@ public class ProcessBindingEntity {
     /** 乐观锁修订号，切换绑定版本时自增。 */
     private Long revision;
 
-    /** 是否启用。 */
-    private Boolean enabled;
+    /** 绑定状态：{@code cn.nihility.rbac.workflow.constant.BindingStatus} 启用/停用/已删除三态。 */
+    private Integer status;
 
     /** 创建人。 */
     private String createBy;

@@ -24,6 +24,7 @@ import cn.nihility.rbac.workflow.exception.WorkflowModelValidationException;
 import cn.nihility.rbac.workflow.mapper.NodeAssigneeRuleMapper;
 import cn.nihility.rbac.workflow.mapper.ProcessDefinitionMapper;
 import cn.nihility.rbac.workflow.mapper.ProcessModelMapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import org.flowable.bpmn.model.BpmnModel;
@@ -89,6 +90,50 @@ class WorkflowProcessModelServiceImplTest {
         service = new WorkflowProcessModelServiceImpl(
                 processModelMapper, processDefinitionMapper, nodeAssigneeRuleMapper, workflowModelCompiler,
                 workflowModelCompilerV2, workflowReleaseReviewService, repositoryService);
+    }
+
+    /** 分页仅转换 Mapper 返回的当前页，保留总数及末页元信息。 */
+    @Test
+    void pageModelsShouldPreservePageMetadata() {
+        Page<ProcessModelEntity> modelPage = new Page<>(3, 10, 21);
+        modelPage.setRecords(List.of(draftModel()));
+        when(processModelMapper.selectPage(any(Page.class), any())).thenReturn(modelPage);
+
+        var result = service.pageModels(3, 10);
+
+        assertThat(result.getRecords()).extracting("id").containsExactly(1L);
+        assertThat(result.getTotal()).isEqualTo(21);
+        assertThat(result.getPage()).isEqualTo(3);
+        assertThat(result.getPageSize()).isEqualTo(10);
+        verify(processModelMapper, never()).selectList(any());
+    }
+
+    /** 空数据与越界页均保持空列表，不丢失真实总数。 */
+    @Test
+    void pageModelsShouldSupportEmptyPages() {
+        when(processModelMapper.selectPage(any(Page.class), any()))
+                .thenReturn(new Page<ProcessModelEntity>(1, 10, 0))
+                .thenReturn(new Page<ProcessModelEntity>(4, 10, 21));
+
+        var empty = service.pageModels(1, 10);
+        assertThat(empty.getRecords()).isEmpty();
+        assertThat(empty.getTotal()).isZero();
+        var beyondLast = service.pageModels(4, 10);
+        assertThat(beyondLast.getRecords()).isEmpty();
+        assertThat(beyondLast.getTotal()).isEqualTo(21);
+        assertThat(beyondLast.getPage()).isEqualTo(4);
+    }
+
+    /** 拒绝非法参数，防止负容量绕过数据库分页。 */
+    @Test
+    void pageModelsShouldRejectInvalidBoundsBeforeQuerying() {
+        for (Integer page : new Integer[] {null, 0, -1}) {
+            assertThatThrownBy(() -> service.pageModels(page, 10)).isInstanceOf(BusinessException.class);
+        }
+        for (Integer pageSize : new Integer[] {null, -1, 0, 101}) {
+            assertThatThrownBy(() -> service.pageModels(1, pageSize)).isInstanceOf(BusinessException.class);
+        }
+        org.mockito.Mockito.verifyNoInteractions(processModelMapper);
     }
 
     /** 保存草稿只更新 {@code model_json}，不触碰 Flowable。 */

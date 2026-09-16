@@ -1,6 +1,7 @@
 package cn.nihility.rbac.workflow.dslv2.binding;
 
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.workflow.constant.BindingStatus;
 import cn.nihility.rbac.workflow.constant.ExecutionMode;
 import cn.nihility.rbac.workflow.constant.ProcessModelStatus;
 import cn.nihility.rbac.workflow.dslv2.dto.ProcessBindingRequest;
@@ -13,6 +14,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -43,6 +45,7 @@ public class WorkflowProcessBindingService {
      */
     public List<ProcessBindingVO> listBindings() {
         return processBindingMapper.selectList(new LambdaQueryWrapper<ProcessBindingEntity>()
+                        .ne(ProcessBindingEntity::getStatus, BindingStatus.DELETED)
                         .orderByDesc(ProcessBindingEntity::getUpdateTime))
                 .stream().map(this::toVO).toList();
     }
@@ -86,7 +89,7 @@ public class WorkflowProcessBindingService {
                 .executionMode(StringUtils.hasText(request.getExecutionMode())
                         ? request.getExecutionMode() : ExecutionMode.LEGACY_SYNC)
                 .revision(1L)
-                .enabled(true)
+                .status(BindingStatus.ENABLED)
                 .createBy(operatorText).createTime(now).updateBy(operatorText).updateTime(now)
                 .build();
         processBindingMapper.insert(entity);
@@ -113,13 +116,12 @@ public class WorkflowProcessBindingService {
         ProcessDefinitionEntity definition = requirePublishedDefinition(request.getDefinitionId());
         ProcessBindingEntity entity = requireBinding(bindingId);
         ProcessDefinitionEntity previousDefinition = processDefinitionMapper.selectById(entity.getDefinitionId());
-        if (!definition.getProcessModelId().equals(previousDefinition.getProcessModelId())) {
-            throw new BusinessException("切换目标流程定义必须与当前绑定属于同一流程模型");
-        }
-        boolean isRollback = previousDefinition.getVersion() != null && definition.getVersion() != null
+        boolean sameModel = definition.getProcessModelId().equals(previousDefinition.getProcessModelId());
+        boolean isRollback = sameModel && previousDefinition.getVersion() != null && definition.getVersion() != null
                 && definition.getVersion() < previousDefinition.getVersion();
+        String scenario = !sameModel ? "切换到其它流程模型" : isRollback ? "显式回滚到历史版本" : "切换到更新版本";
         log.info("业务绑定 {} 切换流程版本：{} -> {}（{}），操作人={}", bindingId, previousDefinition.getVersion(),
-                definition.getVersion(), isRollback ? "显式回滚到历史版本" : "切换到更新版本", operatorId);
+                definition.getVersion(), scenario, operatorId);
 
         LocalDateTime now = LocalDateTime.now();
         String operatorText = operatorId == null ? null : operatorId.toString();
@@ -148,7 +150,26 @@ public class WorkflowProcessBindingService {
         requireBinding(bindingId);
         processBindingMapper.update(null, new LambdaUpdateWrapper<ProcessBindingEntity>()
                 .eq(ProcessBindingEntity::getId, bindingId)
-                .set(ProcessBindingEntity::getEnabled, enabled)
+                .set(ProcessBindingEntity::getStatus, enabled ? BindingStatus.ENABLED : BindingStatus.DISABLED)
+                .set(ProcessBindingEntity::getUpdateBy, operatorId == null ? null : operatorId.toString())
+                .set(ProcessBindingEntity::getUpdateTime, LocalDateTime.now()));
+    }
+
+    /**
+     * 删除业务绑定（软删除，add-process-binding-delete change design.md Decision 4）：置为
+     * {@link BindingStatus#DELETED}，保留行本身（含审计字段），不做物理删除。删除后该绑定
+     * 从列表查询/绑定解析中排除，其占用的维度可重新新建绑定；不要求删除前先停用，与
+     * {@code RoleServiceImpl.delete} 既有惯例一致。
+     *
+     * @param bindingId  绑定 id
+     * @param operatorId 操作人 id
+     */
+    @Transactional(rollbackFor = Exception.class, propagation = Propagation.REQUIRED)
+    public void deleteBinding(Long bindingId, Long operatorId) {
+        requireBinding(bindingId);
+        processBindingMapper.update(null, new LambdaUpdateWrapper<ProcessBindingEntity>()
+                .eq(ProcessBindingEntity::getId, bindingId)
+                .set(ProcessBindingEntity::getStatus, BindingStatus.DELETED)
                 .set(ProcessBindingEntity::getUpdateBy, operatorId == null ? null : operatorId.toString())
                 .set(ProcessBindingEntity::getUpdateTime, LocalDateTime.now()));
     }
@@ -159,7 +180,8 @@ public class WorkflowProcessBindingService {
                 .eq(ProcessBindingEntity::getBizType, bizType)
                 .eq(ProcessBindingEntity::getOperationType, operationType)
                 .eq(ProcessBindingEntity::getScopeType, scopeType)
-                .eq(ProcessBindingEntity::getScopeId, scopeId);
+                .eq(ProcessBindingEntity::getScopeId, scopeId)
+                .ne(ProcessBindingEntity::getStatus, BindingStatus.DELETED);
     }
 
     private long requireScopeId(ProcessBindingRequest request) {
@@ -181,7 +203,9 @@ public class WorkflowProcessBindingService {
     }
 
     private ProcessBindingEntity requireBinding(Long bindingId) {
-        ProcessBindingEntity entity = processBindingMapper.selectById(bindingId);
+        ProcessBindingEntity entity = processBindingMapper.selectOne(new LambdaQueryWrapper<ProcessBindingEntity>()
+                .eq(ProcessBindingEntity::getId, bindingId)
+                .ne(ProcessBindingEntity::getStatus, BindingStatus.DELETED));
         if (entity == null) {
             throw new BusinessException("业务绑定不存在");
         }
@@ -198,7 +222,7 @@ public class WorkflowProcessBindingService {
                 .definitionId(entity.getDefinitionId())
                 .executionMode(entity.getExecutionMode())
                 .revision(entity.getRevision())
-                .enabled(entity.getEnabled())
+                .enabled(Objects.equals(BindingStatus.ENABLED, entity.getStatus()))
                 .createBy(entity.getCreateBy())
                 .createTime(entity.getCreateTime())
                 .updateBy(entity.getUpdateBy())

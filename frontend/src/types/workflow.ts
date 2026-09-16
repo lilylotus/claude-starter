@@ -11,6 +11,20 @@ import {
   type FormFieldDictOption,
 } from './formField'
 
+// 流程模型分页查询参数，对应后端 page/pageSize。
+export interface ProcessModelPageQuery {
+  page: number
+  pageSize: number
+}
+
+// 流程模型分页结果，对应后端 PageResult<ProcessModelVO>。
+export interface ProcessModelPageResult {
+  records: ProcessModelRow[]
+  total: number
+  page: number
+  pageSize: number
+}
+
 // ---- 审批人来源类型：对应后端 cn.nihility.rbac.workflow.constant.AssigneeType 枚举 ----
 export type AssigneeType =
   | 'USER'

@@ -290,6 +290,10 @@ WorkflowDesign（流程设计器，见 openspec/changes/workflow-approval-engine
   .../process-bindings/{bindingId}/enable、POST
   .../process-bindings/{bindingId}/disable；production-approval-lifecycle change
   tasks.md 5.5，本轮补齐种子数据，原因同上）
+- WorkflowDesign:binding:delete  业务绑定删除（软删除，DELETE
+  .../process-bindings/{bindingId}；置绑定状态为已删除，保留数据库行及审计字段，删除后该
+  绑定维度可重新新建绑定，不要求先停用；add-process-binding-delete change design.md
+  Decision 4，独立成一个权限点，区别于 :edit）
 - WorkflowDesign:instance:terminate  运维强制终止流程实例（POST
   /api/v1/workflow/process-instances/{id}/terminate；独立运维权限点，不要求操作人是流程
   发起人/参与者，终止原因必填，结束流程并取消全部开放任务，不触发任何业务执行事件；

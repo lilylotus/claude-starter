@@ -38,3 +38,8 @@ export function enableBinding(bindingId: number): Promise<void> {
 export function disableBinding(bindingId: number): Promise<void> {
   return request.post(`/workflow/process-bindings/${bindingId}/disable`)
 }
+
+// 删除业务绑定（软删除）。对应权限点 WorkflowDesign:binding:delete。
+export function deleteBinding(bindingId: number): Promise<void> {
+  return request.delete(`/workflow/process-bindings/${bindingId}`)
+}

@@ -1,5 +1,6 @@
 package cn.nihility.rbac.workflow.designer.service;
 
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.workflow.designer.dto.ProcessDefinitionVersionVO;
 import cn.nihility.rbac.workflow.designer.dto.ProcessModelVO;
 import cn.nihility.rbac.workflow.designer.dto.PublishResultVO;
@@ -13,6 +14,9 @@ public interface WorkflowProcessModelService {
 
     /** 查询全部流程模型，按更新时间倒序。 */
     List<ProcessModelVO> listModels();
+
+    /** 数据库分页查询模型，页码至少为 1，每页条数为 1–100，按更新时间及主键倒序。 */
+    PageResult<ProcessModelVO> pageModels(Integer page, Integer pageSize);
 
     /** 查询一条流程模型详情。 */
     ProcessModelVO getModel(Long modelId);

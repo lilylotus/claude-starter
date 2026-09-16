@@ -3,7 +3,7 @@
 // 任职/应用）分 Tab，每个 Tab 内按操作类型（新增/更新/启用/停用/删除）分组展示全局绑定 +
 // 该操作类型下的组织范围覆盖绑定列表，支持新建组织覆盖绑定/切换已有绑定指向的版本/启停。
 import { computed, reactive, ref, watch } from 'vue'
-import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import * as bindingApi from '@/api/processBinding'
 import * as workflowApi from '@/api/workflow'
 import * as orgApi from '@/api/org'
@@ -23,6 +23,7 @@ import {
 
 const { hasPermission } = usePermission()
 const canEdit = computed(() => hasPermission('WorkflowDesign:binding:edit'))
+const canDelete = computed(() => hasPermission('WorkflowDesign:binding:delete'))
 
 const loading = ref(false)
 const bindings = ref<ProcessBindingVO[]>([])
@@ -284,6 +285,17 @@ async function handleDisable(binding: ProcessBindingVO) {
   ElMessage.success('已停用')
   await loadAll()
 }
+
+async function handleDelete(binding: ProcessBindingVO) {
+  await ElMessageBox.confirm('确定要删除该业务绑定吗？删除后该维度可以重新配置绑定', '删除确认', {
+    type: 'warning',
+    confirmButtonText: '删除',
+    cancelButtonText: '取消',
+  })
+  await bindingApi.deleteBinding(binding.id)
+  ElMessage.success('已删除')
+  await loadAll()
+}
 </script>
 
 <template>
@@ -361,21 +373,29 @@ async function handleDisable(binding: ProcessBindingVO) {
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column v-if="canEdit" label="操作" width="200" fixed="right">
+              <el-table-column v-if="canEdit || canDelete" label="操作" width="260" fixed="right">
                 <template #default="{ row }">
-                  <el-button link type="primary" @click="openSwitchDialog(row as ProcessBindingVO)">
+                  <el-button v-if="canEdit" link type="primary" @click="openSwitchDialog(row as ProcessBindingVO)">
                     切换版本
                   </el-button>
                   <el-button
-                    v-if="(row as ProcessBindingVO).enabled"
+                    v-if="canEdit && (row as ProcessBindingVO).enabled"
                     link
                     type="warning"
                     @click="handleDisable(row as ProcessBindingVO)"
                   >
                     停用
                   </el-button>
-                  <el-button v-else link type="success" @click="handleEnable(row as ProcessBindingVO)">
+                  <el-button
+                    v-if="canEdit && !(row as ProcessBindingVO).enabled"
+                    link
+                    type="success"
+                    @click="handleEnable(row as ProcessBindingVO)"
+                  >
                     启用
+                  </el-button>
+                  <el-button v-if="canDelete" link type="danger" @click="handleDelete(row as ProcessBindingVO)">
+                    删除
                   </el-button>
                 </template>
               </el-table-column>
