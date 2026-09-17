@@ -26,8 +26,10 @@ import org.junit.jupiter.api.Test;
 /**
  * {@link ProcessModelDslValidator} 单元测试（workflow-condition-payload-fields change
  * tasks.md 5.2）：覆盖条件字段须真实存在、拒绝多选字典字段、拒绝文本/字典下拉字段配置
- * 非 EQ/NE 比较符、数字/日期字段允许全部比较符四类场景，既有"条件节点至少一条默认分支"
- * 校验保持不变不在本文件重复覆盖（见 {@link WorkflowModelCompilerImplTest}）。
+ * 非 EQ/NE 比较符、数字/日期字段允许全部比较符四类场景。条件节点缺少默认分支不再是本校验器
+ * 的拒绝发布项——编译期由 {@code WorkflowModelCompilerImpl} 自动补全
+ * （workflow-condition-auto-default-branch change design.md Decision 1），相关用例见
+ * {@link WorkflowModelCompilerImplTest}。
  */
 class ProcessModelDslValidatorTest {
 

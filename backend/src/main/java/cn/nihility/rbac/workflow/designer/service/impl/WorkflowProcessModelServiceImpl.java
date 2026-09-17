@@ -201,8 +201,8 @@ public class WorkflowProcessModelServiceImpl implements WorkflowProcessModelServ
     }
 
     /**
-     * 按 v1 DSL 编译、部署、落库；沿用 workflow-approval-engine change design.md Decision
-     * 10 既有实现，行为不变。
+     * 按 v1 DSL 编译、部署、落库；发布快照包含编译期补全的默认分支，
+     * 可编辑的草稿内容保持不变。
      */
     private ProcessDefinitionEntity publishV1(
             ProcessModelEntity model, int nextVersion, String resourceName, String operatorText, LocalDateTime now) {
@@ -224,7 +224,7 @@ public class WorkflowProcessModelServiceImpl implements WorkflowProcessModelServ
                 .schemaVersion(1)
                 .flowableDefinitionKey(flowableDefinition.getKey())
                 .flowableDefinitionId(flowableDefinition.getId())
-                .modelJsonSnapshot(model.getModelJson())
+                .modelJsonSnapshot(JacksonUtils.toJson(dsl))
                 .routeFieldCodes(routeFieldCodesJson)
                 .status(ProcessModelStatus.PUBLISHED)
                 .publishedBy(operatorText)

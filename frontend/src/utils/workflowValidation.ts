@@ -2,9 +2,9 @@
 // cn.nihility.rbac.workflow.designer.compiler.ProcessModelDslValidator 保持一致
 // （workflow-approval-engine change design.md Decision 9 / specs/workflow-process-designer
 // "发布前结构与业务规则的强制校验"Requirement）：唯一开始节点、至少一个结束节点、节点 id
-// 唯一、边引用的节点必须存在、孤立节点检测、开始到结束存在可达路径、条件节点存在兜底默认边、
-// 审批节点必填字段完整。全部错误一次性收集返回，不是发现第一个就短路，方便发布前一次性
-// 展示全部问题定位信息。
+// 唯一、边引用的节点必须存在、孤立节点检测、开始到结束存在可达路径、审批节点必填字段完整。
+// 条件节点未手动配置默认分支时，系统会在发布时自动补全，前端不再对此做强制校验。全部错误
+// 一次性收集返回，不是发现第一个就短路，方便发布前一次性展示全部问题定位信息。
 import type { ConditionOperator, EdgeDsl, ProcessModelDsl, ProcessNodeDsl } from '@/types/workflow'
 
 const ALLOWED_OPERATORS: ConditionOperator[] = ['EQ', 'NE', 'GT', 'GTE', 'LT', 'LTE']
@@ -108,10 +108,6 @@ function validateConditionNodes(nodes: ProcessNodeDsl[], outgoing: Map<string, E
   for (const node of nodes) {
     if (node.type !== 'CONDITION') continue
     const out = outgoing.get(node.id) ?? []
-    const hasDefault = out.some((edge) => !edge.condition)
-    if (!hasDefault) {
-      errors.push(`条件节点 ${node.id} 缺少默认分支（未携带 condition 的兜底出边）`)
-    }
     for (const edge of out) {
       const condition = edge.condition
       if (!condition) continue

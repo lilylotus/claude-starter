@@ -69,7 +69,7 @@ const flowWrapperRef = ref<HTMLDivElement | null>(null)
 const PALETTE_ITEMS: Array<{ type: DesignerNodeType; label: string; hint: string }> = [
   { type: 'start', label: '开始', hint: '流程唯一入口，通常只需要一个' },
   { type: 'approval', label: '审批', hint: '配置审批人来源、会签模式等规则' },
-  { type: 'condition', label: '条件', hint: '按字段条件分流，需保留一条默认分支' },
+  { type: 'condition', label: '条件', hint: '按字段条件分流，未配置时系统会在发布时自动补全默认分支' },
   { type: 'end', label: '结束', hint: '流程终点，可以有多个' },
 ]
 

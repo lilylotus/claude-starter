@@ -86,6 +86,10 @@ public class WorkflowModelCompilerImpl implements WorkflowModelCompiler {
      *  变量名一致。 */
     private static final String MULTI_INSTANCE_ELEMENT_VARIABLE = "approver";
 
+    /** 自动生成的共享兜底结束节点 id 候选前缀，与画布已有节点 id 冲突时追加数字后缀直到唯一
+     *  （workflow-condition-auto-default-branch change design.md Decision 2）。 */
+    private static final String AUTO_DEFAULT_END_NODE_ID_PREFIX = "__auto_approved_end__";
+
     /** 条件比较符到 UEL 运算符符号的映射，只允许白名单内的比较符拼装表达式。 */
     private static final Map<String, String> OPERATOR_SYMBOLS = Map.of(
             "EQ", "==",
@@ -112,6 +116,7 @@ public class WorkflowModelCompilerImpl implements WorkflowModelCompiler {
      */
     @Override
     public CompiledProcess compile(ProcessModelDsl dsl) {
+        augmentWithAutoDefaultBranches(dsl);
         processModelDslValidator.validate(dsl);
 
         BpmnModel bpmnModel = new BpmnModel();
@@ -176,6 +181,82 @@ public class WorkflowModelCompilerImpl implements WorkflowModelCompiler {
         }
 
         return new CompiledProcess(bpmnModel, assigneeRules, List.copyOf(routeFieldCodes));
+    }
+
+    /**
+     * 为每个缺少无条件兜底出边的条件节点自动补全一条绕过所有审批节点、直达一个共享的自动
+     * 结束节点的默认分支，原地修改传入的 {@code dsl}（workflow-condition-auto-default-branch
+     * change design.md Decision 1/2）。必须在 {@link ProcessModelDslValidator#validate} 之前
+     * 调用：一是校验器本身已不再要求默认分支存在，二是 Flowable 自带的 {@link ProcessValidator}
+     * 仍会校验排他网关必须有 default flow，若不提前补全会在二次校验被拒绝。
+     * <p>
+     * 使用者已手动配置无条件出边（无论指向哪里）时不触发自动补全，尊重使用者配置。
+     */
+    private void augmentWithAutoDefaultBranches(ProcessModelDsl dsl) {
+        if (dsl == null || dsl.getNodes() == null) {
+            return;
+        }
+        Map<String, List<EdgeDsl>> outgoingByNode = new LinkedHashMap<>();
+        List<EdgeDsl> edges = dsl.getEdges() == null ? List.of() : dsl.getEdges();
+        for (EdgeDsl edge : edges) {
+            outgoingByNode.computeIfAbsent(edge.getFrom(), key -> new ArrayList<>()).add(edge);
+        }
+
+        List<ConditionNodeDsl> conditionNodesMissingDefault = new ArrayList<>();
+        for (ProcessNodeDsl node : dsl.getNodes()) {
+            if (!(node instanceof ConditionNodeDsl conditionNode)) {
+                continue;
+            }
+            List<EdgeDsl> out = outgoingByNode.getOrDefault(node.getId(), List.of());
+            boolean hasDefault = out.stream().anyMatch(edge -> edge.getCondition() == null);
+            if (!hasDefault) {
+                conditionNodesMissingDefault.add(conditionNode);
+            }
+        }
+        if (conditionNodesMissingDefault.isEmpty()) {
+            return;
+        }
+
+        Set<String> existingNodeIds = new HashSet<>();
+        for (ProcessNodeDsl node : dsl.getNodes()) {
+            existingNodeIds.add(node.getId());
+        }
+        String autoEndNodeId = resolveAutoDefaultEndNodeId(existingNodeIds);
+
+        EndNodeDsl autoEndNode = new EndNodeDsl();
+        autoEndNode.setId(autoEndNodeId);
+        autoEndNode.setType("END");
+        autoEndNode.setName("自动通过");
+
+        List<ProcessNodeDsl> mutableNodes = new ArrayList<>(dsl.getNodes());
+        mutableNodes.add(autoEndNode);
+        dsl.setNodes(mutableNodes);
+
+        List<EdgeDsl> mutableEdges = new ArrayList<>(edges);
+        for (ConditionNodeDsl conditionNode : conditionNodesMissingDefault) {
+            mutableEdges.add(EdgeDsl.builder()
+                    .from(conditionNode.getId())
+                    .to(autoEndNodeId)
+                    .condition(null)
+                    .build());
+        }
+        dsl.setEdges(mutableEdges);
+    }
+
+    /**
+     * 计算自动兜底结束节点的候选 id：与画布已有节点 id 冲突时追加数字后缀直到唯一。
+     */
+    private String resolveAutoDefaultEndNodeId(Set<String> existingNodeIds) {
+        if (!existingNodeIds.contains(AUTO_DEFAULT_END_NODE_ID_PREFIX)) {
+            return AUTO_DEFAULT_END_NODE_ID_PREFIX;
+        }
+        int suffix = 2;
+        String candidate;
+        do {
+            candidate = AUTO_DEFAULT_END_NODE_ID_PREFIX + "_" + suffix;
+            suffix++;
+        } while (existingNodeIds.contains(candidate));
+        return candidate;
     }
 
     /**

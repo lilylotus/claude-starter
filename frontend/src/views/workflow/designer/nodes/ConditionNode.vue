@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // "条件"节点：菱形网关外观（不向使用者暴露"排他网关"等 BPMN 术语），分支条件通过该节点
-// 的出边配置（NodePropertyPanel.vue 选中节点后编辑），必须保留至少一条不带 condition 的
-// 兜底默认分支。
+// 的出边配置（NodePropertyPanel.vue 选中节点后编辑）；未手动配置不带 condition 的兜底
+// 默认分支时，系统会在发布时自动补全（绕过审批直达结束，效果为自动通过）。
 import { Handle, Position } from '@vue-flow/core'
 import { Share } from '@element-plus/icons-vue'
 import type { DesignerNodeData } from '@/stores/workflowDesigner'

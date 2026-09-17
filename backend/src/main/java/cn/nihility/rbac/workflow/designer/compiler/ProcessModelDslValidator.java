@@ -33,9 +33,11 @@ import org.springframework.util.StringUtils;
  * 与本类保持一致，避免前后端校验规则漂移，workflow-approval-engine change design.md
  * Decision 9 / specs/workflow-process-designer"发布前结构与业务规则的强制校验"Requirement）。
  * 校验规则：唯一开始节点、至少一个结束节点、节点 id 唯一、边引用的节点必须存在、开始到结束
- * 存在可达路径、条件节点存在兜底默认边且引用字段真实存在于对应业务类型的启用表单字段定义中
+ * 存在可达路径、条件节点已配置的带条件出边引用字段真实存在于对应业务类型的启用表单字段定义中
  * （workflow-condition-payload-fields change design.md Decision 2/4）、审批节点审批人来源
- * 相关必填字段完整。所有校验失败一次性收集后统一抛出，携带具体节点/连线定位信息，不是发现
+ * 相关必填字段完整。条件节点的兜底默认分支不要求使用者手动配置，缺失时由编译器自动补全，
+ * 不属于本校验器的拒绝发布项（workflow-condition-auto-default-branch change design.md
+ * Decision 1）。所有校验失败一次性收集后统一抛出，携带具体节点/连线定位信息，不是发现
  * 第一个错误就短路返回。
  * <p>
  * 注入 {@link FormFieldDefinitionService} 校验条件字段的真实存在性，不再是纯静态工具类。
@@ -178,9 +180,11 @@ public class ProcessModelDslValidator {
     }
 
     /**
-     * 校验条件节点的出边：至少一条兜底默认分支，携带条件的出边字段/比较符/比较值完整合法，
-     * 字段须存在于对应业务类型的启用表单字段定义中且非多选字典，比较符按字段控件类型收窄
-     * （workflow-condition-payload-fields change design.md Decision 2/4）。
+     * 校验条件节点已存在的带条件出边：字段/比较符/比较值完整合法，字段须存在于对应业务类型
+     * 的启用表单字段定义中且非多选字典，比较符按字段控件类型收窄（workflow-condition-
+     * payload-fields change design.md Decision 2/4）。条件节点的兜底默认分支不再作为拒绝
+     * 发布的校验项——缺少无条件出边时由 {@code WorkflowModelCompilerImpl} 在编译期自动补全
+     * （workflow-condition-auto-default-branch change design.md Decision 1）。
      */
     private List<String> validateConditionNodes(List<ProcessNodeDsl> nodes, Map<String, List<EdgeDsl>> outgoing) {
         List<String> errors = new ArrayList<>();
@@ -190,10 +194,6 @@ public class ProcessModelDslValidator {
                 continue;
             }
             List<EdgeDsl> out = outgoing.getOrDefault(node.getId(), List.of());
-            boolean hasDefault = out.stream().anyMatch(edge -> edge.getCondition() == null);
-            if (!hasDefault) {
-                errors.add("条件节点 " + node.getId() + " 缺少默认分支（未携带 condition 的兜底出边）");
-            }
             for (EdgeDsl edge : out) {
                 EdgeConditionDsl condition = edge.getCondition();
                 if (condition == null) {

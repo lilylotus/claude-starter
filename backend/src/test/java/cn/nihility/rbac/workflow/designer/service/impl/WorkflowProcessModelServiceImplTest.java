@@ -10,6 +10,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.common.util.JacksonUtils;
+import cn.nihility.rbac.workflow.designer.dto.EndNodeDsl;
+import cn.nihility.rbac.workflow.designer.dto.EdgeDsl;
+import cn.nihility.rbac.workflow.designer.dto.ProcessModelDsl;
 import cn.nihility.rbac.workflow.constant.ProcessModelStatus;
 import cn.nihility.rbac.workflow.dslv2.review.WorkflowReleaseReviewService;
 import cn.nihility.rbac.workflow.designer.compiler.CompiledProcess;
@@ -213,8 +217,15 @@ class WorkflowProcessModelServiceImplTest {
         NodeAssigneeRuleDraft ruleDraft = new NodeAssigneeRuleDraft(
                 "deptLeaderApprove", "部门负责人审批", 1, null, null, null, null, null, null,
                 false, true, true, false, false, null, null, null, null);
-        when(workflowModelCompiler.compile(any()))
-                .thenReturn(new CompiledProcess(new BpmnModel(), List.of(ruleDraft), List.of()));
+        when(workflowModelCompiler.compile(any())).thenAnswer(invocation -> {
+            ProcessModelDsl dsl = invocation.getArgument(0);
+            EndNodeDsl autoEnd = new EndNodeDsl();
+            autoEnd.setId("__auto_approved_end__");
+            autoEnd.setType("END");
+            dsl.setNodes(List.of(autoEnd));
+            dsl.setEdges(List.of(EdgeDsl.builder().from("gateway").to(autoEnd.getId()).build()));
+            return new CompiledProcess(new BpmnModel(), List.of(ruleDraft), List.of());
+        });
 
         when(repositoryService.createDeployment()).thenReturn(deploymentBuilder);
         when(deploymentBuilder.name(anyString())).thenReturn(deploymentBuilder);
@@ -241,6 +252,19 @@ class WorkflowProcessModelServiceImplTest {
         assertThat(model.getCurrentDefinitionId()).isEqualTo(result.getProcessDefinitionId());
         verify(nodeAssigneeRuleMapper).insert(any(NodeAssigneeRuleEntity.class));
         verify(repositoryService).createDeployment();
+        org.mockito.ArgumentCaptor<ProcessDefinitionEntity> definitionCaptor =
+                org.mockito.ArgumentCaptor.forClass(ProcessDefinitionEntity.class);
+        verify(processDefinitionMapper).insert(definitionCaptor.capture());
+        ProcessModelDsl snapshot = JacksonUtils.toObj(
+                definitionCaptor.getValue().getModelJsonSnapshot(), ProcessModelDsl.class);
+        assertThat(snapshot.getNodes()).singleElement().isInstanceOf(EndNodeDsl.class);
+        assertThat(snapshot.getNodes().getFirst().getId()).isEqualTo("__auto_approved_end__");
+        assertThat(snapshot.getEdges()).singleElement().satisfies(edge -> {
+            assertThat(edge.getFrom()).isEqualTo("gateway");
+            assertThat(edge.getTo()).isEqualTo("__auto_approved_end__");
+            assertThat(edge.getCondition()).isNull();
+        });
+        assertThat(model.getModelJson()).isEqualTo("{\"processCode\":\"MASTER_DATA_APPROVAL\"}");
     }
 
     /**
@@ -289,7 +313,7 @@ class WorkflowProcessModelServiceImplTest {
         ProcessModelEntity model = draftModel();
         when(processModelMapper.selectById(1L)).thenReturn(model);
         when(workflowModelCompiler.compile(any()))
-                .thenThrow(new WorkflowModelValidationException("条件节点缺少默认分支"));
+                .thenThrow(new WorkflowModelValidationException("存在孤立审批节点"));
 
         assertThatThrownBy(() -> service.publish(1L, 9L))
                 .isInstanceOf(WorkflowModelValidationException.class);

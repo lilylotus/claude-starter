@@ -33,10 +33,12 @@ import org.junit.jupiter.api.Test;
 
 /**
  * {@link WorkflowModelCompilerImpl} 单元测试（workflow-approval-engine change tasks.md
- * 9.5；workflow-condition-payload-fields change tasks.md 5.1）：覆盖"单人串行两级""两级含
+ * 9.5；workflow-condition-payload-fields change tasks.md 5.1；
+ * workflow-condition-auto-default-branch change tasks.md 2.2）：覆盖"单人串行两级""两级含
  * 一个会签节点""含条件分支"三种典型 DSL 的编译结果，条件分支引用真实表单字段的 null 安全
- * 表达式生成（含数字/日期比较值转换）、路由字段清单的收集去重，以及"孤立节点""条件分支
- * 缺默认边"两种结构校验失败场景。
+ * 表达式生成（含数字/日期比较值转换）、路由字段清单的收集去重，"孤立节点"结构校验失败场景，
+ * 以及条件节点缺少默认分支时编译期自动补全共享结束节点/兜底边、使用者已手动配置默认分支时
+ * 不触发自动补全三类场景。
  */
 class WorkflowModelCompilerImplTest {
 
@@ -257,10 +259,12 @@ class WorkflowModelCompilerImplTest {
     }
 
     /**
-     * 条件节点的多条出边都携带条件、缺少兜底默认分支时应拒绝编译。
+     * 条件节点的多条出边都携带条件、缺少兜底默认分支时，编译期应自动补入一个共享的结束节点
+     * 与一条无条件兜底边，生成的排他网关应带有 {@code defaultFlow}，指向的连线不携带条件表达式
+     * （workflow-condition-auto-default-branch change design.md Decision 1/2）。
      */
     @Test
-    void compile_shouldRejectConditionNodeWithoutDefaultBranch() {
+    void compile_shouldAutoAugmentDefaultBranch_whenConditionNodeMissingDefaultEdge() {
         stubField("ORG", "amount", 2);
         ProcessModelDsl dsl = ProcessModelDsl.builder()
                 .processCode("MISSING_DEFAULT_BRANCH_PROCESS")
@@ -273,7 +277,7 @@ class WorkflowModelCompilerImplTest {
                         approvalNode("branchB", "分支 B", AssigneeType.ROLE, "SECURITY_ADMIN",
                                 ApprovalMode.SINGLE, null),
                         endNode("end")))
-                .edges(List.of(
+                .edges(new java.util.ArrayList<>(List.of(
                         EdgeDsl.builder().from("start").to("gateway").build(),
                         EdgeDsl.builder().from("gateway").to("branchA")
                                 .condition(condition("ORG", "amount", "GT", 1000))
@@ -282,12 +286,150 @@ class WorkflowModelCompilerImplTest {
                                 .condition(condition("ORG", "amount", "LTE", 1000))
                                 .build(),
                         EdgeDsl.builder().from("branchA").to("end").build(),
-                        EdgeDsl.builder().from("branchB").to("end").build()))
+                        EdgeDsl.builder().from("branchB").to("end").build())))
                 .build();
 
-        assertThatThrownBy(() -> compiler.compile(dsl))
-                .isInstanceOf(WorkflowModelValidationException.class)
-                .hasMessageContaining("缺少默认分支");
+        CompiledProcess compiled = compiler.compile(dsl);
+
+        Process process = compiled.bpmnModel().getMainProcess();
+        assertThat(elementsOf(process, ExclusiveGateway.class)).hasSize(1);
+        ExclusiveGateway gateway = elementsOf(process, ExclusiveGateway.class).get(0);
+        assertThat(gateway.getDefaultFlow()).isNotBlank();
+
+        SequenceFlow defaultFlow = (SequenceFlow) process.getFlowElement(gateway.getDefaultFlow());
+        assertThat(defaultFlow.getConditionExpression()).isNull();
+        assertThat(defaultFlow.getSourceRef()).isEqualTo("gateway");
+
+        // 自动补全的结束节点也应体现在原地修改后的 dsl 上，供 publishV1() 落库快照。
+        assertThat(dsl.getNodes()).anyMatch(node -> node instanceof EndNodeDsl && node.getId().equals(defaultFlow.getTargetRef()));
+        assertThat(dsl.getEdges()).anyMatch(edge -> "gateway".equals(edge.getFrom())
+                && edge.getTo().equals(defaultFlow.getTargetRef()) && edge.getCondition() == null);
+        compiler.compile(dsl);
+        assertThat(dsl.getNodes()).hasSize(6);
+        assertThat(dsl.getEdges()).hasSize(6);
+    }
+
+    /** 用户节点占用自动结束节点的候选标识时，应递增后缀并保持用户节点不变。 */
+    @Test
+    void compile_shouldAvoidExistingAutoEndIds() {
+        stubField("ORG", "amount", 2);
+        ProcessModelDsl dsl = ProcessModelDsl.builder()
+                .processCode("AUTO_END_ID_COLLISION")
+                .processName("自动节点标识冲突")
+                .nodes(List.of(startNode("start"), conditionNode("gateway"),
+                        endNode("__auto_approved_end__"), endNode("__auto_approved_end___2")))
+                .edges(List.of(
+                        EdgeDsl.builder().from("start").to("gateway").build(),
+                        EdgeDsl.builder().from("gateway").to("__auto_approved_end__")
+                                .condition(condition("ORG", "amount", "GT", 1000)).build(),
+                        EdgeDsl.builder().from("gateway").to("__auto_approved_end___2")
+                                .condition(condition("ORG", "amount", "LT", 0)).build()))
+                .build();
+
+        CompiledProcess compiled = compiler.compile(dsl);
+
+        Process process = compiled.bpmnModel().getMainProcess();
+        ExclusiveGateway gateway = (ExclusiveGateway) process.getFlowElement("gateway");
+        SequenceFlow defaultFlow = (SequenceFlow) process.getFlowElement(gateway.getDefaultFlow());
+        assertThat(defaultFlow.getTargetRef()).isNotIn("__auto_approved_end__", "__auto_approved_end___2");
+        assertThat(dsl.getNodes()).hasSize(5).extracting("id").doesNotHaveDuplicates();
+        assertThat(elementsOf(process, EndEvent.class)).hasSize(3);
+    }
+
+    /**
+     * 多个条件节点都缺少默认分支时，应共享同一个自动生成的结束节点，不重复创建
+     * （workflow-condition-auto-default-branch change design.md Decision 2）。
+     */
+    @Test
+    void compile_shouldShareSingleAutoEndNode_whenMultipleConditionNodesMissingDefault() {
+        stubField("ORG", "amount", 2);
+        ProcessModelDsl dsl = ProcessModelDsl.builder()
+                .processCode("MULTI_MISSING_DEFAULT_BRANCH_PROCESS")
+                .processName("多条件分支均缺默认边的流程")
+                .nodes(new java.util.ArrayList<>(List.of(
+                        startNode("start"),
+                        conditionNode("gatewayA"),
+                        conditionNode("gatewayB"),
+                        approvalNode("branchA", "分支 A", AssigneeType.ROLE, "SECURITY_ADMIN",
+                                ApprovalMode.SINGLE, null),
+                        approvalNode("branchB", "分支 B", AssigneeType.ROLE, "SECURITY_ADMIN",
+                                ApprovalMode.SINGLE, null),
+                        endNode("end"))))
+                .edges(new java.util.ArrayList<>(List.of(
+                        EdgeDsl.builder().from("start").to("gatewayA").build(),
+                        EdgeDsl.builder().from("gatewayA").to("branchA")
+                                .condition(condition("ORG", "amount", "GT", 1000))
+                                .build(),
+                        EdgeDsl.builder().from("gatewayA").to("gatewayB")
+                                .condition(condition("ORG", "amount", "LTE", 1000))
+                                .build(),
+                        EdgeDsl.builder().from("gatewayB").to("branchB")
+                                .condition(condition("ORG", "amount", "EQ", 500))
+                                .build(),
+                        EdgeDsl.builder().from("branchA").to("end").build(),
+                        EdgeDsl.builder().from("branchB").to("end").build())))
+                .build();
+
+        CompiledProcess compiled = compiler.compile(dsl);
+
+        long autoEndNodeCount = dsl.getNodes().stream()
+                .filter(node -> node instanceof EndNodeDsl)
+                .filter(node -> !"end".equals(node.getId()))
+                .count();
+        assertThat(autoEndNodeCount).isEqualTo(1);
+
+        Process process = compiled.bpmnModel().getMainProcess();
+        List<ExclusiveGateway> gateways = elementsOf(process, ExclusiveGateway.class);
+        assertThat(gateways).hasSize(2);
+        String targetA = ((SequenceFlow) process.getFlowElement(
+                gateways.stream().filter(g -> "gatewayA".equals(g.getId())).findFirst().orElseThrow().getDefaultFlow()))
+                .getTargetRef();
+        String targetB = ((SequenceFlow) process.getFlowElement(
+                gateways.stream().filter(g -> "gatewayB".equals(g.getId())).findFirst().orElseThrow().getDefaultFlow()))
+                .getTargetRef();
+        assertThat(targetA).isEqualTo(targetB);
+    }
+
+    /**
+     * 使用者已手动配置默认分支（无论指向哪里）时，不应触发自动补全，编译后 {@code dsl} 的节点/
+     * 边数量应保持不变（workflow-condition-auto-default-branch change design.md
+     * "使用者手动配置的默认分支优先生效"）。
+     */
+    @Test
+    void compile_shouldNotAugment_whenConditionNodeAlreadyHasManualDefaultBranch() {
+        stubField("ORG", "amount", 2);
+        ProcessModelDsl dsl = ProcessModelDsl.builder()
+                .processCode("MANUAL_DEFAULT_BRANCH_PROCESS")
+                .processName("已手动配置默认分支的流程")
+                .nodes(new java.util.ArrayList<>(List.of(
+                        startNode("start"),
+                        conditionNode("gateway"),
+                        approvalNode("branchA", "分支 A", AssigneeType.ROLE, "SECURITY_ADMIN",
+                                ApprovalMode.SINGLE, null),
+                        approvalNode("branchB", "分支 B（人工默认分支）", AssigneeType.ORG_LEADER, "DEPT_LEADER",
+                                ApprovalMode.SINGLE, null),
+                        endNode("end"))))
+                .edges(new java.util.ArrayList<>(List.of(
+                        EdgeDsl.builder().from("start").to("gateway").build(),
+                        EdgeDsl.builder().from("gateway").to("branchA")
+                                .condition(condition("ORG", "amount", "GT", 1000))
+                                .build(),
+                        EdgeDsl.builder().from("gateway").to("branchB").build(),
+                        EdgeDsl.builder().from("branchA").to("end").build(),
+                        EdgeDsl.builder().from("branchB").to("end").build())))
+                .build();
+        int originalNodeCount = dsl.getNodes().size();
+        int originalEdgeCount = dsl.getEdges().size();
+
+        CompiledProcess compiled = compiler.compile(dsl);
+
+        assertThat(dsl.getNodes()).hasSize(originalNodeCount);
+        assertThat(dsl.getEdges()).hasSize(originalEdgeCount);
+
+        Process process = compiled.bpmnModel().getMainProcess();
+        ExclusiveGateway gateway = elementsOf(process, ExclusiveGateway.class).get(0);
+        SequenceFlow defaultFlow = (SequenceFlow) process.getFlowElement(gateway.getDefaultFlow());
+        assertThat(defaultFlow.getTargetRef()).isEqualTo("branchB");
     }
 
     /**
