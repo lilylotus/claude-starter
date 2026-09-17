@@ -94,11 +94,13 @@ public class WorkflowTaskController {
      * @param processInstanceId 流程实例 id
      * @return 流程实例详情
      */
-    @Operation(summary = "查询流程实例详情")
+    @Operation(summary = "查询流程实例详情",
+            description = "仅申请人本人、历史审批轨迹中出现过的操作人/转办来源人、当前任一开放任务的指定处理人"
+                    + "或候选人可查看，其余用户返回无权限错误")
     @GetMapping("/api/v1/workflow/process-instances/{processInstanceId}")
     public Result<ProcessInstanceDetailVO> processDetail(
             @Parameter(description = "流程实例 id", required = true) @PathVariable Long processInstanceId) {
-        return Result.success(workflowService.getProcessDetail(processInstanceId));
+        return Result.success(workflowService.getProcessDetail(processInstanceId, requireCurrentUserId()));
     }
 
     /**

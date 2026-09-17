@@ -119,10 +119,12 @@ public interface WorkflowService {
     List<ApprovalTaskVO> findDoneTasks(Long userId, TaskQuery query);
 
     /**
-     * 查询流程实例详情，含完整审批轨迹。
+     * 查询流程实例详情，含完整审批轨迹与完整节点/连线图。仅参与关系满足条件的用户可查看
+     * （add-approval-remark-and-process-flowchart change design.md Decision 3）。
      *
      * @param processInstanceId 流程实例 id（{@code tab_wf_process_instance.id}）
+     * @param viewerId          当前查看者用户 id
      * @return 流程实例详情
      */
-    ProcessInstanceDetailVO getProcessDetail(Long processInstanceId);
+    ProcessInstanceDetailVO getProcessDetail(Long processInstanceId, Long viewerId);
 }

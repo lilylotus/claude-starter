@@ -61,4 +61,12 @@ public class ProcessInstanceDetailVO {
 
     /** 完整审批轨迹，按发生时间升序排列。 */
     private List<ApprovalRecordVO> records;
+
+    /** 该流程定义的完整只读节点列表（按流程定义发布快照解析），每个节点附带服务端计算的
+     *  三态状态；对于经过未评估条件分支的"未到达"部分，只展示完整设计拓扑，不预测具体走向
+     *  （add-approval-remark-and-process-flowchart change design.md Decision 4/5）。 */
+    private List<ProcessGraphNodeVO> nodes;
+
+    /** 该流程定义的完整只读连线列表。 */
+    private List<ProcessGraphEdgeVO> edges;
 }

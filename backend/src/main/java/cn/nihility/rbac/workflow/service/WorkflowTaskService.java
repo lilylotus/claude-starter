@@ -34,10 +34,14 @@ public interface WorkflowTaskService {
     List<ApprovalTaskVO> findDoneTasks(Long userId, TaskQuery query);
 
     /**
-     * 查询流程实例详情，含完整审批轨迹。
+     * 查询流程实例详情，含完整审批轨迹与完整节点/连线图。仅申请人本人、历史审批轨迹中出现过
+     * 的操作人/转办来源人、当前任一开放任务的指定处理人或候选人三者之一可查看，其余用户会被
+     * 拒绝（approval-runtime-safety 能力"操作授权和访问控制"需求，add-approval-remark
+     * -and-process-flowchart change design.md Decision 3）。
      *
      * @param processInstanceId 流程实例 id（{@code tab_wf_process_instance.id}）
+     * @param viewerId          当前查看者用户 id
      * @return 流程实例详情
      */
-    ProcessInstanceDetailVO getProcessDetail(Long processInstanceId);
+    ProcessInstanceDetailVO getProcessDetail(Long processInstanceId, Long viewerId);
 }

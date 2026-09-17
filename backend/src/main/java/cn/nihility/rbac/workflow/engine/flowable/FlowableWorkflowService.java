@@ -997,8 +997,8 @@ public class FlowableWorkflowService implements WorkflowService {
      * {@inheritDoc}
      */
     @Override
-    public ProcessInstanceDetailVO getProcessDetail(Long processInstanceId) {
-        return workflowTaskService.getProcessDetail(processInstanceId);
+    public ProcessInstanceDetailVO getProcessDetail(Long processInstanceId, Long viewerId) {
+        return workflowTaskService.getProcessDetail(processInstanceId, viewerId);
     }
 
     /**

@@ -4,7 +4,7 @@
 // 与其余管理页面"页面 + 按钮"两层门控的既有约定保持一致）。可查看详情、批准、拒绝
 // （拒绝需要填写意见，走弹窗输入框）。
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import * as approvalApi from '@/api/approval'
 import { PAGE_SIZE_OPTIONS } from '@/constants/pagination'
@@ -80,17 +80,39 @@ function openDetail(row: ApprovalRequestRow) {
   detailVisible.value = true
 }
 
-// ---- 批准 ----
+// ---- 批准：意见可选，走弹窗输入框（与拒绝不同，不强制必填——拒绝必须说明理由是既有业务
+// 语义，批准没有对应的既有约束，见 add-approval-remark-and-process-flowchart change
+// design.md Decision 1） ----
 
-async function handleApprove(row: ApprovalRequestRow) {
-  await ElMessageBox.confirm('确定要批准该申请吗？批准后将立即执行对应的创建/更新/状态切换/删除操作。', '批准确认', {
-    type: 'warning',
-    confirmButtonText: '批准',
-    cancelButtonText: '取消',
-  })
-  await approvalApi.approveApprovalRequest(row.id)
-  ElMessage.success('已批准')
-  await fetchList()
+const approveDialogVisible = ref(false)
+const approveFormRef = ref<FormInstance>()
+const approveSubmitting = ref(false)
+const approveTargetId = ref<number | null>(null)
+const approveForm = reactive({ opinion: '' })
+
+function openApproveDialog(row: ApprovalRequestRow) {
+  approveTargetId.value = row.id
+  approveForm.opinion = ''
+  approveDialogVisible.value = true
+}
+
+function closeApproveDialog() {
+  approveDialogVisible.value = false
+  approveFormRef.value?.clearValidate()
+}
+
+async function submitApprove() {
+  if (approveTargetId.value === null) return
+
+  approveSubmitting.value = true
+  try {
+    await approvalApi.approveApprovalRequest(approveTargetId.value, approveForm.opinion || undefined)
+    ElMessage.success('已批准')
+    approveDialogVisible.value = false
+    await fetchList()
+  } finally {
+    approveSubmitting.value = false
+  }
 }
 
 // ---- 拒绝：意见必填，走弹窗输入框 ----
@@ -186,7 +208,7 @@ async function submitReject() {
               v-if="hasPermission('ApprovalManagement:request:approve')"
               link
               type="success"
-              @click="handleApprove(row as ApprovalRequestRow)"
+              @click="openApproveDialog(row as ApprovalRequestRow)"
             >
               批准
             </el-button>
@@ -216,6 +238,18 @@ async function submitReject() {
     </section>
 
     <approval-request-detail-dialog v-model="detailVisible" :row="detailRow" />
+
+    <el-dialog v-model="approveDialogVisible" title="批准申请" width="480px" @close="closeApproveDialog">
+      <el-form ref="approveFormRef" :model="approveForm" label-width="80px">
+        <el-form-item label="审批意见" prop="opinion">
+          <el-input v-model="approveForm.opinion" type="textarea" :rows="3" placeholder="选填，可留空" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="approveDialogVisible = false">取消</el-button>
+        <el-button type="success" :loading="approveSubmitting" @click="submitApprove">确认批准</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="rejectDialogVisible" title="拒绝申请" width="480px" @close="closeRejectDialog">
       <el-form ref="rejectFormRef" :model="rejectForm" :rules="rejectRules" label-width="80px">

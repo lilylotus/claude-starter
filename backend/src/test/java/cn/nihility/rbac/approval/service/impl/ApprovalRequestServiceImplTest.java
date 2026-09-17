@@ -763,6 +763,34 @@ class ApprovalRequestServiceImplTest {
     }
 
     /**
+     * 查询结果应携带 {@code processInstanceId}，供前端据此查询流程实例详情
+     * （add-approval-remark-and-process-flowchart change tasks.md 2.1，此前 {@code toVO}
+     * 转换遗漏了该字段的暴露）。
+     */
+    @Test
+    void pageMine_shouldExposeProcessInstanceId() {
+        ApprovalRequestEntity entity = ApprovalRequestEntity.builder()
+                .id(10L)
+                .bizType(FormFieldBizType.APP)
+                .operationType(ApprovalOperationType.CREATE)
+                .requestPayload(JacksonUtils.toJson(buildAppCreateRequest()))
+                .status(ApprovalRequestStatus.PENDING)
+                .processInstanceId(PROCESS_INSTANCE_ID)
+                .createBy("1")
+                .createTime(LocalDateTime.now())
+                .build();
+        Page<ApprovalRequestEntity> resultPage = new Page<>(1, 10, 1L);
+        resultPage.setRecords(java.util.List.of(entity));
+        when(mapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(resultPage);
+        when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
+
+        PageResult<ApprovalRequestVO> result =
+                service.pageMine(FormFieldBizType.APP, ApprovalOperationType.CREATE, null, 1, 10);
+
+        assertThat(result.getRecords().get(0).getProcessInstanceId()).isEqualTo(PROCESS_INSTANCE_ID);
+    }
+
+    /**
      * 待审批申请当前所处节点配置了 HIDDEN 字段权限时，返回给前端的 requestPayload 应整条
      * 移除该字段，而不是设为 null（production-approval-lifecycle change tasks.md 5.2）。
      */

@@ -222,3 +222,145 @@ export interface ProcessDefinitionVersionVO {
   publishedTime: string
   modelJsonSnapshot: string
 }
+
+// ---- 流程实例详情（add-approval-remark-and-process-flowchart change design.md Decision 4/6）：
+//      "我的申请"/"待我审批"详情弹窗展示当前节点、完整流程拓扑与审批轨迹所需的类型，
+//      对应后端 GET /api/v1/workflow/process-instances/{id} 返回的 ProcessInstanceDetailVO。 ----
+
+export type ProcessInstanceStatus = 'RUNNING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | 'TERMINATED'
+
+export const PROCESS_INSTANCE_STATUS_LABEL: Record<ProcessInstanceStatus, string> = {
+  RUNNING: '进行中',
+  APPROVED: '已通过',
+  REJECTED: '已拒绝',
+  WITHDRAWN: '已撤回',
+  TERMINATED: '已终止',
+}
+
+// 流程实例当前开放节点：并行分叉场景下可能同时存在多个。
+export interface OpenNodeVO {
+  nodeId: string
+  nodeName: string
+}
+
+// 审批轨迹动作类型文案，对应后端既有动作常量；未覆盖的取值原样展示 action 字面量兜底。
+export const APPROVAL_RECORD_ACTION_LABEL: Record<string, string> = {
+  SUBMIT: '提交',
+  APPROVE: '批准',
+  REJECT: '拒绝',
+  DISAGREE: '不同意',
+  TRANSFER: '转办',
+  DELEGATE: '委派',
+  RETURN: '退回',
+  ADD_SIGN: '加签',
+  WITHDRAW: '撤回',
+  TERMINATE: '终止',
+}
+
+// 审批轨迹一条记录，字段对应后端 ApprovalRecordVO。
+export interface ApprovalRecordVO {
+  id: number
+  processInstanceId: number
+  taskId: number | null
+  nodeId: string | null
+  nodeName: string | null
+  operatorId: number | null
+  operatorName: string | null
+  action: string
+  remark: string | null
+  fromUserId: number | null
+  fromUserName: string | null
+  toUserId: number | null
+  toUserName: string | null
+  createTime: string
+}
+
+// 流程图节点类型字面量，对应后端 ProcessGraphNodeVO.type；PARALLEL_SPLIT/PARALLEL_JOIN/CC/AUTO
+// 是 v2 流程才有的节点类型，前端图组件对未识别的类型统一走通用占位节点展示。
+export type ProcessGraphNodeType =
+  | 'START'
+  | 'APPROVAL'
+  | 'CONDITION'
+  | 'PARALLEL_SPLIT'
+  | 'PARALLEL_JOIN'
+  | 'CC'
+  | 'AUTO'
+  | 'END'
+
+// 流程图节点三态状态：已完成/进行中/未到达。
+export type ProcessGraphNodeStatus = 'COMPLETED' | 'CURRENT' | 'PENDING'
+
+// 当前节点（status=CURRENT）的处理人/候选审批人信息，字段对应后端 CurrentApproverVO
+// （add-approval-remark-and-process-flowchart change design.md Decision 7 二次修订）。
+// assigned=true 表示已认领的指定处理人（userId/userName 非空）；assigned=false 表示尚未
+// 认领的候选人——USER 类型时 userId/userName 非空，ROLE 类型时 roleCode/roleName 非空，
+// 不含 resolveBasis（用户已简化为仅展示角色名称和编码）。
+export interface CurrentApproverVO {
+  userId: number | null
+  userName: string | null
+  roleCode: string | null
+  roleName: string | null
+  assigned: boolean
+}
+
+// 流程实例详情完整节点图中的单个只读节点，字段对应后端 ProcessGraphNodeVO。x/y 字段仍会
+// 返回但分级列表展示不再使用（见 utils/processGraphLayout.ts 的层号计算，不做像素定位）。
+export interface ProcessGraphNodeVO {
+  id: string
+  type: ProcessGraphNodeType
+  name: string | null
+  x: number | null
+  y: number | null
+  status: ProcessGraphNodeStatus
+  records: ApprovalRecordVO[]
+  currentApprovers: CurrentApproverVO[]
+}
+
+// 条件分支比较符归一化取值，对应后端 ConditionItemVO.operator（add-approval-remark-and-
+// process-flowchart change design.md Decision 9：v1 的 GTE/LTE 已归一化为 GE/LE，前端只需
+// 维护一套中文映射，见 components/processFlowChart/typeLabels.ts 的
+// PROCESS_GRAPH_CONDITION_OPERATOR_LABEL）。
+export type ProcessGraphConditionOperator = 'EQ' | 'NE' | 'GT' | 'GE' | 'LT' | 'LE' | 'IN' | 'IS_NULL'
+
+// 条件分支单个条件项，字段对应后端 ConditionItemVO；field 是字段编码（fieldCode），前端需
+// 按 fieldBizType 查对应业务对象类型的渲染元数据取展示名/翻译取值（复用
+// ApprovalRequestDetailDialog.vue 已有的 labelFor/displayValue 逻辑，通过 prop 传给
+// ProcessFlowChart.vue，不在子组件里重新请求渲染元数据）。value 是原始比较值，未做任何
+// 格式化。
+export interface ConditionItemVO {
+  fieldBizType: string
+  field: string
+  operator: ProcessGraphConditionOperator
+  value: unknown
+}
+
+// 流程实例详情完整节点图中的一条只读连线，字段对应后端 ProcessGraphEdgeVO；conditions 为该
+// 边的条件分支列表（无条件/默认分支为空数组，不是 null），conditionLogic 为多条件项之间的
+// 逻辑关系（AND/OR，conditions.length <= 1 时可能为 null）。
+export interface ProcessGraphEdgeVO {
+  id: string
+  source: string
+  target: string
+  conditions: ConditionItemVO[]
+  conditionLogic: string | null
+}
+
+// 流程实例详情，字段对应后端 ProcessInstanceDetailVO。
+export interface ProcessInstanceDetailVO {
+  id: number
+  flowableInstanceId: string
+  businessType: string
+  businessId: number | null
+  title: string | null
+  applicantId: number | null
+  applicantName: string | null
+  status: ProcessInstanceStatus
+  currentNodeId: string | null
+  currentNodeName: string | null
+  openNodes: OpenNodeVO[]
+  startedTime: string
+  finishedTime: string | null
+  records: ApprovalRecordVO[]
+  nodes: ProcessGraphNodeVO[]
+  edges: ProcessGraphEdgeVO[]
+}

@@ -61,6 +61,10 @@ export interface ApprovalRequestRow {
   opinion: string | null
   requestPayload?: Record<string, unknown> | null
   targetSnapshot?: Record<string, unknown> | null
+  // 关联的工作流流程实例 id，未启用工作流审批（如仅走简单审批）的申请为空；非空时前端可据此
+  // 调用 workflowApi.getProcessInstanceDetail() 查询完整流程详情（当前节点/完整拓扑/审批轨迹），
+  // 见 add-approval-remark-and-process-flowchart change design.md Decision 2。
+  processInstanceId: number | null
 }
 
 // 四个模块新增/编辑/启用/停用/删除接口统一返回的"写操作结果"包装对象：

@@ -25,6 +25,10 @@ public class ApprovalRequestVO {
     /** 目标记录 id。 */
     private Long targetId;
 
+    /** 关联的通用审批引擎流程实例 id，对应 {@code tab_wf_process_instance.id}，供前端据此查询
+     *  流程实例详情（含完整节点/连线图与审批轨迹）。 */
+    private Long processInstanceId;
+
     /** 创建审批通过后生成的记录 id。 */
     private Long resultTargetId;
 

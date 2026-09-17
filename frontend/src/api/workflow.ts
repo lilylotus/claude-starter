@@ -1,6 +1,7 @@
 import request from './request'
 import type {
   ProcessDefinitionVersionVO,
+  ProcessInstanceDetailVO,
   ProcessModelPageQuery,
   ProcessModelPageResult,
   ProcessModelRow,
@@ -62,4 +63,14 @@ export function createProcessModel(processCode: string, processName: string): Pr
 
 export function copyProcessModel(id: number, processCode: string, processName: string): Promise<ProcessModelRow> {
   return request.post(`/workflow/process-models/${id}/copy`, { processCode, processName })
+}
+
+// 流程实例详情：当前节点、完整只读节点/连线图、完整审批轨迹，供"我的申请"/"待我审批"
+// 详情弹窗展示（add-approval-remark-and-process-flowchart change design.md Decision 6）。
+// 注意接口挂在 /api/v1/... 前缀下（cn.nihility.rbac.workflow.controller.WorkflowTaskController），
+// 与本文件其余流程模型设计器接口的 /api/workflow/... 前缀不同，axios baseURL 已含 /api，
+// 这里补上 /v1 前缀。后端会校验当前用户是否为该实例的申请人/历史操作人/当前候选人，
+// 无权限时返回非 0 code，由 request.ts 拦截器统一提示并 reject。
+export function getProcessInstanceDetail(processInstanceId: number): Promise<ProcessInstanceDetailVO> {
+  return request.get(`/v1/workflow/process-instances/${processInstanceId}`)
 }

@@ -8,8 +8,10 @@
 // 元数据来源（design.md Decision 8），不重新维护一份字段展示名映射；四个 bizType 的渲染
 // 元数据在弹窗组件挂载时一次性拉取，代价是四次轻量 GET 请求换取实现简洁（弹窗内会被
 // 反复复用于不同 bizType 的申请行，不适合每次切换行都重新拉取/销毁对应 bizType 的元数据）。
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useDynamicFormFields } from '@/composables/useDynamicFormFields'
+import * as workflowApi from '@/api/workflow'
+import ProcessFlowChart from './processFlowChart/ProcessFlowChart.vue'
 import {
   FORM_FIELD_CONTROL_TYPE_DICT,
   FORM_FIELD_CONTROL_TYPE_MULTI_DICT,
@@ -26,6 +28,7 @@ import {
   type ApprovalOperationType,
   type ApprovalRequestRow,
 } from '@/types/approval'
+import type { ProcessInstanceDetailVO } from '@/types/workflow'
 
 const props = defineProps<{
   modelValue: boolean
@@ -38,6 +41,49 @@ const visible = computed({
   get: () => props.modelValue,
   set: (value: boolean) => emit('update:modelValue', value),
 })
+
+// ---- "审批流程"区块：当前节点、完整拓扑、审批轨迹，仅当该申请关联了工作流流程实例
+// （processInstanceId 非空）时才展示。弹窗每次打开（modelValue 变为 true）都重新拉取一次，
+// 避免展示上一条申请的流程详情；弹窗关闭时清空，下次打开前不闪现旧数据。改成 tab 之后仍然
+// 是"弹窗打开即请求"，不因为用户没切到"审批流程" tab 而延迟请求（design.md Decision 8）。 ----
+
+const processDetail = ref<ProcessInstanceDetailVO | null>(null)
+const processDetailLoading = ref(false)
+
+watch(
+  () => [props.modelValue, props.row?.processInstanceId] as const,
+  async ([open, processInstanceId]) => {
+    if (!open) {
+      processDetail.value = null
+      return
+    }
+    if (!processInstanceId) {
+      processDetail.value = null
+      return
+    }
+    processDetailLoading.value = true
+    processDetail.value = null
+    try {
+      processDetail.value = await workflowApi.getProcessInstanceDetail(processInstanceId)
+    } finally {
+      processDetailLoading.value = false
+    }
+  },
+  { immediate: true },
+)
+
+// ---- tab 切换：每次打开弹窗、或者切换到不同的申请（row.id 变化），都重置回"基本信息"
+// tab，不记忆上一条申请最后停留的 tab 位置（design.md Decision 8）。 ----
+
+const activeTab = ref('basic')
+
+watch(
+  () => [props.modelValue, props.row?.id] as const,
+  ([open]) => {
+    if (open) activeTab.value = 'basic'
+  },
+  { immediate: true },
+)
 
 // 四个 bizType 各自的渲染元数据，弹窗挂载时一次性拉取
 const orgFields = useDynamicFormFields('ORG')
@@ -82,6 +128,13 @@ function schemaItemFor(bizType: ApprovalBizType, key: string): FormFieldRenderIt
 
 function labelFor(bizType: ApprovalBizType, key: string): string {
   return schemaItemFor(bizType, key)?.fieldName ?? STATIC_LABELS[bizType][key] ?? key
+}
+
+// 供 ProcessFlowChart.vue（"审批流程" tab）把条件分支的字段取值翻译成可读文案（字典字段
+// 翻译成选项文案、布尔转"是/否"），复用 displayValue 同一套逻辑，子组件不重新请求渲染元数据
+// （design.md Decision 9）。
+function resolveFieldValueLabel(bizType: ApprovalBizType, field: string, value: unknown): string {
+  return displayValue(bizType, schemaItemFor(bizType, field), value)
 }
 
 // 把原始值转换为可读展示：字典/多选字典按渲染元数据翻译成标签；布尔值转"是/否"；
@@ -210,98 +263,113 @@ function statusTagType(status: number): 'warning' | 'success' | 'danger' | 'info
 <template>
   <el-dialog v-model="visible" title="申请详情" width="640px">
     <template v-if="row">
-      <el-descriptions :column="2" border>
-        <el-descriptions-item label="业务对象类型">{{ bizTypeLabel(row.bizType) }}</el-descriptions-item>
-        <el-descriptions-item label="操作类型">{{ operationTypeLabel(row.operationType) }}</el-descriptions-item>
-        <el-descriptions-item label="目标记录ID">{{ row.targetId ?? '-' }}</el-descriptions-item>
-        <el-descriptions-item label="生效记录ID">{{ row.resultTargetId ?? '-' }}</el-descriptions-item>
-        <el-descriptions-item label="申请状态">
-          <el-tag :type="statusTagType(row.status)">{{ statusLabel(row.status) }}</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="提交人">{{ row.createByName || row.createBy }}</el-descriptions-item>
-        <el-descriptions-item label="提交时间">{{ row.createTime }}</el-descriptions-item>
-        <el-descriptions-item label="审批人">{{ row.approverName || row.approverId || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="审批时间">{{ row.approveTime ?? '-' }}</el-descriptions-item>
-        <el-descriptions-item label="审批意见" :span="2">{{ row.opinion || '-' }}</el-descriptions-item>
-      </el-descriptions>
+      <el-tabs v-model="activeTab">
+        <el-tab-pane label="基本信息" name="basic">
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="业务对象类型">{{ bizTypeLabel(row.bizType) }}</el-descriptions-item>
+            <el-descriptions-item label="操作类型">{{ operationTypeLabel(row.operationType) }}</el-descriptions-item>
+            <el-descriptions-item label="目标记录ID">{{ row.targetId ?? '-' }}</el-descriptions-item>
+            <el-descriptions-item label="生效记录ID">{{ row.resultTargetId ?? '-' }}</el-descriptions-item>
+            <el-descriptions-item label="申请状态">
+              <el-tag :type="statusTagType(row.status)">{{ statusLabel(row.status) }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="提交人">{{ row.createByName || row.createBy }}</el-descriptions-item>
+            <el-descriptions-item label="提交时间">{{ row.createTime }}</el-descriptions-item>
+            <el-descriptions-item label="审批人">{{ row.approverName || row.approverId || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="审批时间">{{ row.approveTime ?? '-' }}</el-descriptions-item>
+            <el-descriptions-item label="审批意见" :span="2">{{ row.opinion || '-' }}</el-descriptions-item>
+          </el-descriptions>
+        </el-tab-pane>
 
-      <div v-if="fieldRows.length > 0" class="approval-detail-fields">
-        <h4 class="approval-detail-fields__title">
-          {{ row.targetSnapshot ? '变更内容（旧值 → 新值）' : '申请内容' }}
-        </h4>
-        <ul class="approval-detail-fields__list">
-          <li v-for="item in fieldRows" :key="item.key" class="approval-detail-fields__item">
-            <span class="approval-detail-fields__label">{{ item.label }}</span>
-            <span v-if="item.oldValue !== null" class="approval-detail-fields__values">
-              <span class="approval-detail-fields__old">{{ item.oldValue }}</span>
-              <span class="approval-detail-fields__arrow">→</span>
-              <span class="approval-detail-fields__new">{{ item.newValue }}</span>
-            </span>
-            <span v-else class="approval-detail-fields__values">
-              <span class="approval-detail-fields__new">{{ item.newValue }}</span>
-            </span>
-          </li>
-        </ul>
-      </div>
+        <el-tab-pane label="申请内容" name="content">
+          <div v-if="fieldRows.length > 0" class="approval-detail-fields">
+            <h4 class="approval-detail-fields__title">
+              {{ row.targetSnapshot ? '变更内容（旧值 → 新值）' : '申请内容' }}
+            </h4>
+            <ul class="approval-detail-fields__list">
+              <li v-for="item in fieldRows" :key="item.key" class="approval-detail-fields__item">
+                <span class="approval-detail-fields__label">{{ item.label }}</span>
+                <span v-if="item.oldValue !== null" class="approval-detail-fields__values">
+                  <span class="approval-detail-fields__old">{{ item.oldValue }}</span>
+                  <span class="approval-detail-fields__arrow">→</span>
+                  <span class="approval-detail-fields__new">{{ item.newValue }}</span>
+                </span>
+                <span v-else class="approval-detail-fields__values">
+                  <span class="approval-detail-fields__new">{{ item.newValue }}</span>
+                </span>
+              </li>
+            </ul>
+          </div>
 
-      <div v-if="userPositions" class="approval-detail-fields approval-detail-positions">
-        <h4 class="approval-detail-fields__title">
-          任职信息{{ userPositions.hasOld ? '（变更前 → 变更后）' : '' }}
-        </h4>
-        <div v-if="userPositions.hasOld" class="approval-detail-positions__columns">
-          <div class="approval-detail-positions__column">
-            <div class="approval-detail-positions__column-title">变更前</div>
-            <p v-if="userPositions.oldList.length === 0" class="approval-detail-fields__empty">无</p>
-            <div
-              v-for="(fields, idx) in userPositions.oldList"
-              :key="`old-${idx}`"
-              class="approval-detail-position-card"
-            >
-              <div class="approval-detail-position-card__title">任职 {{ idx + 1 }}</div>
-              <div v-for="field in fields" :key="field.label" class="approval-detail-position-card__row">
-                <span class="approval-detail-fields__label">{{ field.label }}</span>
-                <span>{{ field.value }}</span>
+          <div v-if="userPositions" class="approval-detail-fields approval-detail-positions">
+            <h4 class="approval-detail-fields__title">
+              任职信息{{ userPositions.hasOld ? '（变更前 → 变更后）' : '' }}
+            </h4>
+            <div v-if="userPositions.hasOld" class="approval-detail-positions__columns">
+              <div class="approval-detail-positions__column">
+                <div class="approval-detail-positions__column-title">变更前</div>
+                <p v-if="userPositions.oldList.length === 0" class="approval-detail-fields__empty">无</p>
+                <div
+                  v-for="(fields, idx) in userPositions.oldList"
+                  :key="`old-${idx}`"
+                  class="approval-detail-position-card"
+                >
+                  <div class="approval-detail-position-card__title">任职 {{ idx + 1 }}</div>
+                  <div v-for="field in fields" :key="field.label" class="approval-detail-position-card__row">
+                    <span class="approval-detail-fields__label">{{ field.label }}</span>
+                    <span>{{ field.value }}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="approval-detail-positions__column">
+                <div class="approval-detail-positions__column-title">变更后</div>
+                <p v-if="userPositions.newList.length === 0" class="approval-detail-fields__empty">无</p>
+                <div
+                  v-for="(fields, idx) in userPositions.newList"
+                  :key="`new-${idx}`"
+                  class="approval-detail-position-card"
+                >
+                  <div class="approval-detail-position-card__title">任职 {{ idx + 1 }}</div>
+                  <div v-for="field in fields" :key="field.label" class="approval-detail-position-card__row">
+                    <span class="approval-detail-fields__label">{{ field.label }}</span>
+                    <span>{{ field.value }}</span>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-          <div class="approval-detail-positions__column">
-            <div class="approval-detail-positions__column-title">变更后</div>
-            <p v-if="userPositions.newList.length === 0" class="approval-detail-fields__empty">无</p>
-            <div
-              v-for="(fields, idx) in userPositions.newList"
-              :key="`new-${idx}`"
-              class="approval-detail-position-card"
-            >
-              <div class="approval-detail-position-card__title">任职 {{ idx + 1 }}</div>
-              <div v-for="field in fields" :key="field.label" class="approval-detail-position-card__row">
-                <span class="approval-detail-fields__label">{{ field.label }}</span>
-                <span>{{ field.value }}</span>
+            <template v-else>
+              <p v-if="userPositions.newList.length === 0" class="approval-detail-fields__empty">无</p>
+              <div
+                v-for="(fields, idx) in userPositions.newList"
+                :key="idx"
+                class="approval-detail-position-card"
+              >
+                <div class="approval-detail-position-card__title">任职 {{ idx + 1 }}</div>
+                <div v-for="field in fields" :key="field.label" class="approval-detail-position-card__row">
+                  <span class="approval-detail-fields__label">{{ field.label }}</span>
+                  <span>{{ field.value }}</span>
+                </div>
               </div>
-            </div>
+            </template>
           </div>
-        </div>
-        <template v-else>
-          <p v-if="userPositions.newList.length === 0" class="approval-detail-fields__empty">无</p>
-          <div
-            v-for="(fields, idx) in userPositions.newList"
-            :key="idx"
-            class="approval-detail-position-card"
+
+          <p
+            v-if="fieldRows.length === 0 && !userPositions"
+            class="approval-detail-fields__empty"
           >
-            <div class="approval-detail-position-card__title">任职 {{ idx + 1 }}</div>
-            <div v-for="field in fields" :key="field.label" class="approval-detail-position-card__row">
-              <span class="approval-detail-fields__label">{{ field.label }}</span>
-              <span>{{ field.value }}</span>
-            </div>
-          </div>
-        </template>
-      </div>
+            该操作不涉及字段变更，审批通过后将直接对目标记录执行状态切换/删除
+          </p>
+        </el-tab-pane>
 
-      <p
-        v-if="fieldRows.length === 0 && !userPositions"
-        class="approval-detail-fields__empty"
-      >
-        该操作不涉及字段变更，审批通过后将直接对目标记录执行状态切换/删除
-      </p>
+        <el-tab-pane v-if="row.processInstanceId" label="审批流程" name="processFlow">
+          <process-flow-chart
+            :detail="processDetail"
+            :loading="processDetailLoading"
+            :resolve-field-label="labelFor"
+            :resolve-field-value-label="resolveFieldValueLabel"
+          />
+        </el-tab-pane>
+      </el-tabs>
     </template>
     <template #footer>
       <el-button @click="visible = false">关闭</el-button>
