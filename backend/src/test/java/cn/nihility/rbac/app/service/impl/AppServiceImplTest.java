@@ -105,7 +105,13 @@ class AppServiceImplTest {
      */
     @BeforeAll
     static void primeLambdaColumnCache() {
+        // 必须显式开启 mapUnderscoreToCamelCase（与本项目 mybatis/mybatis.conf 里真实 MyBatis
+        // 配置一致），否则默认关闭该项的 Configuration 会让 TableInfoHelper 这个 JVM 静态缓存
+        // 把列名错误地永久缓存成驼峰字段名本身，污染同一实体后续所有真实 @SpringBootTest
+        // 集成测试生成的 SQL（fix-approval-zero-task-process-completion change 实施时发现并
+        // 修复）。
         Configuration configuration = new Configuration();
+        configuration.setMapUnderscoreToCamelCase(true);
         MapperBuilderAssistant assistant = new MapperBuilderAssistant(configuration, "appServiceImplTest");
         assistant.setCurrentNamespace(AppEntity.class.getName());
         TableInfoHelper.initTableInfo(assistant, AppEntity.class);
@@ -171,7 +177,7 @@ class AppServiceImplTest {
 
         ArgumentCaptor<LambdaQueryWrapper<AppEntity>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
         verify(appMapper).selectPage(any(Page.class), captor.capture());
-        assertThat(captor.getValue().getSqlSegment()).contains("orgId IN");
+        assertThat(captor.getValue().getSqlSegment()).contains("org_id IN");
     }
 
     /**
@@ -189,7 +195,7 @@ class AppServiceImplTest {
 
         ArgumentCaptor<LambdaQueryWrapper<AppEntity>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
         verify(appMapper).selectPage(any(Page.class), captor.capture());
-        assertThat(captor.getValue().getSqlSegment()).contains("id = ").doesNotContain("orgId IN");
+        assertThat(captor.getValue().getSqlSegment()).contains("id = ").doesNotContain("org_id IN");
     }
 
     /**
@@ -220,7 +226,7 @@ class AppServiceImplTest {
 
         ArgumentCaptor<LambdaQueryWrapper<AppEntity>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
         verify(appMapper).selectList(captor.capture());
-        assertThat(captor.getValue().getSqlSegment()).contains("orgId IN");
+        assertThat(captor.getValue().getSqlSegment()).contains("org_id IN");
     }
 
     /**

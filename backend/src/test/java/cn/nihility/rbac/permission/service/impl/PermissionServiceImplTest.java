@@ -68,7 +68,13 @@ class PermissionServiceImplTest {
      */
     @BeforeAll
     static void primeLambdaColumnCache() {
+        // 必须显式开启 mapUnderscoreToCamelCase（与本项目 mybatis/mybatis.conf 里真实 MyBatis
+        // 配置一致），否则默认关闭该项的 Configuration 会让 TableInfoHelper 这个 JVM 静态缓存
+        // 把列名错误地永久缓存成驼峰字段名本身，污染同一实体后续所有真实 @SpringBootTest
+        // 集成测试生成的 SQL（fix-approval-zero-task-process-completion change 实施时发现并
+        // 修复）。
         Configuration configuration = new Configuration();
+        configuration.setMapUnderscoreToCamelCase(true);
         MapperBuilderAssistant assistant = new MapperBuilderAssistant(configuration, "permissionServiceImplTest");
         assistant.setCurrentNamespace(PermissionEntity.class.getName());
         TableInfoHelper.initTableInfo(assistant, PermissionEntity.class);
@@ -298,7 +304,7 @@ class PermissionServiceImplTest {
 
         ArgumentCaptor<LambdaQueryWrapper<PermissionEntity>> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
         verify(permissionMapper).selectList(captor.capture());
-        assertThat(captor.getValue().getSqlSegment()).contains("ORDER BY showOrder ASC,id ASC");
+        assertThat(captor.getValue().getSqlSegment()).contains("ORDER BY show_order ASC,id ASC");
     }
 
     /**

@@ -178,9 +178,19 @@ class ApprovalRequestServiceImplTest {
         primeEntity(NodeAssigneeRuleEntity.class);
     }
 
-    /** 为单个实体类初始化 Lambda 列缓存。 */
+    /**
+     * 为单个实体类初始化 Lambda 列缓存。{@code TableInfoHelper} 的缓存是 JVM 静态、按
+     * {@code Class} 缓存一次即永久生效，必须显式开启 {@code mapUnderscoreToCamelCase}
+     * （与本项目 {@code mybatis/mybatis.conf} 里真实 MyBatis 配置一致），否则用默认关闭该项的
+     * {@link Configuration} 生成的 {@code TableInfo} 会把列名错误地缓存成驼峰字段名本身
+     * （如 {@code assigneeId} 而非 {@code assignee_id}），一旦在同一 Gradle 测试 JVM 里比真实
+     * {@code @SpringBootTest} 上下文更早跑到，会永久污染同一实体后续所有真实集成测试生成的 SQL
+     * （fix-approval-zero-task-process-completion change 实施时发现并修复）。
+     */
     private static void primeEntity(Class<?> entityClass) {
-        MapperBuilderAssistant assistant = new MapperBuilderAssistant(new Configuration(), "approvalRequestTest");
+        Configuration configuration = new Configuration();
+        configuration.setMapUnderscoreToCamelCase(true);
+        MapperBuilderAssistant assistant = new MapperBuilderAssistant(configuration, "approvalRequestTest");
         assistant.setCurrentNamespace(entityClass.getName());
         TableInfoHelper.initTableInfo(assistant, entityClass);
     }
@@ -222,10 +232,8 @@ class ApprovalRequestServiceImplTest {
     void submit_shouldCreatePendingRequest_whenSwitchEnabled() {
         AppCreateRequest request = buildAppCreateRequest();
         when(orgScopeService.isOrgIdAllowed(1L, 100L)).thenReturn(true);
-        doAnswer(invocation -> {
-            invocation.<ApprovalRequestEntity>getArgument(0).setId(10L);
-            return 1;
-        }).when(mapper).insert(any(ApprovalRequestEntity.class));
+        stubInsertAssigningIdAndSelectBack(10L);
+        stubRunningProcessInstance();
         when(approvalProcessService.start(
                 eq(10L), eq(FormFieldBizType.APP), eq(ApprovalOperationType.CREATE), eq(1L), any(), any()))
                 .thenReturn(new WorkflowInstanceResult(PROCESS_INSTANCE_ID, "flow-1", "deptLeaderApprove", "部门负责人审批"));
@@ -259,6 +267,8 @@ class ApprovalRequestServiceImplTest {
             invocation.<ApprovalRequestEntity>getArgument(0).setId(10L);
             return 1;
         }).when(mapper).insert(captor.capture());
+        when(mapper.selectById(10L)).thenAnswer(invocation -> captor.getValue());
+        stubRunningProcessInstance();
         when(approvalProcessService.start(
                 eq(10L), eq(FormFieldBizType.APP), eq(ApprovalOperationType.CREATE), eq(1L), any(), any()))
                 .thenReturn(new WorkflowInstanceResult(PROCESS_INSTANCE_ID, "flow-1", "deptLeaderApprove", "部门负责人审批"));
@@ -286,6 +296,8 @@ class ApprovalRequestServiceImplTest {
             invocation.<ApprovalRequestEntity>getArgument(0).setId(11L);
             return 1;
         }).when(mapper).insert(captor.capture());
+        when(mapper.selectById(11L)).thenAnswer(invocation -> captor.getValue());
+        stubRunningProcessInstance();
         when(approvalProcessService.start(
                 eq(11L), eq(FormFieldBizType.ORG), eq(ApprovalOperationType.UPDATE), eq(1L), any(), any()))
                 .thenReturn(new WorkflowInstanceResult(PROCESS_INSTANCE_ID, "flow-1", "deptLeaderApprove", "部门负责人审批"));
@@ -381,10 +393,8 @@ class ApprovalRequestServiceImplTest {
         lenient().when(orgScopeService.isOrgIdAllowed(1L, 100L)).thenReturn(true);
         lenient().when(orgScopeService.isOrgIdAllowed(1L, 99L)).thenReturn(true);
         prepareCurrentTarget(bizType, targetId);
-        doAnswer(invocation -> {
-            invocation.<ApprovalRequestEntity>getArgument(0).setId(10L);
-            return 1;
-        }).when(mapper).insert(any(ApprovalRequestEntity.class));
+        stubInsertAssigningIdAndSelectBack(10L);
+        stubRunningProcessInstance();
         when(approvalProcessService.start(eq(10L), eq(bizType), eq(operationType), anyLong(), any(), any()))
                 .thenReturn(new WorkflowInstanceResult(PROCESS_INSTANCE_ID, "flow-1", "deptLeaderApprove", "部门负责人审批"));
 
@@ -415,7 +425,7 @@ class ApprovalRequestServiceImplTest {
         verify(orgScopeService, never()).isOrgIdAllowed(any(), any());
         ArgumentCaptor<LambdaUpdateWrapper<ApprovalRequestEntity>> captor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
         verify(mapper).update(eq(null), captor.capture());
-        assertThat(captor.getValue().getSqlSet()).contains("currentNodeName");
+        assertThat(captor.getValue().getSqlSet()).contains("current_node_name");
         assertThat(captor.getValue().getSqlSet()).doesNotContain("status");
     }
 
@@ -683,7 +693,7 @@ class ApprovalRequestServiceImplTest {
                 ArgumentCaptor.forClass(LambdaQueryWrapper.class);
         verify(mapper).selectPage(any(Page.class), captor.capture());
         assertThat(captor.getValue().getSqlSegment())
-                .contains("bizType", "operationType", "status", "createBy");
+                .contains("biz_type", "operation_type", "status", "create_by");
     }
 
     /** 无当前用户命中的开放任务时，"待我审批"应直接返回空分页，不触发主表查询。 */
@@ -799,6 +809,36 @@ class ApprovalRequestServiceImplTest {
                         .status(TaskStatus.PENDING).build()));
         when(processInstanceMapper.selectById(PROCESS_INSTANCE_ID)).thenReturn(ProcessInstanceEntity.builder()
                 .id(PROCESS_INSTANCE_ID).status(ProcessInstanceStatus.APPROVED).build());
+    }
+
+    /**
+     * 为 {@code submit()} 相关测试桩流程实例仍处于 {@code RUNNING} 状态（正常有开放任务的既有
+     * 场景，fix-approval-zero-task-process-completion change tasks.md 2.5 回归覆盖）：
+     * {@code submit()} 内新增的"按流程实例真实状态分支处理"逻辑依赖此桩，否则默认返回
+     * {@code null} 会被当作"流程实例不存在"而拒绝。
+     */
+    private void stubRunningProcessInstance() {
+        when(processInstanceMapper.selectById(PROCESS_INSTANCE_ID)).thenReturn(ProcessInstanceEntity.builder()
+                .id(PROCESS_INSTANCE_ID).status(ProcessInstanceStatus.RUNNING).build());
+    }
+
+    /**
+     * 桩 {@code mapper.insert(...)} 写回自增主键，并令后续 {@code mapper.selectById(id)}
+     * 返回同一个（可能已被 {@code submit()} 内部继续原地修改字段的）实体对象，模拟
+     * {@code submit()} 末尾重新查询最新状态的行为（fix-approval-zero-task-process-completion
+     * change design.md Decision 2 要点三）。
+     *
+     * @param id 桩定的自增主键
+     */
+    private void stubInsertAssigningIdAndSelectBack(Long id) {
+        ApprovalRequestEntity[] holder = new ApprovalRequestEntity[1];
+        doAnswer(invocation -> {
+            ApprovalRequestEntity inserted = invocation.getArgument(0);
+            inserted.setId(id);
+            holder[0] = inserted;
+            return 1;
+        }).when(mapper).insert(any(ApprovalRequestEntity.class));
+        when(mapper.selectById(id)).thenAnswer(invocation -> holder[0]);
     }
 
     /** 构造合法应用创建请求。 */

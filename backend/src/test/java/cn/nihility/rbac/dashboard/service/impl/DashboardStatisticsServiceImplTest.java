@@ -68,7 +68,13 @@ class DashboardStatisticsServiceImplTest {
      */
     @BeforeAll
     static void primeLambdaColumnCache() {
+        // 必须显式开启 mapUnderscoreToCamelCase（与本项目 mybatis/mybatis.conf 里真实 MyBatis
+        // 配置一致），否则默认关闭该项的 Configuration 会让 TableInfoHelper 这个 JVM 静态缓存
+        // 把列名错误地永久缓存成驼峰字段名本身，污染同一实体后续所有真实 @SpringBootTest
+        // 集成测试生成的 SQL（fix-approval-zero-task-process-completion change 实施时发现并
+        // 修复）。
         Configuration configuration = new Configuration();
+        configuration.setMapUnderscoreToCamelCase(true);
         primeEntity(configuration, UserEntity.class);
         primeEntity(configuration, OrgEntity.class);
         primeEntity(configuration, AppEntity.class);
@@ -166,7 +172,7 @@ class DashboardStatisticsServiceImplTest {
 
         ArgumentCaptor<LambdaQueryWrapper<AppEntity>> appCaptor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
         verify(appMapper).selectCount(appCaptor.capture());
-        assertThat(appCaptor.getValue().getSqlSegment()).contains("orgId IN");
+        assertThat(appCaptor.getValue().getSqlSegment()).contains("org_id IN");
 
         verify(userMapper).countUsersInScope(eq(allowedOrgIds), anyInt(), anyInt());
         verify(adminMapper).countAdminsInScope(eq(allowedOrgIds), anyInt(), anyInt());

@@ -185,6 +185,11 @@ public class FlowableWorkflowService implements WorkflowService {
                 .updateTime(now)
                 .build());
 
+        // 命中路径若不经过任何审批节点，Flowable 会在上面 startProcessInstanceById 这一次同步
+        // 调用内就把流程直接跑到结束事件；此处补一次幂等收尾，避免实例状态永远停留在 RUNNING
+        // （fix-approval-zero-task-process-completion change design.md Decision 1）。
+        finalizeInstanceIfEnded(instance.getId());
+
         ProcessInstanceEntity refreshed = processInstanceMapper.selectById(instance.getId());
         return new WorkflowInstanceResult(
                 refreshed.getId(),

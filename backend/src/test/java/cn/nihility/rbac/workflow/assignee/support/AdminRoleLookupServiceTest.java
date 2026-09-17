@@ -63,8 +63,17 @@ class AdminRoleLookupServiceTest {
         prime(OrgEntity.class);
     }
 
+    /**
+     * 为单个实体类初始化 Lambda 列缓存。必须显式开启 {@code mapUnderscoreToCamelCase}（与
+     * 本项目 {@code mybatis/mybatis.conf} 里真实 MyBatis 配置一致），否则默认关闭该项的
+     * {@link Configuration} 会让 {@code TableInfoHelper} 这个 JVM 静态缓存把列名错误地永久
+     * 缓存成驼峰字段名本身，污染同一实体后续所有真实 {@code @SpringBootTest} 集成测试生成的
+     * SQL（fix-approval-zero-task-process-completion change 实施时发现并修复）。
+     */
     private static void prime(Class<?> entityClass) {
-        MapperBuilderAssistant assistant = new MapperBuilderAssistant(new Configuration(), "adminRoleLookupTest");
+        Configuration configuration = new Configuration();
+        configuration.setMapUnderscoreToCamelCase(true);
+        MapperBuilderAssistant assistant = new MapperBuilderAssistant(configuration, "adminRoleLookupTest");
         assistant.setCurrentNamespace(entityClass.getName());
         TableInfoHelper.initTableInfo(assistant, entityClass);
     }

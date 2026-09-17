@@ -75,6 +75,16 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
     /** 任职记录里表达"主职"的任职类型编码。 */
     private static final String PRIMARY_POSITION_TYPE = "primary";
 
+    /** 提交后流程在 {@code start()} 内部同步跑到"已通过"终态（命中路径未经过任何审批节点）时
+     *  使用的固定审批意见文案（fix-approval-zero-task-process-completion change design.md
+     *  Decision 2）。 */
+    private static final String AUTO_APPROVED_OPINION =
+            "系统自动通过：该流程未配置需要人工处理的审批节点，按默认分支自动通过";
+
+    /** 提交后流程在 {@code start()} 内部同步跑到"已拒绝"终态时使用的固定审批意见文案。 */
+    private static final String AUTO_REJECTED_OPINION =
+            "系统自动拒绝：该流程未配置需要人工处理的审批节点，按默认分支直接流转到拒绝结束节点";
+
     /** 审批申请数据访问接口。 */
     private final ApprovalRequestMapper approvalRequestMapper;
 
@@ -189,11 +199,38 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
         entity.setProcessInstanceId(process.processInstanceId());
         entity.setFlowableProcessInstanceId(process.flowableProcessInstanceId());
         entity.setCurrentNodeName(process.currentNodeName());
-        ApprovalTaskEntity openTask = findOpenTask(process.processInstanceId());
-        if (openTask != null) {
-            entity.setFlowableTaskId(openTask.getFlowableTaskId());
+
+        // 命中路径若不经过任何审批节点，FlowableWorkflowService.start() 内部已经把流程实例同步
+        // 收尾为 APPROVED/REJECTED 终态；此处必须按三种真实结果分支处理，不能只假设"仍在运行"
+        // （fix-approval-zero-task-process-completion change design.md Decision 2）。
+        ProcessInstanceEntity instance = processInstanceMapper.selectById(process.processInstanceId());
+        if (instance == null) {
+            throw new BusinessException("流程实例不存在");
         }
-        approvalRequestMapper.updateById(entity);
+        switch (instance.getStatus()) {
+            case ProcessInstanceStatus.RUNNING -> {
+                ApprovalTaskEntity openTask = findOpenTask(process.processInstanceId());
+                if (openTask != null) {
+                    entity.setFlowableTaskId(openTask.getFlowableTaskId());
+                }
+                approvalRequestMapper.updateById(entity);
+            }
+            case ProcessInstanceStatus.APPROVED -> {
+                approvalRequestMapper.updateById(entity);
+                // 无人工审批人（approverId=null）；CurrentUserContext 须恢复为申请人自身，
+                // 不能恢复成 null，否则会影响本方法内后续仍在同一线程执行的代码。
+                finalizeApproval(entity, null, AUTO_APPROVED_OPINION, applicantId);
+            }
+            case ProcessInstanceStatus.REJECTED -> {
+                approvalRequestMapper.updateById(entity);
+                finalizeAutoRejected(entity, AUTO_REJECTED_OPINION, applicantId);
+            }
+            default -> throw new BusinessException("流程实例状态异常：" + instance.getStatus());
+        }
+
+        // finalizeApproval/finalizeAutoRejected 均通过 LambdaUpdateWrapper 做局部字段更新，
+        // 不会同步刷新上面这个 entity 对象，必须重新查询一次，避免响应 VO 仍显示旧状态。
+        entity = approvalRequestMapper.selectById(entity.getId());
         Map<String, String> displayNames = userDisplayService.resolveDisplayNames(Set.of(currentUserId));
         return WriteOperationResultVO.pending(toVO(entity, displayNames));
     }
@@ -219,7 +256,7 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
         }
         switch (instance.getStatus()) {
             case ProcessInstanceStatus.RUNNING -> advanceNode(entity, instance, approverId);
-            case ProcessInstanceStatus.APPROVED -> finalizeApproval(entity, approverId, opinion);
+            case ProcessInstanceStatus.APPROVED -> finalizeApproval(entity, approverId, opinion, approverId);
             case ProcessInstanceStatus.TERMINATED -> terminateAsRejected(entity, approverId, instance);
             default -> throw new BusinessException("流程实例状态异常：" + instance.getStatus());
         }
@@ -241,8 +278,21 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
      * 最终节点通过：以提交人身份重新校验管辖范围并执行既有业务写操作，成功后申请置为已通过；
      * 与 {@link ApprovalProcessService#approve} 处于同一数据库事务内，业务写操作失败会连同流程
      * 推进一并回滚（本项目 Flowable 与业务表共用同一 DataSource/事务管理器，见最终报告说明）。
+     * <p>
+     * {@code approverId} 允许传 {@code null}，表示"提交即在 {@code start()} 内部同步自动通过、
+     * 无人工审批人"（{@code submit()} 零审批节点分支，fix-approval-zero-task-process-completion
+     * change design.md Decision 2）；此时 {@code contextRestoreUserId} 须显式传入调用方当前所处
+     * 线程真正应当恢复成的用户 id（人工审批场景与 {@code approverId} 相同，都是审批人自身；
+     * 零任务自动通过场景须传申请人 id），不能直接把线程上下文恢复成 {@code null}，否则会影响
+     * 调用方方法体内这次调用之后仍在同一线程执行的后续代码。
+     *
+     * @param entity               审批申请
+     * @param approverId           审批人 id，{@code null} 表示无人工审批人
+     * @param opinion              审批意见
+     * @param contextRestoreUserId 业务写操作执行完毕后用于恢复 {@link CurrentUserContext} 的用户 id
      */
-    private void finalizeApproval(ApprovalRequestEntity entity, Long approverId, String opinion) {
+    private void finalizeApproval(
+            ApprovalRequestEntity entity, Long approverId, String opinion, Long contextRestoreUserId) {
         Object payload = masterDataOperationExecutor.convertPayload(
                 entity.getBizType(), entity.getOperationType(), entity.getRequestPayload());
         Long submitterId = parseUserId(entity.getCreateBy());
@@ -254,7 +304,7 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
             result = masterDataOperationExecutor.executeWrite(
                     entity.getBizType(), entity.getOperationType(), entity.getTargetId(), payload);
         } finally {
-            CurrentUserContext.setUserId(approverId);
+            CurrentUserContext.setUserId(contextRestoreUserId);
         }
 
         Long resultTargetId = masterDataOperationExecutor.extractTargetId(result);
@@ -266,14 +316,42 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
                 .set(ApprovalRequestEntity::getApproveTime, now)
                 .set(ApprovalRequestEntity::getOpinion, opinion)
                 .set(ApprovalRequestEntity::getCurrentNodeName, null)
-                .set(ApprovalRequestEntity::getUpdateBy, approverId.toString())
+                .set(ApprovalRequestEntity::getUpdateBy, contextRestoreUserId.toString())
                 .set(ApprovalRequestEntity::getUpdateTime, now);
         if (Objects.equals(entity.getOperationType(), ApprovalOperationType.CREATE)) {
             wrapper.set(ApprovalRequestEntity::getResultTargetId, resultTargetId);
         }
         approvalRequestMapper.update(null, wrapper);
         recordRequestStatusChange(entity, ApprovalRequestStatus.APPROVED, approverId, opinion);
-        releaseBusinessLock(entity, approverId);
+        releaseBusinessLock(entity, contextRestoreUserId);
+    }
+
+    /**
+     * 提交后流程在 {@code start()} 内部同步跑到"已拒绝"终态（命中路径未经过任何审批节点，例如
+     * 默认分支直接流转到 {@code outcome=REJECTED} 的结束节点）：不执行任何业务写操作，直接标记
+     * 申请为已拒绝。不复用 {@link #terminateAsRejected}——它的 {@link #latestTerminateReason}
+     * 是专门为"空审批人 {@code REJECT} 策略触发的系统终止"设计的，查询
+     * {@code tab_wf_approval_record} 里 {@code action=TERMINATE} 的轨迹，本场景没有这类轨迹，
+     * 套用会读到误导性的兜底文案（fix-approval-zero-task-process-completion change design.md
+     * Decision 2 要点二）。
+     *
+     * @param entity                审批申请
+     * @param opinion               固定的自动拒绝说明文案
+     * @param contextRestoreUserId  用于填充 {@code updateBy}/释放业务活动锁的操作人 id（申请人自身）
+     */
+    private void finalizeAutoRejected(ApprovalRequestEntity entity, String opinion, Long contextRestoreUserId) {
+        LocalDateTime now = LocalDateTime.now();
+        approvalRequestMapper.update(null, new LambdaUpdateWrapper<ApprovalRequestEntity>()
+                .eq(ApprovalRequestEntity::getId, entity.getId())
+                .set(ApprovalRequestEntity::getStatus, ApprovalRequestStatus.REJECTED)
+                .set(ApprovalRequestEntity::getApproverId, null)
+                .set(ApprovalRequestEntity::getApproveTime, now)
+                .set(ApprovalRequestEntity::getOpinion, opinion)
+                .set(ApprovalRequestEntity::getCurrentNodeName, null)
+                .set(ApprovalRequestEntity::getUpdateBy, contextRestoreUserId.toString())
+                .set(ApprovalRequestEntity::getUpdateTime, now));
+        recordRequestStatusChange(entity, ApprovalRequestStatus.REJECTED, null, opinion);
+        releaseBusinessLock(entity, contextRestoreUserId);
     }
 
     /**
