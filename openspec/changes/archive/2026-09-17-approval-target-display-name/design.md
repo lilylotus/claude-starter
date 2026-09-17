@@ -41,7 +41,7 @@ if (Objects.equals(entity.getOperationType(), ApprovalOperationType.UPDATE)) {
 
 新增 `frontend/src/utils/approvalTarget.ts`，导出 `resolveApprovalTargetLabel(row: Pick<ApprovalRequestRow, 'bizType' | 'targetId' | 'requestPayload' | 'targetSnapshot'>): string`：
 
-- 按 `bizType` 选取数据来源：`requestPayload`（CREATE，此时 `targetSnapshot` 必为空）优先于 `targetSnapshot`（其余四种操作类型），二者都取不到时返回 `'-'`。
+- 数据来源取值优先级：`targetSnapshot`（UPDATE/ENABLE/DISABLE/DELETE 四类操作的目标记录当前值）非空时优先使用，为空时（此时必为 CREATE，因为其余四类操作都会填充 `targetSnapshot`）退化到 `requestPayload`；不再按 `bizType` 或 `operationType` 额外分支判断，一行 `row.targetSnapshot ?? row.requestPayload` 的空值合并即可覆盖全部五种操作类型。二者都取不到时返回 `'-'`。
 - `USER`/`ORG`/`APP`：取来源对象的 `name` 字段。
 - `POSITION`：取来源对象的 `userName`/`orgName` 字段，拼成 `"${userName} - ${orgName}"`；某一侧缺失时只展示存在的一侧，都缺失时返回 `'-'`。
 - 三处 UI（`MyApprovalRequestView.vue` 表格列、`PendingApprovalRequestView.vue` 表格列、`ApprovalRequestDetailDialog.vue` 详情项）把原来的 `{{ row.targetId ?? '-' }}` 替换为 `{{ resolveApprovalTargetLabel(row) }}`，列/字段标签由"目标记录ID"改为"审批对象"。

@@ -87,4 +87,19 @@ public interface ApprovalRequestService {
             String operationType,
             Integer page,
             Integer pageSize);
+
+    /**
+     * 查询单条申请详情，供"审批历史"等已处理记录场景复用"我的申请"/"待我审批"的详情弹窗。
+     *
+     * <p>查看权限口径与流程实例详情接口（{@code GET /api/v1/workflow/process-instances/
+     * {processInstanceId}}）一致：{@code processInstanceId} 非空时，申请人本人、该流程实例
+     * 审批轨迹中出现过的操作人/转办来源人、或当前任一开放任务的指定处理人/候选人三者之一即可
+     * 查看；{@code processInstanceId} 为空（未走 Flowable 的简单审批场景）时，退化为申请提交人
+     * 本人或该申请记录的审批人本人可查看。均不满足时拒绝访问。</p>
+     *
+     * @param id       申请 id
+     * @param viewerId 当前查看者用户 id
+     * @return 申请详情
+     */
+    ApprovalRequestVO getDetail(Long id, Long viewerId);
 }

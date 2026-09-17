@@ -8,6 +8,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import * as approvalApi from '@/api/approval'
 import { PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import ApprovalRequestDetailDialog from '@/components/ApprovalRequestDetailDialog.vue'
+import { resolveApprovalTargetLabel } from '@/utils/approvalTarget'
 import {
   APPROVAL_BIZ_TYPE_OPTIONS,
   APPROVAL_OPERATION_TYPE_OPTIONS,
@@ -136,8 +137,8 @@ async function handleCancel(row: ApprovalRequestRow) {
             }}
           </template>
         </el-table-column>
-        <el-table-column label="目标记录ID" width="100">
-          <template #default="{ row }">{{ (row as ApprovalRequestRow).targetId ?? '-' }}</template>
+        <el-table-column label="审批对象" min-width="120">
+          <template #default="{ row }">{{ resolveApprovalTargetLabel(row as ApprovalRequestRow) }}</template>
         </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">

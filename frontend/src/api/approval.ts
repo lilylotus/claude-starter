@@ -45,3 +45,8 @@ export function getMyApprovalRequests(params: ApprovalPageQuery): Promise<PageRe
 export function getPendingApprovalRequests(params: ApprovalPageQuery): Promise<PageResult<ApprovalRequestRow>> {
   return request.get('/approval-requests/pending', { params })
 }
+
+// 查询单条申请详情：申请人本人、历史处理过该实例的人、当前候选人之一可查看，其余用户被拒绝
+export function getApprovalRequestDetail(id: number): Promise<ApprovalRequestRow> {
+  return request.get(`/approval-requests/${id}`)
+}

@@ -3,6 +3,10 @@ package cn.nihility.rbac.workflow.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import cn.nihility.rbac.approval.constant.ApprovalOperationType;
+import cn.nihility.rbac.approval.constant.ApprovalRequestStatus;
+import cn.nihility.rbac.approval.entity.ApprovalRequestEntity;
+import cn.nihility.rbac.approval.mapper.ApprovalRequestMapper;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.role.constant.RoleStatus;
@@ -84,6 +88,12 @@ class WorkflowTaskServiceImplIntegrationTest {
     /** 用户数据访问接口，用于真实插入测试用户以验证展示名解析。 */
     @Autowired
     private UserMapper userMapper;
+
+    /** 审批申请数据访问接口，用于验证已办查询 {@code operationType} 列与
+     *  {@code tab_approval_request.operation_type} 的关联（approval-history-detail-entry
+     *  change tasks.md 7）。 */
+    @Autowired
+    private ApprovalRequestMapper approvalRequestMapper;
 
     /** 角色数据访问接口，用于真实插入测试角色以验证角色候选人展示名解析。 */
     @Autowired
@@ -279,6 +289,46 @@ class WorkflowTaskServiceImplIntegrationTest {
 
         assertThat(result.getTotal()).isEqualTo(0L);
         assertThat(result.getRecords()).isNotNull().isEmpty();
+    }
+
+    /**
+     * 已办查询应携带该记录关联申请的操作类型：{@code operationType} 通过流程实例的
+     * {@code business_id}/{@code business_type} 关联到 {@code tab_approval_request.operation_type}
+     * （approval-history-detail-entry change tasks.md 7.1）。
+     */
+    @Test
+    void findDoneTasks_shouldExposeOperationType_whenApprovalRequestMatched() {
+        Long userId = SEQ.incrementAndGet();
+        Long requestId = insertApprovalRequest("ORG", ApprovalOperationType.UPDATE);
+        Long processInstanceId = insertProcessInstance("ORG", userId, 1L, requestId);
+        Long taskId = insertTask(processInstanceId, "node1", userId, TaskStatus.COMPLETED, LocalDateTime.now());
+        insertRecord(processInstanceId, taskId, userId, ApprovalAction.APPROVE, LocalDateTime.now());
+
+        PageResult<ApprovalTaskVO> done = workflowTaskService.findDoneTasks(userId, new TaskQuery(null, 1, 10));
+
+        assertThat(done.getRecords()).extracting(ApprovalTaskVO::getId).containsExactly(taskId);
+        assertThat(done.getRecords().get(0).getOperationType()).isEqualTo(ApprovalOperationType.UPDATE);
+    }
+
+    /**
+     * 已办查询记录关联的流程实例在 {@code tab_approval_request} 里找不到匹配行时（LEFT JOIN
+     * 未命中，如 {@code business_id} 不对应任何申请行），该记录不应从结果里消失或重复，
+     * 其它字段正常返回，只是 {@code operationType} 为空（approval-history-detail-entry
+     * change design.md Decision 4、tasks.md 7.2）。
+     */
+    @Test
+    void findDoneTasks_shouldReturnNullOperationType_andKeepRecord_whenApprovalRequestNotMatched() {
+        Long userId = SEQ.incrementAndGet();
+        // 负数 business_id 保证不会命中任何 tab_approval_request 自增主键（恒为正）。
+        Long processInstanceId = insertProcessInstance("ORG", userId, 1L, -SEQ.incrementAndGet());
+        Long taskId = insertTask(processInstanceId, "node1", userId, TaskStatus.COMPLETED, LocalDateTime.now());
+        insertRecord(processInstanceId, taskId, userId, ApprovalAction.APPROVE, LocalDateTime.now());
+
+        PageResult<ApprovalTaskVO> done = workflowTaskService.findDoneTasks(userId, new TaskQuery(null, 1, 10));
+
+        assertThat(done.getTotal()).isEqualTo(1L);
+        assertThat(done.getRecords()).extracting(ApprovalTaskVO::getId).containsExactly(taskId);
+        assertThat(done.getRecords().get(0).getOperationType()).isNull();
     }
 
     /**
@@ -656,10 +706,21 @@ class WorkflowTaskServiceImplIntegrationTest {
      * 落库一条最小化的流程实例种子行，绑定指定的流程定义 id。
      */
     private Long insertProcessInstance(String businessType, Long applicantId, Long processDefinitionId) {
+        return insertProcessInstance(businessType, applicantId, processDefinitionId, null);
+    }
+
+    /**
+     * 落库一条最小化的流程实例种子行，绑定指定的流程定义 id 与业务对象 id（用于验证
+     * {@code selectDonePage} 通过 {@code business_id}/{@code business_type} 关联
+     * {@code tab_approval_request} 取 {@code operationType}，approval-history-detail-entry
+     * change tasks.md 7）。
+     */
+    private Long insertProcessInstance(String businessType, Long applicantId, Long processDefinitionId, Long businessId) {
         LocalDateTime now = LocalDateTime.now();
         ProcessInstanceEntity instance = ProcessInstanceEntity.builder()
                 .processDefinitionId(processDefinitionId)
                 .businessType(businessType)
+                .businessId(businessId)
                 .applicantId(applicantId)
                 .status(ProcessInstanceStatus.RUNNING)
                 .startedTime(now)
@@ -670,6 +731,26 @@ class WorkflowTaskServiceImplIntegrationTest {
                 .build();
         processInstanceMapper.insert(instance);
         return instance.getId();
+    }
+
+    /**
+     * 落库一条最小化的审批申请种子行，返回其自增主键 id（供流程实例的 {@code business_id}
+     * 关联使用），用于验证已办查询携带的 {@code operationType} 与本行的
+     * {@code operation_type} 一致（approval-history-detail-entry change tasks.md 7.1）。
+     */
+    private Long insertApprovalRequest(String bizType, String operationType) {
+        LocalDateTime now = LocalDateTime.now();
+        ApprovalRequestEntity entity = ApprovalRequestEntity.builder()
+                .bizType(bizType)
+                .operationType(operationType)
+                .status(ApprovalRequestStatus.APPROVED)
+                .createBy("test")
+                .createTime(now)
+                .updateBy("test")
+                .updateTime(now)
+                .build();
+        approvalRequestMapper.insert(entity);
+        return entity.getId();
     }
 
     /**

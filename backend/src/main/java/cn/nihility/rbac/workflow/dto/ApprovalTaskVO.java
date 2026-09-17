@@ -72,4 +72,8 @@ public class ApprovalTaskVO {
     /** 已办查询专用：触发这条历史记录的那次审批操作填写的处理意见，未填写时为空，"我的
      *  待办"查询结果不携带该字段，恒为空。 */
     private String remark;
+
+    /** 已办查询专用：该记录关联申请的操作类型（CREATE/UPDATE/ENABLE/DISABLE/DELETE），"我的
+     *  待办"查询结果不携带该字段，恒为空。 */
+    private String operationType;
 }

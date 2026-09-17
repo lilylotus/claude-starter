@@ -7,6 +7,7 @@ import cn.nihility.rbac.approval.dto.ApprovalSubmitRequest;
 import cn.nihility.rbac.approval.dto.WriteOperationResultVO;
 import cn.nihility.rbac.approval.service.ApprovalRequestService;
 import cn.nihility.rbac.approval.service.ApprovalSwitchService;
+import cn.nihility.rbac.auth.context.CurrentUserContext;
 import cn.nihility.rbac.common.exception.BusinessException;
 import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.result.Result;
@@ -122,5 +123,30 @@ public class ApprovalRequestController {
             @RequestParam(required = false, defaultValue = "1") Integer page,
             @RequestParam(required = false, defaultValue = "10") Integer pageSize) {
         return approvalRequestService.pagePending(bizType, operationType, page, pageSize);
+    }
+
+    /**
+     * 查询单条申请详情。
+     *
+     * @param id 申请 id
+     * @return 申请详情
+     */
+    @Operation(summary = "查询单条申请详情",
+            description = "仅申请人本人、历史处理过该实例的人、当前任一开放任务的指定处理人或候选人可查看")
+    @GetMapping("/api/approval-requests/{id}")
+    public Result<ApprovalRequestVO> detail(
+            @Parameter(description = "申请 id", required = true) @PathVariable Long id) {
+        return Result.success(approvalRequestService.getDetail(id, requireCurrentUserId()));
+    }
+
+    /**
+     * 读取当前登录用户 id。
+     */
+    private Long requireCurrentUserId() {
+        Long userId = CurrentUserContext.getUserId();
+        if (userId == null) {
+            throw new BusinessException("当前用户未登录");
+        }
+        return userId;
     }
 }

@@ -37,6 +37,8 @@ import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
 import cn.nihility.rbac.org.dto.OrgCreateRequest;
 import cn.nihility.rbac.org.dto.OrgUpdateRequest;
 import cn.nihility.rbac.org.dto.OrgVO;
+import cn.nihility.rbac.org.entity.OrgEntity;
+import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.org.service.OrgService;
 import cn.nihility.rbac.user.dto.PositionCreateRequest;
 import cn.nihility.rbac.user.dto.PositionUpdateRequest;
@@ -127,6 +129,9 @@ class ApprovalRequestServiceImplTest {
     private UserPositionMapper userPositionMapper;
 
     @Mock
+    private OrgMapper orgMapper;
+
+    @Mock
     private OrgService orgService;
 
     @Mock
@@ -208,6 +213,7 @@ class ApprovalRequestServiceImplTest {
                 approvalRecordMapper,
                 taskAuthorizationService,
                 userPositionMapper,
+                orgMapper,
                 masterDataOperationExecutor,
                 validator,
                 userDisplayService,
@@ -763,6 +769,158 @@ class ApprovalRequestServiceImplTest {
     }
 
     /**
+     * ENABLE/DISABLE/DELETE 三类操作查询结果应同样携带目标记录当前值，供前端解析出可展示的
+     * 审批对象名称（approval-target-display-name change design.md Decision 1）。
+     *
+     * @param operationType 操作类型
+     */
+    @ParameterizedTest(name = "pageMine-{0}-includesTargetSnapshot")
+    @MethodSource("targetSnapshotOperationTypes")
+    void pageMine_shouldIncludeCurrentTargetSnapshot_forEnableDisableDeleteRequest(String operationType) {
+        ApprovalRequestEntity entity = ApprovalRequestEntity.builder()
+                .id(10L)
+                .bizType(FormFieldBizType.APP)
+                .operationType(operationType)
+                .targetId(99L)
+                .status(ApprovalRequestStatus.PENDING)
+                .createBy("1")
+                .createTime(LocalDateTime.now())
+                .build();
+        Page<ApprovalRequestEntity> resultPage = new Page<>(1, 10, 1L);
+        resultPage.setRecords(java.util.List.of(entity));
+        AppVO current = AppVO.builder().id(99L).name("当前名称").orgId(100L).build();
+        when(mapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(resultPage);
+        when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
+        when(appService.getById(99L)).thenReturn(current);
+
+        PageResult<ApprovalRequestVO> result =
+                service.pageMine(FormFieldBizType.APP, operationType, null, 1, 10);
+
+        assertThat(result.getRecords()).hasSize(1);
+        assertThat(result.getRecords().get(0).getTargetSnapshot()).isSameAs(current);
+    }
+
+    /**
+     * DELETE 申请审批通过、目标记录已被物理删除后再次查询该申请，接口应正常返回且
+     * {@code targetSnapshot} 为空，不抛异常（{@code getCurrentTarget()} 既有的"捕获异常返回
+     * {@code null}"兜底在放宽后依旧生效，approval-target-display-name change tasks.md 2.2）。
+     */
+    @Test
+    void pageMine_shouldReturnEmptySnapshot_whenDeleteTargetAlreadyRemoved() {
+        ApprovalRequestEntity entity = ApprovalRequestEntity.builder()
+                .id(10L)
+                .bizType(FormFieldBizType.APP)
+                .operationType(ApprovalOperationType.DELETE)
+                .targetId(99L)
+                .status(ApprovalRequestStatus.APPROVED)
+                .createBy("1")
+                .createTime(LocalDateTime.now())
+                .build();
+        Page<ApprovalRequestEntity> resultPage = new Page<>(1, 10, 1L);
+        resultPage.setRecords(java.util.List.of(entity));
+        when(mapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(resultPage);
+        when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
+        when(appService.getById(99L)).thenThrow(new BusinessException("应用不存在"));
+
+        PageResult<ApprovalRequestVO> result =
+                service.pageMine(FormFieldBizType.APP, ApprovalOperationType.DELETE, null, 1, 10);
+
+        assertThat(result.getRecords()).hasSize(1);
+        assertThat(result.getRecords().get(0).getTargetSnapshot()).isNull();
+    }
+
+    /**
+     * {@code bizType=USER} 的 CREATE 申请，{@code requestPayload.positions} 携带任职记录时，
+     * 查询结果中每条记录都应带上批量查出的组织名称（approval-target-display-name change
+     * tasks.md 2.4）。
+     */
+    @Test
+    void pageMine_shouldEnrichPositionOrgNames_forUserCreateRequest() {
+        UserPositionRequest position1 = new UserPositionRequest();
+        position1.setOrgId(100L);
+        position1.setPositionType("primary");
+        UserPositionRequest position2 = new UserPositionRequest();
+        position2.setOrgId(200L);
+        position2.setPositionType("secondary");
+        UserCreateRequest payload = new UserCreateRequest();
+        payload.setName("新用户");
+        payload.setCode("U002");
+        payload.setPositions(java.util.List.of(position1, position2));
+        ApprovalRequestEntity entity = ApprovalRequestEntity.builder()
+                .id(10L)
+                .bizType(FormFieldBizType.USER)
+                .operationType(ApprovalOperationType.CREATE)
+                .requestPayload(JacksonUtils.toJson(payload))
+                .status(ApprovalRequestStatus.PENDING)
+                .createBy("1")
+                .createTime(LocalDateTime.now())
+                .build();
+        Page<ApprovalRequestEntity> resultPage = new Page<>(1, 10, 1L);
+        resultPage.setRecords(java.util.List.of(entity));
+        when(mapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(resultPage);
+        when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
+        when(orgMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(
+                OrgEntity.builder().id(100L).name("组织甲").build(),
+                OrgEntity.builder().id(200L).name("组织乙").build()));
+
+        PageResult<ApprovalRequestVO> result =
+                service.pageMine(FormFieldBizType.USER, ApprovalOperationType.CREATE, null, 1, 10);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> returnedPayload = (Map<String, Object>) result.getRecords().get(0).getRequestPayload();
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> positions = (List<Map<String, Object>>) returnedPayload.get("positions");
+        assertThat(positions).hasSize(2);
+        assertThat(positions.get(0)).containsEntry("orgName", "组织甲");
+        assertThat(positions.get(1)).containsEntry("orgName", "组织乙");
+    }
+
+    /**
+     * {@code requestPayload.positions} 中某条记录的 {@code orgId} 指向一个不存在的组织时，
+     * 该条记录 {@code orgName} 应为空，其余记录不受影响，接口不报错（approval-target-display-name
+     * change tasks.md 2.5）。
+     */
+    @Test
+    void pageMine_shouldSkipOrgName_whenPositionOrgIdNotFound() {
+        UserPositionRequest position1 = new UserPositionRequest();
+        position1.setOrgId(100L);
+        position1.setPositionType("primary");
+        UserPositionRequest position2 = new UserPositionRequest();
+        position2.setOrgId(999L);
+        position2.setPositionType("secondary");
+        UserCreateRequest payload = new UserCreateRequest();
+        payload.setName("新用户");
+        payload.setCode("U003");
+        payload.setPositions(java.util.List.of(position1, position2));
+        ApprovalRequestEntity entity = ApprovalRequestEntity.builder()
+                .id(10L)
+                .bizType(FormFieldBizType.USER)
+                .operationType(ApprovalOperationType.CREATE)
+                .requestPayload(JacksonUtils.toJson(payload))
+                .status(ApprovalRequestStatus.PENDING)
+                .createBy("1")
+                .createTime(LocalDateTime.now())
+                .build();
+        Page<ApprovalRequestEntity> resultPage = new Page<>(1, 10, 1L);
+        resultPage.setRecords(java.util.List.of(entity));
+        when(mapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(resultPage);
+        when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
+        when(orgMapper.selectList(any(LambdaQueryWrapper.class)))
+                .thenReturn(List.of(OrgEntity.builder().id(100L).name("组织甲").build()));
+
+        PageResult<ApprovalRequestVO> result =
+                service.pageMine(FormFieldBizType.USER, ApprovalOperationType.CREATE, null, 1, 10);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> returnedPayload = (Map<String, Object>) result.getRecords().get(0).getRequestPayload();
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> positions = (List<Map<String, Object>>) returnedPayload.get("positions");
+        assertThat(positions).hasSize(2);
+        assertThat(positions.get(0)).containsEntry("orgName", "组织甲");
+        assertThat(positions.get(1)).doesNotContainKey("orgName");
+    }
+
+    /**
      * 查询结果应携带 {@code processInstanceId}，供前端据此查询流程实例详情
      * （add-approval-remark-and-process-flowchart change tasks.md 2.1，此前 {@code toVO}
      * 转换遗漏了该字段的暴露）。
@@ -828,6 +986,169 @@ class ApprovalRequestServiceImplTest {
         Map<String, Object> returnedPayload = (Map<String, Object>) result.getRecords().get(0).getRequestPayload();
         assertThat(returnedPayload).doesNotContainKey("ownerId");
         assertThat(returnedPayload).containsKey("name");
+    }
+
+    /**
+     * 申请人本人调用 {@code getDetail} 能正常查看自己提交的申请详情
+     * （approval-history-detail-entry change tasks.md 2.1）。
+     */
+    @Test
+    void getDetail_shouldReturnDetail_forApplicantSelf() {
+        ApprovalRequestEntity entity = buildPendingEntity();
+        when(mapper.selectById(10L)).thenReturn(entity);
+        when(processInstanceMapper.selectById(PROCESS_INSTANCE_ID)).thenReturn(ProcessInstanceEntity.builder()
+                .id(PROCESS_INSTANCE_ID).applicantId(1L).build());
+        when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of("1", "张三"));
+
+        ApprovalRequestVO vo = service.getDetail(10L, 1L);
+
+        assertThat(vo.getId()).isEqualTo(10L);
+        assertThat(vo.getCreateByName()).isEqualTo("张三");
+        verify(approvalRecordMapper, never()).selectList(any(LambdaQueryWrapper.class));
+    }
+
+    /**
+     * 历史处理过该申请关联流程实例的审批人（{@code ApprovalRecordEntity.operatorId} 命中）
+     * 能正常查看，即使当前不再是任何开放任务的候选人（approval-history-detail-entry change
+     * tasks.md 2.2）。
+     */
+    @Test
+    void getDetail_shouldReturnDetail_forHistoricalApprover() {
+        ApprovalRequestEntity entity = buildPendingEntity();
+        when(mapper.selectById(10L)).thenReturn(entity);
+        when(processInstanceMapper.selectById(PROCESS_INSTANCE_ID)).thenReturn(ProcessInstanceEntity.builder()
+                .id(PROCESS_INSTANCE_ID).applicantId(999L).build());
+        when(approvalRecordMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(
+                ApprovalRecordEntity.builder().processInstanceId(PROCESS_INSTANCE_ID).operatorId(77L).build()));
+        when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
+
+        ApprovalRequestVO vo = service.getDetail(10L, 77L);
+
+        assertThat(vo.getId()).isEqualTo(10L);
+    }
+
+    /**
+     * 当前所处审批节点的候选人（尚未处理，任务仍 {@code PENDING}/{@code CLAIMED}）能正常查看
+     * （approval-history-detail-entry change tasks.md 2.3）。
+     */
+    @Test
+    void getDetail_shouldReturnDetail_forCurrentOpenTaskCandidate() {
+        ApprovalRequestEntity entity = buildPendingEntity();
+        ApprovalTaskEntity openTask = ApprovalTaskEntity.builder()
+                .id(TASK_ID).processInstanceId(PROCESS_INSTANCE_ID).status(TaskStatus.PENDING).build();
+        when(mapper.selectById(10L)).thenReturn(entity);
+        when(processInstanceMapper.selectById(PROCESS_INSTANCE_ID)).thenReturn(ProcessInstanceEntity.builder()
+                .id(PROCESS_INSTANCE_ID).applicantId(999L).build());
+        when(approvalRecordMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
+        when(approvalTaskMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(openTask));
+        when(taskAuthorizationService.isAuthorized(openTask, 88L)).thenReturn(true);
+        when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
+
+        ApprovalRequestVO vo = service.getDetail(10L, 88L);
+
+        assertThat(vo.getId()).isEqualTo(10L);
+    }
+
+    /**
+     * 与申请无任何参与关系的用户调用接口被拒绝，返回无权限错误
+     * （approval-history-detail-entry change tasks.md 2.4）。
+     */
+    @Test
+    void getDetail_shouldReject_whenViewerHasNoParticipation() {
+        ApprovalRequestEntity entity = buildPendingEntity();
+        ApprovalTaskEntity openTask = ApprovalTaskEntity.builder()
+                .id(TASK_ID).processInstanceId(PROCESS_INSTANCE_ID).status(TaskStatus.PENDING).build();
+        when(mapper.selectById(10L)).thenReturn(entity);
+        when(processInstanceMapper.selectById(PROCESS_INSTANCE_ID)).thenReturn(ProcessInstanceEntity.builder()
+                .id(PROCESS_INSTANCE_ID).applicantId(999L).build());
+        when(approvalRecordMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
+        when(approvalTaskMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(openTask));
+        when(taskAuthorizationService.isAuthorized(openTask, 66L)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.getDetail(10L, 66L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权限");
+    }
+
+    /**
+     * {@code processInstanceId} 为空的申请，提交人和审批人能查看，其余用户被拒绝
+     * （approval-history-detail-entry change tasks.md 2.5）。
+     */
+    @Test
+    void getDetail_shouldFallbackToSubmitterOrApprover_whenProcessInstanceIdIsNull() {
+        ApprovalRequestEntity entity = ApprovalRequestEntity.builder()
+                .id(10L)
+                .bizType(FormFieldBizType.APP)
+                .operationType(ApprovalOperationType.CREATE)
+                .requestPayload(JacksonUtils.toJson(buildAppCreateRequest()))
+                .status(ApprovalRequestStatus.APPROVED)
+                .approverId(5L)
+                .createBy("1")
+                .createTime(LocalDateTime.now())
+                .build();
+        when(mapper.selectById(10L)).thenReturn(entity);
+        lenient().when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of());
+
+        assertThat(service.getDetail(10L, 1L).getId()).isEqualTo(10L);
+        assertThat(service.getDetail(10L, 5L).getId()).isEqualTo(10L);
+        assertThatThrownBy(() -> service.getDetail(10L, 99L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("无权限");
+        verify(processInstanceMapper, never()).selectById(any());
+    }
+
+    /**
+     * 查询一个不存在的 {@code id} 返回"申请不存在"错误，不是无权限错误
+     * （approval-history-detail-entry change tasks.md 2.6）。
+     */
+    @Test
+    void getDetail_shouldThrowNotFound_whenRequestDoesNotExist() {
+        when(mapper.selectById(999L)).thenReturn(null);
+
+        assertThatThrownBy(() -> service.getDetail(999L, 1L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("申请不存在");
+    }
+
+    /**
+     * 返回的 {@code ApprovalRequestVO} 内容（{@code requestPayload}/{@code targetSnapshot}/
+     * 审批对象名称等）与 {@code pageMine}/{@code pagePending} 对同一条记录返回的内容一致，
+     * 因为复用同一个 {@code toVO()}（approval-history-detail-entry change tasks.md 2.7）。
+     */
+    @Test
+    void getDetail_shouldReturnSameContentAsPageMine_forSameRecord() {
+        AppUpdateRequest payload = new AppUpdateRequest();
+        payload.setName("新名称");
+        payload.setOrgId(100L);
+        ApprovalRequestEntity entity = ApprovalRequestEntity.builder()
+                .id(10L)
+                .bizType(FormFieldBizType.APP)
+                .operationType(ApprovalOperationType.UPDATE)
+                .targetId(99L)
+                .requestPayload(JacksonUtils.toJson(payload))
+                .status(ApprovalRequestStatus.PENDING)
+                .approverId(5L)
+                .createBy("1")
+                .createTime(LocalDateTime.now())
+                .build();
+        AppVO current = AppVO.builder().id(99L).name("旧名称").orgId(100L).build();
+        when(mapper.selectById(10L)).thenReturn(entity);
+        lenient().when(userDisplayService.resolveDisplayNames(any())).thenReturn(Map.of("1", "张三", "5", "李四"));
+        lenient().when(appService.getById(99L)).thenReturn(current);
+        Page<ApprovalRequestEntity> resultPage = new Page<>(1, 10, 1L);
+        resultPage.setRecords(java.util.List.of(entity));
+        lenient().when(mapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(resultPage);
+
+        ApprovalRequestVO detailVO = service.getDetail(10L, 1L);
+        ApprovalRequestVO pageVO = service.pageMine(FormFieldBizType.APP, ApprovalOperationType.UPDATE, null, 1, 10)
+                .getRecords().get(0);
+
+        assertThat(detailVO.getRequestPayload()).isEqualTo(pageVO.getRequestPayload());
+        assertThat(detailVO.getTargetSnapshot()).isEqualTo(pageVO.getTargetSnapshot());
+        assertThat(detailVO.getApproverName()).isEqualTo(pageVO.getApproverName());
+        assertThat(detailVO.getCreateByName()).isEqualTo(pageVO.getCreateByName());
+        assertThat(detailVO.getBizType()).isEqualTo(pageVO.getBizType());
+        assertThat(detailVO.getOperationType()).isEqualTo(pageVO.getOperationType());
     }
 
     /** 为审批相关测试统一桩出"命中唯一开放任务 + 流程实例已到达最终已通过状态"。 */
@@ -1054,6 +1375,16 @@ class ApprovalRequestServiceImplTest {
                 FormFieldBizType.USER,
                 FormFieldBizType.POSITION,
                 FormFieldBizType.APP)
+                .map(Arguments::of);
+    }
+
+    /**
+     * 提供需要填充 {@code targetSnapshot} 的三类"targetId 非空但不携带 requestPayload"操作类型。
+     *
+     * @return 操作类型参数流
+     */
+    private static Stream<Arguments> targetSnapshotOperationTypes() {
+        return Stream.of(ApprovalOperationType.ENABLE, ApprovalOperationType.DISABLE, ApprovalOperationType.DELETE)
                 .map(Arguments::of);
     }
 }

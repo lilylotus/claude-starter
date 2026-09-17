@@ -356,10 +356,13 @@ export interface DoneApprovalTaskQuery {
   pageSize?: number
 }
 
-// 已办审批任务行，字段对应后端 cn.nihility.rbac.workflow.dto.ApprovalTaskVO；action/remark
-// 为该 change 新增字段，承载触发这条已办记录的那次审批动作（APPROVE/REJECT/RETURN/
-// TRANSFER/DELEGATE/ADD_SIGN，取值与 APPROVAL_RECORD_ACTION_LABEL 共用同一套映射）与当时
-// 填写的处理意见（可能为空）。
+// 已办审批任务行，字段对应后端 cn.nihility.rbac.workflow.dto.ApprovalTaskVO；action/remark/
+// operationType 均为"已办查询专用"字段（"我的待办"查询结果恒为空）：action/remark 承载
+// 触发这条已办记录的那次审批动作（APPROVE/REJECT/RETURN/TRANSFER/DELEGATE/ADD_SIGN，取值与
+// APPROVAL_RECORD_ACTION_LABEL 共用同一套映射）与当时填写的处理意见（可能为空）；
+// operationType 是该记录关联的 tab_approval_request.operation_type（新增/编辑/启用/停用/
+// 删除），取值与 APPROVAL_OPERATION_TYPE_OPTIONS（frontend/src/types/approval.ts）共用同一
+// 套映射，关联不到 tab_approval_request 记录时为空。
 export interface ApprovalTaskVO {
   id: number
   processInstanceId: number
@@ -377,6 +380,7 @@ export interface ApprovalTaskVO {
   finishedTime: string | null
   action: string | null
   remark: string | null
+  operationType: string | null
 }
 
 // 流程实例详情，字段对应后端 ProcessInstanceDetailVO。

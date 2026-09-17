@@ -37,6 +37,7 @@ public interface WorkflowConvert {
     @Mapping(target = "applicantName", ignore = true)
     @Mapping(target = "action", ignore = true)
     @Mapping(target = "remark", ignore = true)
+    @Mapping(target = "operationType", ignore = true)
     ApprovalTaskVO toTaskVO(ApprovalTaskEntity entity);
 
     /**

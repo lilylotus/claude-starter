@@ -28,9 +28,12 @@
          rec.action/rec.remark 两列，不属于 tab_wf_approval_task 表，不适合混入持久化实体；
          t.* 里其余不属于 ApprovalTaskVO 的列（如 flowableTaskId、candidateType 等）按
          mybatis.conf 的默认行为静默忽略，不影响结果（add-approval-history-menu change
-         design.md Decision 2）。 -->
+         design.md Decision 2）。LEFT JOIN tab_approval_request 取 operationType（用
+         LEFT 而非 INNER：万一该流程实例在 tab_approval_request 里找不到匹配行，这条已办
+         记录本身不应从列表里消失，只是 operationType 为空，approval-history-detail-entry
+         change design.md Decision 4）。 -->
     <select id="selectDonePage" resultType="cn.nihility.rbac.workflow.dto.ApprovalTaskVO">
-        SELECT t.*, rec.action AS action, rec.remark AS remark
+        SELECT t.*, rec.action AS action, rec.remark AS remark, ar.operation_type AS operationType
         FROM tab_wf_approval_task t
         INNER JOIN (
             SELECT r.task_id, MAX(r.id) AS max_id
@@ -43,6 +46,7 @@
         ) latest ON t.id = latest.task_id
         INNER JOIN tab_wf_approval_record rec ON rec.id = latest.max_id
         INNER JOIN tab_wf_process_instance p ON p.id = t.process_instance_id
+        LEFT JOIN tab_approval_request ar ON ar.id = p.business_id AND ar.biz_type = p.business_type
         <where>
             <if test="businessType != null">AND p.business_type = #{businessType}</if>
         </where>

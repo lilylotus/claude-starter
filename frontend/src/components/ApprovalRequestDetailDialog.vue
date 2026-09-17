@@ -10,6 +10,7 @@
 // 反复复用于不同 bizType 的申请行，不适合每次切换行都重新拉取/销毁对应 bizType 的元数据）。
 import { computed, onMounted, ref, watch } from 'vue'
 import { useDynamicFormFields } from '@/composables/useDynamicFormFields'
+import { resolveApprovalTargetLabel } from '@/utils/approvalTarget'
 import * as workflowApi from '@/api/workflow'
 import ProcessFlowChart from './processFlowChart/ProcessFlowChart.vue'
 import {
@@ -165,7 +166,9 @@ interface FieldDiffRow {
 // 决定是否渲染"旧值 -> 新值"对照，还是只展示新值）。USER 的 positions 是任职记录
 // 数组，字段含义按 POSITION bizType 的渲染元数据单独展开成结构化卡片（见
 // userPositions），不适合和其余标量字段一样走 JSON.stringify 兜底，这里排除掉，
-// 避免被渲染两次
+// 避免被渲染两次。新旧值都为空（都展示成 "-"）的字段不保留——两侧都没填写过的
+// 可选字段对用户没有信息量，过滤后 fieldRows 为空时复用既有的"暂无内容"提示
+// （approval-history-detail-entry change design.md Decision 6）。
 const fieldRows = computed<FieldDiffRow[]>(() => {
   const row = props.row
   if (!row) return []
@@ -174,15 +177,17 @@ const fieldRows = computed<FieldDiffRow[]>(() => {
   const keys = Array.from(new Set([...Object.keys(payload), ...Object.keys(snapshot)])).filter(
     (key) => !(row.bizType === 'USER' && key === 'positions'),
   )
-  return keys.map((key) => {
-    const item = schemaItemFor(row.bizType, key)
-    return {
-      key,
-      label: labelFor(row.bizType, key),
-      newValue: displayValue(row.bizType, item, payload[key]),
-      oldValue: row.targetSnapshot ? displayValue(row.bizType, item, snapshot[key]) : null,
-    }
-  })
+  return keys
+    .map((key) => {
+      const item = schemaItemFor(row.bizType, key)
+      return {
+        key,
+        label: labelFor(row.bizType, key),
+        newValue: displayValue(row.bizType, item, payload[key]),
+        oldValue: row.targetSnapshot ? displayValue(row.bizType, item, snapshot[key]) : null,
+      }
+    })
+    .filter((item) => item.newValue !== '-' || (item.oldValue !== null && item.oldValue !== '-'))
 })
 
 interface PositionFieldRow {
@@ -191,10 +196,10 @@ interface PositionFieldRow {
 }
 
 // 单条任职记录展开成"字段名: 值"列表，字段含义/字典翻译复用 POSITION bizType 的
-// 渲染元数据（与任职管理页面新增/编辑表单同一套元数据来源）；orgId 优先展示
-// targetSnapshot 里已经带的 orgName（组织名称），requestPayload 里的新增任职记录
-// 没有 orgName 只能展示 orgId 本身。ext1~ext10 内容为空时不占位展示，避免大多数
-// 未使用扩展字段的任职记录出现一长串空值
+// 渲染元数据（与任职管理页面新增/编辑表单同一套元数据来源）；orgId 优先展示 orgName
+// （组织名称）。新增任职记录的组织名称由后端 toVO() 批量注入，一般都能展示组织名称，
+// 只有该组织已被删除的情况下才会退化展示 orgId 原始数字。ext1~ext10 内容为空时不
+// 占位展示，避免大多数未使用扩展字段的任职记录出现一长串空值
 function positionFieldRows(position: Record<string, unknown>): PositionFieldRow[] {
   const rows: PositionFieldRow[] = []
   rows.push({
@@ -268,8 +273,7 @@ function statusTagType(status: number): 'warning' | 'success' | 'danger' | 'info
           <el-descriptions :column="2" border>
             <el-descriptions-item label="业务对象类型">{{ bizTypeLabel(row.bizType) }}</el-descriptions-item>
             <el-descriptions-item label="操作类型">{{ operationTypeLabel(row.operationType) }}</el-descriptions-item>
-            <el-descriptions-item label="目标记录ID">{{ row.targetId ?? '-' }}</el-descriptions-item>
-            <el-descriptions-item label="生效记录ID">{{ row.resultTargetId ?? '-' }}</el-descriptions-item>
+            <el-descriptions-item label="审批对象">{{ resolveApprovalTargetLabel(row) }}</el-descriptions-item>
             <el-descriptions-item label="申请状态">
               <el-tag :type="statusTagType(row.status)">{{ statusLabel(row.status) }}</el-tag>
             </el-descriptions-item>

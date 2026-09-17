@@ -15,6 +15,7 @@
 - 后端 `ApprovalRequestServiceImpl.toVO()` 补齐 ENABLE/DISABLE/DELETE 操作类型下的 `targetSnapshot` 填充（目前只有 UPDATE 会填充），使这三类操作也具备可供展示名称的数据来源。
 - 后端 `ApprovalRequestServiceImpl.toVO()` 在返回 `bizType=USER` 的 `requestPayload` 前，为其中 `positions` 数组里每条新增/变更任职记录按 `orgId` 批量查出组织名称并注入 `orgName` 字段（只读时计算注入，不修改数据库里存储的原始 `requestPayload` JSON），前端沿用既有的"优先展示 `orgName`，取不到才退化为 `orgId`"逻辑即可自动生效，不需要改前端渲染代码。
 - 不新增数据库字段、不改变 `targetId` 本身的存储与返回（仍然原样返回，只是前端不再把它当作主展示信息渲染），前端展示逻辑按 `bizType` 从 `requestPayload`/`targetSnapshot` 里取对应名称字段。
+- 申请详情弹窗移除"生效记录ID"（`resultTargetId`）展示项：有了"审批对象"这一更友好的展示，`resultTargetId` 这个数据库自增 id 对用户不再有查看价值，直接去掉，不保留占位。仅移除前端展示，不改变 `resultTargetId` 字段本身的存储、返回与业务语义（创建类审批通过后回填新记录 id 的逻辑不受影响）。
 
 ## Capabilities
 

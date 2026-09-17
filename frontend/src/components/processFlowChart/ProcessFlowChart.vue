@@ -8,14 +8,14 @@
 // - 下方按审批级别一级一级纵向展示列表，不再是可缩放拖拽的 Vue Flow 图形画布：层号计算见
 //   utils/processGraphLayout.ts（只算层号，不算像素坐标），v1/v2 流程统一走同一套分层。
 // - 节点按 status 三态区分：CURRENT（当前审批点）高亮突出，并展示处理人/候选审批人信息；
-//   PENDING（未到达）置灰、不可点击；COMPLETED（已完成）正常展示，点击可查看该节点关联的
-//   审批轨迹（谁、何时、什么意见），数据已经在 ProcessGraphNodeVO.records 里，不需要额外
-//   请求。
-import { computed, ref } from 'vue'
+//   PENDING（未到达）置灰；COMPLETED（已完成）直接内联展示该节点关联的完整审批轨迹（谁、
+//   何时、什么意见，会签节点可能有多条），数据同样来自 ProcessGraphNodeVO.records，不需要
+//   额外请求、不需要点击（approval-history-detail-entry change design.md Decision 5：
+//   原先点击节点弹窗查看的交互改为直接展示，省去多余的一次点击）。
+import { computed } from 'vue'
 import {
   APPROVAL_RECORD_ACTION_LABEL,
   PROCESS_INSTANCE_STATUS_LABEL,
-  type ApprovalRecordVO,
   type ConditionItemVO,
   type CurrentApproverVO,
   type ProcessGraphEdgeVO,
@@ -91,10 +91,6 @@ function statusClass(node: ProcessGraphNodeVO): string {
   return `is-${node.status.toLowerCase()}`
 }
 
-function isClickable(node: ProcessGraphNodeVO): boolean {
-  return node.status === 'COMPLETED' && (node.records ?? []).length > 0
-}
-
 // ---- 当前节点（CURRENT）处理人/候选审批人展示（design.md Decision 7 二次修订）：
 //      assigned=true 一条一行"处理人：xxx"；assigned=false 按 USER/ROLE 分别汇总成
 //      "候选审批人：xxx"，多个同类候选人用顿号连接展示在同一行，不做悬浮/点击交互。 ----
@@ -144,19 +140,6 @@ const summaryText = computed(() => {
   return `已结束（${PROCESS_INSTANCE_STATUS_LABEL[detail.status] ?? detail.status}）`
 })
 
-// ---- 点击已完成节点查看审批记录 ----
-
-const recordsDialogVisible = ref(false)
-const recordsDialogTitle = ref('')
-const recordsDialogRecords = ref<ApprovalRecordVO[]>([])
-
-function onNodeClick(node: ProcessGraphNodeVO) {
-  if (!isClickable(node)) return
-  recordsDialogTitle.value = `${nodeLabel(node)} · 审批记录`
-  recordsDialogRecords.value = node.records ?? []
-  recordsDialogVisible.value = true
-}
-
 function actionLabel(action: string): string {
   return APPROVAL_RECORD_ACTION_LABEL[action] ?? action
 }
@@ -176,13 +159,7 @@ function actionLabel(action: string): string {
           <span class="process-flow-chart__level-dot" />
           <div class="process-flow-chart__level-body">
             <div class="process-flow-chart__nodes">
-              <div
-                v-for="node in group.nodes"
-                :key="node.id"
-                class="process-flow-chart__node"
-                :class="[statusClass(node), { 'is-clickable': isClickable(node) }]"
-                @click="onNodeClick(node)"
-              >
+              <div v-for="node in group.nodes" :key="node.id" class="process-flow-chart__node" :class="statusClass(node)">
                 <div class="process-flow-chart__node-header">
                   <el-icon class="process-flow-chart__node-icon">
                     <component :is="PROCESS_GRAPH_NODE_TYPE_ICON[node.type]" />
@@ -202,7 +179,24 @@ function actionLabel(action: string): string {
                     暂无处理人/候选审批人信息
                   </p>
                 </div>
-                <span v-if="isClickable(node)" class="process-flow-chart__node-hint">点击查看审批记录</span>
+                <div v-if="node.status === 'COMPLETED'" class="process-flow-chart__node-records">
+                  <div v-for="record in node.records ?? []" :key="record.id" class="process-flow-chart__node-record">
+                    <div class="process-flow-chart__node-record-row">
+                      <span class="process-flow-chart__node-record-operator">
+                        {{ record.operatorName || record.operatorId || '—' }}
+                      </span>
+                      <el-tag size="small">{{ actionLabel(record.action) }}</el-tag>
+                    </div>
+                    <p class="process-flow-chart__node-record-time">{{ record.createTime }}</p>
+                    <p v-if="record.remark" class="process-flow-chart__node-record-remark">{{ record.remark }}</p>
+                    <p v-if="record.fromUserName || record.toUserName" class="process-flow-chart__node-record-transfer">
+                      {{ record.fromUserName || '—' }} → {{ record.toUserName || '—' }}
+                    </p>
+                  </div>
+                  <p v-if="(node.records ?? []).length === 0" class="process-flow-chart__node-record-empty">
+                    暂无处理记录
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -210,23 +204,6 @@ function actionLabel(action: string): string {
       </ol>
       <p v-else-if="!loading" class="process-flow-chart__empty">暂无流程图数据</p>
     </div>
-
-    <el-dialog v-model="recordsDialogVisible" :title="recordsDialogTitle" width="480px" append-to-body>
-      <ul class="process-flow-chart__records">
-        <li v-for="record in recordsDialogRecords" :key="record.id" class="process-flow-chart__record">
-          <div class="process-flow-chart__record-row">
-            <span class="process-flow-chart__record-operator">{{ record.operatorName || record.operatorId || '—' }}</span>
-            <el-tag size="small">{{ actionLabel(record.action) }}</el-tag>
-            <span class="process-flow-chart__record-time">{{ record.createTime }}</span>
-          </div>
-          <p v-if="record.remark" class="process-flow-chart__record-remark">{{ record.remark }}</p>
-          <p v-if="record.fromUserName || record.toUserName" class="process-flow-chart__record-transfer">
-            {{ record.fromUserName || '—' }} → {{ record.toUserName || '—' }}
-          </p>
-        </li>
-        <li v-if="recordsDialogRecords.length === 0" class="process-flow-chart__record-empty">暂无记录</li>
-      </ul>
-    </el-dialog>
   </div>
 </template>
 
@@ -333,14 +310,6 @@ function actionLabel(action: string): string {
     color: var(--color-text-tertiary);
     opacity: 0.75;
   }
-
-  &.is-clickable {
-    cursor: pointer;
-
-    &:hover {
-      box-shadow: var(--shadow-md);
-    }
-  }
 }
 
 .process-flow-chart__node-header {
@@ -402,65 +371,62 @@ function actionLabel(action: string): string {
   }
 }
 
-.process-flow-chart__node-hint {
-  font-size: 11px;
-  color: var(--color-text-tertiary);
-}
-
-.process-flow-chart__records {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.process-flow-chart__node-records {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--color-border-strong);
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  max-height: 360px;
-  overflow: auto;
+  gap: 6px;
 }
 
-.process-flow-chart__record {
-  border-bottom: 1px dashed var(--color-border);
-  padding-bottom: 8px;
+.process-flow-chart__node-record {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 
-  &:last-child {
-    border-bottom: none;
-    padding-bottom: 0;
+  & + & {
+    padding-top: 6px;
+    border-top: 1px dashed var(--color-border);
   }
 }
 
-.process-flow-chart__record-row {
+.process-flow-chart__node-record-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 13px;
+  gap: 6px;
+  font-size: 12px;
   color: var(--color-ink);
 }
 
-.process-flow-chart__record-operator {
+.process-flow-chart__node-record-operator {
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.process-flow-chart__record-time {
-  margin-left: auto;
+.process-flow-chart__node-record-time {
+  margin: 0;
   color: var(--color-text-tertiary);
-  font-size: 12px;
+  font-size: 11px;
 }
 
-.process-flow-chart__record-remark {
-  margin: 6px 0 0;
-  font-size: 13px;
+.process-flow-chart__node-record-remark {
+  margin: 0;
+  font-size: 12px;
   color: var(--color-text);
 }
 
-.process-flow-chart__record-transfer {
-  margin: 4px 0 0;
-  font-size: 12px;
+.process-flow-chart__node-record-transfer {
+  margin: 0;
+  font-size: 11px;
   color: var(--color-text-secondary);
 }
 
-.process-flow-chart__record-empty {
-  text-align: center;
+.process-flow-chart__node-record-empty {
+  margin: 0;
   color: var(--color-text-tertiary);
-  font-size: 13px;
+  font-size: 12px;
 }
 </style>

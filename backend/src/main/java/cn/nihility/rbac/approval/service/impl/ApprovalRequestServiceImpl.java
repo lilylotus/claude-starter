@@ -18,6 +18,8 @@ import cn.nihility.rbac.common.util.JacksonUtils;
 import cn.nihility.rbac.formfield.constant.FormFieldBizType;
 import cn.nihility.rbac.operationlog.constant.OperationLogResourceType;
 import cn.nihility.rbac.operationlog.service.OperationLogRecorder;
+import cn.nihility.rbac.org.entity.OrgEntity;
+import cn.nihility.rbac.org.mapper.OrgMapper;
 import cn.nihility.rbac.user.constant.PositionStatus;
 import cn.nihility.rbac.user.entity.UserPositionEntity;
 import cn.nihility.rbac.user.mapper.UserPositionMapper;
@@ -75,6 +77,15 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
     /** 任职记录里表达"主职"的任职类型编码。 */
     private static final String PRIMARY_POSITION_TYPE = "primary";
 
+    /** 需要填充目标记录当前值（{@code targetSnapshot}）的操作类型集合：{@code targetId} 非空的
+     *  四类操作，CREATE 因 {@code targetId} 为空不适用，仍只从 {@code requestPayload} 取值
+     *  （approval-target-display-name change design.md Decision 1）。 */
+    private static final Set<String> TARGET_SNAPSHOT_OPERATION_TYPES = Set.of(
+            ApprovalOperationType.UPDATE,
+            ApprovalOperationType.ENABLE,
+            ApprovalOperationType.DISABLE,
+            ApprovalOperationType.DELETE);
+
     /** 提交后流程在 {@code start()} 内部同步跑到"已通过"终态（命中路径未经过任何审批节点）时
      *  使用的固定审批意见文案（fix-approval-zero-task-process-completion change design.md
      *  Decision 2）。 */
@@ -106,6 +117,10 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
 
     /** 用户任职记录数据访问接口，用于提交申请时解析发起人所属组织。 */
     private final UserPositionMapper userPositionMapper;
+
+    /** 组织机构数据访问接口，用于批量查询 {@code requestPayload.positions} 里任职记录所属
+     *  组织的名称，供前端展示（approval-target-display-name change design.md Decision 4）。 */
+    private final OrgMapper orgMapper;
 
     /** ORG/USER/POSITION/APP 主数据写操作的转换/管辖范围校验/执行公共组件，同步与异步执行路径
      *  共用（production-approval-lifecycle change tasks.md 7.3）。 */
@@ -496,6 +511,71 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
     }
 
     /**
+     * {@inheritDoc}
+     */
+    @Override
+    public ApprovalRequestVO getDetail(Long id, Long viewerId) {
+        ApprovalRequestEntity entity = approvalRequestMapper.selectById(id);
+        if (entity == null) {
+            throw new BusinessException("申请不存在");
+        }
+        requireViewer(entity, viewerId);
+
+        Set<String> userIdTexts = new HashSet<>();
+        if (entity.getApproverId() != null) {
+            userIdTexts.add(entity.getApproverId().toString());
+        }
+        if (StringUtils.hasText(entity.getCreateBy())) {
+            userIdTexts.add(entity.getCreateBy());
+        }
+        Map<String, String> displayNames = userDisplayService.resolveDisplayNames(userIdTexts);
+        return toVO(entity, displayNames);
+    }
+
+    /**
+     * 单条申请详情参与关系校验，判定口径与 {@link cn.nihility.rbac.workflow.service.impl
+     * .WorkflowTaskServiceImpl#requireViewer} 完全一致，但该方法为包内可见无法跨包直接复用，
+     * 此处按相同约定复刻（master-data-approval-workflow spec.md "管理页面的审批入口"
+     * Requirement）：{@code processInstanceId} 非空时，按"申请人本人 / 该实例审批轨迹中出现过
+     * 的操作人或转办来源人 / 当前任一开放任务的指定处理人或候选人"三选一放行；
+     * {@code processInstanceId} 为空（未走 Flowable 的简单审批场景）时，退化为"提交人本人 /
+     * 该申请记录的审批人本人"放行。都不满足时拒绝访问。
+     *
+     * @param entity   审批申请
+     * @param viewerId 当前查看者用户 id
+     */
+    private void requireViewer(ApprovalRequestEntity entity, Long viewerId) {
+        Long processInstanceId = entity.getProcessInstanceId();
+        if (processInstanceId == null) {
+            if (Objects.equals(entity.getCreateBy(), viewerId == null ? null : viewerId.toString())
+                    || Objects.equals(entity.getApproverId(), viewerId)) {
+                return;
+            }
+            throw new BusinessException("无权限查看该申请详情");
+        }
+
+        ProcessInstanceEntity instance = processInstanceMapper.selectById(processInstanceId);
+        if (instance != null && Objects.equals(instance.getApplicantId(), viewerId)) {
+            return;
+        }
+        List<ApprovalRecordEntity> records = approvalRecordMapper.selectList(new LambdaQueryWrapper<ApprovalRecordEntity>()
+                .eq(ApprovalRecordEntity::getProcessInstanceId, processInstanceId));
+        boolean historyInvolved = records.stream()
+                .anyMatch(record -> Objects.equals(record.getOperatorId(), viewerId)
+                        || Objects.equals(record.getFromUserId(), viewerId));
+        if (historyInvolved) {
+            return;
+        }
+        List<ApprovalTaskEntity> openTasks = findOpenTasks(processInstanceId);
+        boolean currentCandidate = openTasks.stream()
+                .anyMatch(task -> taskAuthorizationService.isAuthorized(task, viewerId));
+        if (currentCandidate) {
+            return;
+        }
+        throw new BusinessException("无权限查看该申请详情");
+    }
+
+    /**
      * 解析当前用户在通用审批引擎里命中的待处理任务，反查这些任务所属流程实例关联的
      * {@code tab_approval_request.id} 候选集合。命中判定复用
      * {@link TaskAuthorizationService#isAuthorized}，与引擎内部 {@code approve}/{@code reject}
@@ -576,6 +656,7 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
             Map<String, Object> payload = JacksonUtils.toObj(
                     entity.getRequestPayload(), JacksonUtils.MAP_OBJECT_TYPE_REFERENCE);
             removeHiddenFields(payload, entity.getProcessInstanceId());
+            enrichPositionOrgNames(entity.getBizType(), payload);
             vo.setRequestPayload(payload);
         }
         if (entity.getApproverId() != null) {
@@ -584,11 +665,56 @@ public class ApprovalRequestServiceImpl implements ApprovalRequestService {
         if (StringUtils.hasText(entity.getCreateBy())) {
             vo.setCreateByName(displayNames.getOrDefault(entity.getCreateBy(), "未知用户"));
         }
-        if (Objects.equals(entity.getOperationType(), ApprovalOperationType.UPDATE)) {
+        if (TARGET_SNAPSHOT_OPERATION_TYPES.contains(entity.getOperationType())) {
             vo.setTargetSnapshot(
                     masterDataOperationExecutor.getCurrentTarget(entity.getBizType(), entity.getTargetId()));
         }
         return vo;
+    }
+
+    /**
+     * 为 {@code bizType=USER} 申请的 {@code requestPayload.positions} 数组里每条任职记录
+     * 批量注入所属组织名称 {@code orgName}，只读时计算注入，不修改数据库存储的原始 JSON
+     * （approval-target-display-name change design.md Decision 4）。查不到的组织（已被删除）
+     * 保持不塞该键，前端沿用既有的"取不到 orgName 时展示 orgId 原始数字"兜底。
+     *
+     * @param bizType 业务对象类型
+     * @param payload 已反序列化的请求体，就地修改
+     */
+    @SuppressWarnings("unchecked")
+    private void enrichPositionOrgNames(String bizType, Map<String, Object> payload) {
+        if (!Objects.equals(bizType, FormFieldBizType.USER) || payload == null) {
+            return;
+        }
+        Object positionsValue = payload.get("positions");
+        if (!(positionsValue instanceof List<?> positions) || positions.isEmpty()) {
+            return;
+        }
+        List<Map<String, Object>> positionRows = positions.stream()
+                .filter(Map.class::isInstance)
+                .map(row -> (Map<String, Object>) row)
+                .toList();
+        Set<Long> orgIds = positionRows.stream()
+                .map(row -> row.get("orgId"))
+                .filter(Objects::nonNull)
+                .map(orgId -> ((Number) orgId).longValue())
+                .collect(Collectors.toCollection(HashSet::new));
+        if (orgIds.isEmpty()) {
+            return;
+        }
+        Map<Long, String> orgNameMap = orgMapper
+                .selectList(new LambdaQueryWrapper<OrgEntity>().in(OrgEntity::getId, orgIds)).stream()
+                .collect(Collectors.toMap(OrgEntity::getId, OrgEntity::getName, (left, right) -> left));
+        positionRows.forEach(row -> {
+            Object orgId = row.get("orgId");
+            if (orgId == null) {
+                return;
+            }
+            String orgName = orgNameMap.get(((Number) orgId).longValue());
+            if (orgName != null) {
+                row.put("orgName", orgName);
+            }
+        });
     }
 
     /**
