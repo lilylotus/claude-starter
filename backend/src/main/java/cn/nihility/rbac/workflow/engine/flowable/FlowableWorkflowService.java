@@ -1,5 +1,6 @@
 package cn.nihility.rbac.workflow.engine.flowable;
 
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.util.JacksonUtils;
 import cn.nihility.rbac.workflow.constant.ApprovalAction;
 import cn.nihility.rbac.workflow.constant.ApprovalMode;
@@ -989,7 +990,7 @@ public class FlowableWorkflowService implements WorkflowService {
      * {@inheritDoc}
      */
     @Override
-    public List<ApprovalTaskVO> findDoneTasks(Long userId, TaskQuery query) {
+    public PageResult<ApprovalTaskVO> findDoneTasks(Long userId, TaskQuery query) {
         return workflowTaskService.findDoneTasks(userId, query);
     }
 

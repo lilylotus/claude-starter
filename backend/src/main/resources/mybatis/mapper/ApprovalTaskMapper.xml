@@ -23,9 +23,14 @@
     <!-- 已办分页："每组最新一条记录"用自关联子查询 GROUP BY MAX(id) 实现（仓库约定禁止
          MySQL 8.0+ 窗口函数，目标库 5.7）：先在子查询里按 operatorId + actions 过滤出
          每个 taskId 命中的最新一条审批轨迹 id，再关联出该轨迹行与对应任务行；业务对象类型
-         过滤、排序（按轨迹发生时间 create_time DESC, id DESC）、分页均在外层完成。 -->
-    <select id="selectDonePage" resultType="cn.nihility.rbac.workflow.entity.ApprovalTaskEntity">
-        SELECT t.*
+         过滤、排序（按轨迹发生时间 create_time DESC, id DESC）、分页均在外层完成。
+         resultType 直接用 ApprovalTaskVO（而非 ApprovalTaskEntity）：这条查询额外选出了
+         rec.action/rec.remark 两列，不属于 tab_wf_approval_task 表，不适合混入持久化实体；
+         t.* 里其余不属于 ApprovalTaskVO 的列（如 flowableTaskId、candidateType 等）按
+         mybatis.conf 的默认行为静默忽略，不影响结果（add-approval-history-menu change
+         design.md Decision 2）。 -->
+    <select id="selectDonePage" resultType="cn.nihility.rbac.workflow.dto.ApprovalTaskVO">
+        SELECT t.*, rec.action AS action, rec.remark AS remark
         FROM tab_wf_approval_task t
         INNER JOIN (
             SELECT r.task_id, MAX(r.id) AS max_id
@@ -43,6 +48,28 @@
         </where>
         ORDER BY rec.create_time DESC, rec.id DESC
         LIMIT #{offset}, #{limit}
+    </select>
+
+    <!-- 已办总条数：与 selectDonePage 保持完全一致的 JOIN/WHERE 结构，只是 SELECT COUNT(*)
+         且不带 ORDER BY/LIMIT，避免分页查询和总数查询过滤条件不小心写岔导致 total 与实际
+         返回条数对不上（design.md Decision 2）。 -->
+    <select id="selectDonePageCount" resultType="java.lang.Long">
+        SELECT COUNT(*)
+        FROM tab_wf_approval_task t
+        INNER JOIN (
+            SELECT r.task_id, MAX(r.id) AS max_id
+            FROM tab_wf_approval_record r
+            WHERE r.operator_id = #{operatorId}
+            AND r.task_id IS NOT NULL
+            AND r.action IN
+            <foreach collection="actions" item="action" open="(" separator="," close=")">#{action}</foreach>
+            GROUP BY r.task_id
+        ) latest ON t.id = latest.task_id
+        INNER JOIN tab_wf_approval_record rec ON rec.id = latest.max_id
+        INNER JOIN tab_wf_process_instance p ON p.id = t.process_instance_id
+        <where>
+            <if test="businessType != null">AND p.business_type = #{businessType}</if>
+        </where>
     </select>
 
 </mapper>

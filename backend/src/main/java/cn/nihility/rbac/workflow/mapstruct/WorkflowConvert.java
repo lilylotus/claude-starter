@@ -21,7 +21,10 @@ public interface WorkflowConvert {
     WorkflowConvert INSTANCE = Mappers.getMapper(WorkflowConvert.class);
 
     /**
-     * 转换审批任务。
+     * 转换审批任务："我的待办"查询结果来自 {@code tab_wf_approval_task} 实体，不携带
+     * {@code action}/{@code remark}（那是已办查询专用字段，由 {@code selectDonePage} 直接
+     * 查出 {@link ApprovalTaskVO}，不经过本方法，见 add-approval-history-menu change
+     * design.md Decision 2）。
      *
      * @param entity 审批任务实体
      * @return 审批任务视图对象
@@ -32,6 +35,8 @@ public interface WorkflowConvert {
     @Mapping(target = "assigneeName", ignore = true)
     @Mapping(target = "applicantId", ignore = true)
     @Mapping(target = "applicantName", ignore = true)
+    @Mapping(target = "action", ignore = true)
+    @Mapping(target = "remark", ignore = true)
     ApprovalTaskVO toTaskVO(ApprovalTaskEntity entity);
 
     /**

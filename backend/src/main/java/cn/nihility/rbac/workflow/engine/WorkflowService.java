@@ -1,5 +1,6 @@
 package cn.nihility.rbac.workflow.engine;
 
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.workflow.dto.AddSignCommand;
 import cn.nihility.rbac.workflow.dto.ApproveCommand;
 import cn.nihility.rbac.workflow.dto.ApprovalTaskVO;
@@ -110,13 +111,15 @@ public interface WorkflowService {
     List<ApprovalTaskVO> findTodoTasks(Long userId, TaskQuery query);
 
     /**
-     * 查询指定用户的"我的已办"。
+     * 查询指定用户的"我的已办"，每条记录携带触发该记录的那次审批操作的
+     * {@code action}/{@code remark}（add-approval-history-menu change design.md
+     * Decision 1/2）。
      *
      * @param userId 用户 id
      * @param query  查询条件
-     * @return 已办任务列表
+     * @return 已办任务分页结果
      */
-    List<ApprovalTaskVO> findDoneTasks(Long userId, TaskQuery query);
+    PageResult<ApprovalTaskVO> findDoneTasks(Long userId, TaskQuery query);
 
     /**
      * 查询流程实例详情，含完整审批轨迹与完整节点/连线图。仅参与关系满足条件的用户可查看

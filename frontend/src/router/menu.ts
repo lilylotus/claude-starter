@@ -73,6 +73,9 @@ export const MENU_GROUPS: MenuGroup[] = [
       },
       { title: '待我审批', path: '/approval/pending', permissionKey: 'ApprovalManagement:request:approve' },
       { title: '审批设置', path: '/approval/settings', permissionKey: 'ApprovalManagement:switch:view' },
+      // 当前登录用户自己已经审批过（同意/拒绝/转办/委派/加签/退回）的历史记录列表，
+      // 对应后端新权限点 ApprovalManagement:record:view（add-approval-history-menu change）
+      { title: '审批历史', path: '/approval/history', permissionKey: 'ApprovalManagement:record:view' },
     ],
   },
   {

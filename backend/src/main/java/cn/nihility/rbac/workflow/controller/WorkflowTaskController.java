@@ -2,6 +2,7 @@ package cn.nihility.rbac.workflow.controller;
 
 import cn.nihility.rbac.auth.context.CurrentUserContext;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.common.result.Result;
 import cn.nihility.rbac.workflow.dto.AddSignCommand;
 import cn.nihility.rbac.workflow.dto.AddSignRequest;
@@ -71,19 +72,19 @@ public class WorkflowTaskController {
     }
 
     /**
-     * 查询我的已办。
+     * 查询我的已办，每条记录携带触发该记录的那次审批操作的处理动作与处理意见。
      *
      * @param businessType 业务对象类型过滤，可为空
      * @param page         页码
      * @param pageSize     每页大小
-     * @return 已办任务列表
+     * @return 已办任务分页结果
      */
-    @Operation(summary = "查询我的已办")
+    @Operation(summary = "查询我的已办", description = "分页结果携带总条数与每条记录的处理动作/处理意见")
     @GetMapping("/api/v1/workflow/tasks/done")
-    public Result<List<ApprovalTaskVO>> done(
-            @RequestParam(required = false) String businessType,
-            @RequestParam(required = false, defaultValue = "1") Integer page,
-            @RequestParam(required = false, defaultValue = "10") Integer pageSize) {
+    public Result<PageResult<ApprovalTaskVO>> done(
+            @Parameter(description = "业务对象类型过滤，可为空") @RequestParam(required = false) String businessType,
+            @Parameter(description = "页码，从 1 开始") @RequestParam(required = false, defaultValue = "1") Integer page,
+            @Parameter(description = "每页大小") @RequestParam(required = false, defaultValue = "10") Integer pageSize) {
         return Result.success(workflowService.findDoneTasks(requireCurrentUserId(),
                 new TaskQuery(businessType, page, pageSize)));
     }

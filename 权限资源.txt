@@ -250,6 +250,9 @@ ApprovalManagement（审批管理，见 openspec/changes/add-master-data-approva
 - ApprovalManagement:switch:view       审批设置页面访问（查看组织/用户/任职/应用四个业务
   对象类型的审批开关状态，/approval/settings）
 - ApprovalManagement:switch:edit       修改审批开关（切换指定业务对象类型是否启用审批流程）
+- ApprovalManagement:record:view       审批历史页面访问（查看当前登录用户自己已经审批过
+  的历史记录，/approval/history，见 openspec/changes/add-approval-history-menu），默认
+  随 Flyway 迁移授予 SUPER_ADMIN，其余角色按需手动勾选
 （组织/用户/任职/应用四个管理页面的新增/编辑/启用/停用/删除按钮权限点不变——审批流程接入
 后仍复用原有的 add/edit/enable/disable/delete 权限点，只是调用接口后是否立即生效改由
 对应 bizType 的审批开关状态决定，不需要新增/拆分按钮级权限点）

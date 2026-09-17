@@ -345,6 +345,40 @@ export interface ProcessGraphEdgeVO {
   conditionLogic: string | null
 }
 
+// ---- "审批历史"（已办任务）分页查询（add-approval-history-menu change design.md
+//      Decision 4）：对应后端 GET /api/v1/workflow/tasks/done，展示当前登录用户自己已经
+//      处理过（同意/拒绝/转办/委派/加签/退回）的历史记录。 ----
+
+// 已办审批任务查询参数，businessType/page/pageSize 均可选，对应后端 TaskQuery。
+export interface DoneApprovalTaskQuery {
+  businessType?: string
+  page?: number
+  pageSize?: number
+}
+
+// 已办审批任务行，字段对应后端 cn.nihility.rbac.workflow.dto.ApprovalTaskVO；action/remark
+// 为该 change 新增字段，承载触发这条已办记录的那次审批动作（APPROVE/REJECT/RETURN/
+// TRANSFER/DELEGATE/ADD_SIGN，取值与 APPROVAL_RECORD_ACTION_LABEL 共用同一套映射）与当时
+// 填写的处理意见（可能为空）。
+export interface ApprovalTaskVO {
+  id: number
+  processInstanceId: number
+  businessType: string
+  businessId: number | null
+  title: string | null
+  nodeId: string | null
+  nodeName: string | null
+  assigneeId: number | null
+  assigneeName: string | null
+  status: string
+  applicantId: number | null
+  applicantName: string | null
+  createTime: string
+  finishedTime: string | null
+  action: string | null
+  remark: string | null
+}
+
 // 流程实例详情，字段对应后端 ProcessInstanceDetailVO。
 export interface ProcessInstanceDetailVO {
   id: number

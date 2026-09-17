@@ -1,5 +1,6 @@
 package cn.nihility.rbac.workflow.mapper;
 
+import cn.nihility.rbac.workflow.dto.ApprovalTaskVO;
 import cn.nihility.rbac.workflow.entity.ApprovalTaskEntity;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import java.util.Collection;
@@ -39,19 +40,35 @@ public interface ApprovalTaskMapper extends BaseMapper<ApprovalTaskEntity> {
      * {@code actions} 的最新一条记录为准（同一任务可能存在多条不同动作的记录，如先委派后归还
      * 再完成，只取最新一条，语义与原内存实现的 {@code distinct(taskId)} 保持一致），按业务对象
      * 类型过滤，数据库层按记录发生时间 {@code create_time DESC, id DESC} 稳定排序后
-     * {@code LIMIT/OFFSET} 分页。
+     * {@code LIMIT/OFFSET} 分页；结果携带触发该条历史记录的那次审批操作的
+     * {@code action}/{@code remark}（add-approval-history-menu change design.md
+     * Decision 2）。
      *
      * @param operatorId   操作人（当前用户）id
      * @param actions      计入"已办"的动作类型集合
      * @param businessType 业务对象类型过滤，可为空表示不过滤
      * @param offset       偏移量
      * @param limit        每页大小
-     * @return 已排序、已分页、已去重的审批任务实体列表
+     * @return 已排序、已分页、已去重的审批任务视图对象列表（含 action/remark）
      */
-    List<ApprovalTaskEntity> selectDonePage(
+    List<ApprovalTaskVO> selectDonePage(
             @Param("operatorId") Long operatorId,
             @Param("actions") Collection<String> actions,
             @Param("businessType") String businessType,
             @Param("offset") int offset,
             @Param("limit") int limit);
+
+    /**
+     * 已办任务总条数查询：与 {@link #selectDonePage} 保持完全一致的 JOIN/WHERE 结构，供分页
+     * 响应的 {@code total} 使用，避免过滤条件与分页查询写岔导致两者对不上。
+     *
+     * @param operatorId   操作人（当前用户）id
+     * @param actions      计入"已办"的动作类型集合
+     * @param businessType 业务对象类型过滤，可为空表示不过滤
+     * @return 满足条件的已办任务总条数
+     */
+    Long selectDonePageCount(
+            @Param("operatorId") Long operatorId,
+            @Param("actions") Collection<String> actions,
+            @Param("businessType") String businessType);
 }

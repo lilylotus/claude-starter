@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.role.constant.RoleStatus;
 import cn.nihility.rbac.role.entity.RoleEntity;
 import cn.nihility.rbac.role.mapper.RoleMapper;
@@ -191,7 +192,8 @@ class WorkflowTaskServiceImplIntegrationTest {
 
     /**
      * 已办查询"每组最新一条记录"语义：同一任务存在多条不同动作的审批轨迹记录（如先委派后
-     * 又被记录一次转办）时，只取最新一条计入已办列表，不重复出现。
+     * 又被记录一次转办）时，只取最新一条计入已办列表，不重复出现，且携带的
+     * {@code action}/{@code remark} 对应最新一条记录本身，而不是更早那条。
      */
     @Test
     void findDoneTasks_shouldKeepOnlyLatestRecordPerTask() {
@@ -200,16 +202,21 @@ class WorkflowTaskServiceImplIntegrationTest {
         Long taskId = insertTask(processInstanceId, "node1", userId, TaskStatus.COMPLETED, LocalDateTime.now());
         LocalDateTime t1 = LocalDateTime.now().minusMinutes(5);
         LocalDateTime t2 = LocalDateTime.now().minusMinutes(1);
-        insertRecord(processInstanceId, taskId, userId, ApprovalAction.DELEGATE, t1);
-        insertRecord(processInstanceId, taskId, userId, ApprovalAction.APPROVE, t2);
+        insertRecord(processInstanceId, taskId, userId, ApprovalAction.DELEGATE, t1, null, "委派意见");
+        insertRecord(processInstanceId, taskId, userId, ApprovalAction.APPROVE, t2, null, "同意意见");
 
-        List<ApprovalTaskVO> done = workflowTaskService.findDoneTasks(userId, new TaskQuery(null, 1, 10));
+        PageResult<ApprovalTaskVO> done = workflowTaskService.findDoneTasks(userId, new TaskQuery(null, 1, 10));
 
-        assertThat(done).extracting(ApprovalTaskVO::getId).containsExactly(taskId);
+        assertThat(done.getTotal()).isEqualTo(1L);
+        assertThat(done.getRecords()).extracting(ApprovalTaskVO::getId).containsExactly(taskId);
+        ApprovalTaskVO record = done.getRecords().get(0);
+        assertThat(record.getAction()).isEqualTo(ApprovalAction.APPROVE);
+        assertThat(record.getRemark()).isEqualTo("同意意见");
     }
 
     /**
-     * 已办分页应按最新一条命中轨迹的发生时间降序稳定排序、无重复，且分页边界正确。
+     * 已办分页应按最新一条命中轨迹的发生时间降序稳定排序、无重复，分页边界正确，且总条数
+     * {@code total} 与真实满足条件的记录数一致（跨页验证，不受当页 {@code limit} 影响）。
      */
     @Test
     void findDoneTasks_shouldSortByLatestRecordTime_andPaginateFromDatabase() {
@@ -230,11 +237,48 @@ class WorkflowTaskServiceImplIntegrationTest {
         Long task3 = insertTask(processInstanceId, "node1", userId, TaskStatus.COMPLETED, base);
         insertRecord(processInstanceId, task3, userId, ApprovalAction.REJECT, base.plusMinutes(5));
 
-        List<ApprovalTaskVO> firstPage = workflowTaskService.findDoneTasks(userId, new TaskQuery(null, 1, 2));
-        assertThat(firstPage).extracting(ApprovalTaskVO::getId).containsExactly(task2, task1);
+        PageResult<ApprovalTaskVO> firstPage = workflowTaskService.findDoneTasks(userId, new TaskQuery(null, 1, 2));
+        assertThat(firstPage.getTotal()).isEqualTo(3L);
+        assertThat(firstPage.getRecords()).extracting(ApprovalTaskVO::getId).containsExactly(task2, task1);
 
-        List<ApprovalTaskVO> secondPage = workflowTaskService.findDoneTasks(userId, new TaskQuery(null, 2, 2));
-        assertThat(secondPage).extracting(ApprovalTaskVO::getId).containsExactly(task3);
+        PageResult<ApprovalTaskVO> secondPage = workflowTaskService.findDoneTasks(userId, new TaskQuery(null, 2, 2));
+        assertThat(secondPage.getTotal()).isEqualTo(3L);
+        assertThat(secondPage.getRecords()).extracting(ApprovalTaskVO::getId).containsExactly(task3);
+    }
+
+    /**
+     * 已办查询按业务对象类型过滤应下推到 SQL 层（分页与总条数查询均需保持过滤条件一致）：
+     * 候选任务跨多个流程实例时，只返回命中 {@code businessType} 的那些，{@code total} 也
+     * 只统计命中的部分。
+     */
+    @Test
+    void findDoneTasks_shouldFilterByBusinessType_inDatabase() {
+        Long userId = SEQ.incrementAndGet();
+        Long instanceA = insertProcessInstance("TEST_DONE_A", userId);
+        Long instanceB = insertProcessInstance("TEST_DONE_B", userId);
+        Long taskA = insertTask(instanceA, "node1", userId, TaskStatus.COMPLETED, LocalDateTime.now());
+        Long taskB = insertTask(instanceB, "node1", userId, TaskStatus.COMPLETED, LocalDateTime.now());
+        insertRecord(instanceA, taskA, userId, ApprovalAction.APPROVE, LocalDateTime.now());
+        insertRecord(instanceB, taskB, userId, ApprovalAction.APPROVE, LocalDateTime.now());
+
+        PageResult<ApprovalTaskVO> filtered = workflowTaskService.findDoneTasks(userId, new TaskQuery("TEST_DONE_A", 1, 10));
+
+        assertThat(filtered.getTotal()).isEqualTo(1L);
+        assertThat(filtered.getRecords()).extracting(ApprovalTaskVO::getId).containsExactly(taskA);
+    }
+
+    /**
+     * 当前用户没有任何已办记录时应返回空分页对象（{@code records} 为空数组、{@code total}
+     * 为 0），而不是抛异常或返回 {@code null}。
+     */
+    @Test
+    void findDoneTasks_shouldReturnEmptyPage_whenNoRecords() {
+        Long userId = SEQ.incrementAndGet();
+
+        PageResult<ApprovalTaskVO> result = workflowTaskService.findDoneTasks(userId, new TaskQuery(null, 1, 10));
+
+        assertThat(result.getTotal()).isEqualTo(0L);
+        assertThat(result.getRecords()).isNotNull().isEmpty();
     }
 
     /**
@@ -685,12 +729,23 @@ class WorkflowTaskServiceImplIntegrationTest {
     private void insertRecord(
             Long processInstanceId, Long taskId, Long operatorId, String action, LocalDateTime createTime,
             String nodeId) {
+        insertRecord(processInstanceId, taskId, operatorId, action, createTime, nodeId, null);
+    }
+
+    /**
+     * 落库一条审批轨迹种子行，关联指定节点 id 与处理意见（用于验证已办查询携带的
+     * {@code action}/{@code remark} 正确对应触发该记录的那次审批操作）。
+     */
+    private void insertRecord(
+            Long processInstanceId, Long taskId, Long operatorId, String action, LocalDateTime createTime,
+            String nodeId, String remark) {
         ApprovalRecordEntity record = ApprovalRecordEntity.builder()
                 .processInstanceId(processInstanceId)
                 .taskId(taskId)
                 .nodeId(nodeId)
                 .operatorId(operatorId)
                 .action(action)
+                .remark(remark)
                 .createBy("test")
                 .createTime(createTime)
                 .updateBy("test")

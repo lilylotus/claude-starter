@@ -1,5 +1,7 @@
 import request from './request'
 import type {
+  ApprovalTaskVO,
+  DoneApprovalTaskQuery,
   ProcessDefinitionVersionVO,
   ProcessInstanceDetailVO,
   ProcessModelPageQuery,
@@ -7,6 +9,7 @@ import type {
   ProcessModelRow,
   PublishResultVO,
 } from '@/types/workflow'
+import type { PageResult } from '@/types/approval'
 
 // 流程设计器相关接口封装，组件/store 不直接调用 axios。
 // 五个生命周期接口的路径/请求响应结构均以后端
@@ -73,4 +76,11 @@ export function copyProcessModel(id: number, processCode: string, processName: s
 // 无权限时返回非 0 code，由 request.ts 拦截器统一提示并 reject。
 export function getProcessInstanceDetail(processInstanceId: number): Promise<ProcessInstanceDetailVO> {
   return request.get(`/v1/workflow/process-instances/${processInstanceId}`)
+}
+
+// "审批历史"页面：查询当前登录用户自己已经处理完成的审批任务分页列表，对应权限点
+// ApprovalManagement:record:view（add-approval-history-menu change design.md Decision 4）。
+// 与上面 getProcessInstanceDetail 一样挂在 /api/v1/workflow/... 前缀下。
+export function getDoneApprovalTasks(query: DoneApprovalTaskQuery): Promise<PageResult<ApprovalTaskVO>> {
+  return request.get('/v1/workflow/tasks/done', { params: query })
 }

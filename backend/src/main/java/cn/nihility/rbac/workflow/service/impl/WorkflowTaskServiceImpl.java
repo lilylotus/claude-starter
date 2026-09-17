@@ -29,6 +29,7 @@ import cn.nihility.rbac.workflow.mapper.ProcessInstanceMapper;
 import cn.nihility.rbac.workflow.mapstruct.WorkflowConvert;
 import cn.nihility.rbac.workflow.service.WorkflowTaskService;
 import cn.nihility.rbac.common.exception.BusinessException;
+import cn.nihility.rbac.common.result.PageResult;
 import cn.nihility.rbac.role.entity.RoleEntity;
 import cn.nihility.rbac.role.mapper.RoleMapper;
 import cn.nihility.rbac.user.service.UserDisplayService;
@@ -127,20 +128,19 @@ public class WorkflowTaskServiceImpl implements WorkflowTaskService {
         }
         List<ApprovalTaskEntity> tasks = approvalTaskMapper.selectTodoPage(
                 taskIds, query.businessType(), offset(query), query.effectivePageSize());
-        return buildTaskVOList(tasks);
+        return buildTaskVOList(WorkflowConvert.INSTANCE.toTaskVOList(tasks));
     }
 
     /**
      * {@inheritDoc}
      */
     @Override
-    public List<ApprovalTaskVO> findDoneTasks(Long userId, TaskQuery query) {
-        List<ApprovalTaskEntity> tasks = approvalTaskMapper.selectDonePage(
+    public PageResult<ApprovalTaskVO> findDoneTasks(Long userId, TaskQuery query) {
+        Long total = approvalTaskMapper.selectDonePageCount(userId, DONE_ACTIONS, query.businessType());
+        List<ApprovalTaskVO> baseVOs = approvalTaskMapper.selectDonePage(
                 userId, DONE_ACTIONS, query.businessType(), offset(query), query.effectivePageSize());
-        if (tasks.isEmpty()) {
-            return List.of();
-        }
-        return buildTaskVOList(tasks);
+        List<ApprovalTaskVO> records = baseVOs.isEmpty() ? List.of() : buildTaskVOList(baseVOs);
+        return new PageResult<>(records, total == null ? 0L : total, query.effectivePage(), query.effectivePageSize());
     }
 
     /**
@@ -411,11 +411,15 @@ public class WorkflowTaskServiceImpl implements WorkflowTaskService {
     /**
      * 组装任务视图列表：批量补齐流程实例信息与展示名。排序/过滤/分页已在
      * {@link ApprovalTaskMapper#selectTodoPage}/{@link ApprovalTaskMapper#selectDonePage} 的
-     * SQL 层完成，这里只做 VO 组装，不再重复过滤或排序，保持数据库返回的顺序。
+     * SQL 层完成，这里只做 VO 组装，不再重复过滤或排序，保持数据库返回的顺序。入参已经是
+     * {@link ApprovalTaskVO}（待办路径由 {@link WorkflowConvert#toTaskVOList} 转换而来，已办
+     * 路径由 {@link ApprovalTaskMapper#selectDonePage} 直接查出、已携带 action/remark），
+     * 本方法只原地补填 businessType/title/applicantName/assigneeName 等展示字段，不会覆盖
+     * action/remark（add-approval-history-menu change design.md Decision 2）。
      */
-    private List<ApprovalTaskVO> buildTaskVOList(List<ApprovalTaskEntity> tasks) {
+    private List<ApprovalTaskVO> buildTaskVOList(List<ApprovalTaskVO> tasks) {
         Set<Long> processInstanceIds = tasks.stream()
-                .map(ApprovalTaskEntity::getProcessInstanceId)
+                .map(ApprovalTaskVO::getProcessInstanceId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         Map<Long, ProcessInstanceEntity> instanceById = processInstanceIds.isEmpty()
@@ -424,7 +428,7 @@ public class WorkflowTaskServiceImpl implements WorkflowTaskService {
                         .collect(Collectors.toMap(ProcessInstanceEntity::getId, instance -> instance, (a, b) -> a));
 
         Map<String, String> displayNames = resolveDisplayNames(instanceById.values());
-        for (ApprovalTaskEntity task : tasks) {
+        for (ApprovalTaskVO task : tasks) {
             if (task.getAssigneeId() != null) {
                 displayNames.putIfAbsent(task.getAssigneeId().toString(),
                         userDisplayService.resolveDisplayNames(Set.of(task.getAssigneeId().toString()))
@@ -433,18 +437,18 @@ public class WorkflowTaskServiceImpl implements WorkflowTaskService {
         }
 
         return tasks.stream()
-                .map(task -> toVO(task, instanceById.get(task.getProcessInstanceId()), displayNames))
+                .map(task -> fillVO(task, instanceById.get(task.getProcessInstanceId()), displayNames))
                 .collect(Collectors.toList());
     }
 
     /**
-     * 转换为视图对象，补填流程实例相关的展示字段。
+     * 原地补填流程实例相关的展示字段，不改动 {@code action}/{@code remark} 等已在查询结果里
+     * 带出的字段。
      */
-    private ApprovalTaskVO toVO(
-            ApprovalTaskEntity task,
+    private ApprovalTaskVO fillVO(
+            ApprovalTaskVO vo,
             ProcessInstanceEntity instance,
             Map<String, String> displayNames) {
-        ApprovalTaskVO vo = WorkflowConvert.INSTANCE.toTaskVO(task);
         if (instance != null) {
             vo.setBusinessType(instance.getBusinessType());
             vo.setBusinessId(instance.getBusinessId());
@@ -454,8 +458,8 @@ public class WorkflowTaskServiceImpl implements WorkflowTaskService {
                 vo.setApplicantName(displayNames.get(instance.getApplicantId().toString()));
             }
         }
-        if (task.getAssigneeId() != null) {
-            vo.setAssigneeName(displayNames.get(task.getAssigneeId().toString()));
+        if (vo.getAssigneeId() != null) {
+            vo.setAssigneeName(displayNames.get(vo.getAssigneeId().toString()));
         }
         return vo;
     }

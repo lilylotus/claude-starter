@@ -43,6 +43,7 @@ const implementedComponents: Record<string, () => Promise<unknown>> = {
   '/approval/mine': () => import('@/views/approval/mine/MyApprovalRequestView.vue'),
   '/approval/pending': () => import('@/views/approval/pending/PendingApprovalRequestView.vue'),
   '/approval/settings': () => import('@/views/approval/settings/ApprovalSettingsView.vue'),
+  '/approval/history': () => import('@/views/approval/history/ApprovalHistoryView.vue'),
   '/chat': () => import('@/views/chat/ChatView.vue'),
   '/system/sensitive-words': () => import('@/views/chat/SensitiveWordManagementView.vue'),
   '/workflow/models': () => import('@/views/workflow/process-model/ProcessModelListView.vue'),
