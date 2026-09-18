@@ -4,7 +4,8 @@
 // （chat-messaging spec"聊天菜单与会话/消息界面"/"离线消息补偿推送"需求，tasks.md 6.6）。
 import { computed, nextTick, ref, watch } from 'vue'
 import { useChatStore, type LocalChatMessage } from '@/stores/chat'
-import { CONVERSATION_TYPE_GROUP } from '@/types/chat'
+import { CONVERSATION_TYPE_GROUP, CONVERSATION_TYPE_SINGLE } from '@/types/chat'
+import SecurityCodeDialog from './SecurityCodeDialog.vue'
 
 const emit = defineEmits<{
   showMembers: []
@@ -62,13 +63,33 @@ function isMine(message: LocalChatMessage): boolean {
 }
 
 const isGroup = computed(() => chatStore.currentConversation?.conversationType === CONVERSATION_TYPE_GROUP)
+const isSingle = computed(() => chatStore.currentConversation?.conversationType === CONVERSATION_TYPE_SINGLE)
 
-function send() {
+// 当前单聊对方是否存在"安全码已变更且用户尚未确认"的 TOFU 告警
+const trustWarningVisible = computed(
+  () => isSingle.value && chatStore.currentCounterpartUserId !== null && chatStore.trustWarnings[chatStore.currentCounterpartUserId] === true,
+)
+
+const securityCodeVisible = ref(false)
+
+function confirmTrustChange() {
+  const counterpartId = chatStore.currentCounterpartUserId
+  if (counterpartId === null) return
+  void chatStore.acknowledgeTrustChange(counterpartId)
+}
+
+async function send() {
   const content = inputContent.value.trim()
   const conversationId = chatStore.currentConversationId
   if (!content || conversationId === null) return
-  chatStore.sendToConversation(conversationId, content)
   inputContent.value = ''
+  await chatStore.sendToConversation(conversationId, content)
+}
+
+// 单聊消息气泡实际展示的文本：解密失败时用明确的占位提示，而不是空白/乱码
+function bubbleText(message: LocalChatMessage): string {
+  if (message.decryptState === 'failed') return '[消息无法解密]'
+  return message.content
 }
 
 // el-input 的 keydown 事件类型声明为 Event | KeyboardEvent（textarea 原生事件类型不够精确），
@@ -92,8 +113,24 @@ function retry(message: LocalChatMessage) {
     <template v-if="chatStore.currentConversation">
       <header class="message-panel__header">
         <h2 class="message-panel__title">{{ chatStore.currentConversation.name }}</h2>
-        <el-button v-if="isGroup" size="small" @click="emit('showMembers')">群成员</el-button>
+        <div class="message-panel__actions">
+          <el-button v-if="isSingle" size="small" @click="securityCodeVisible = true">查看安全码</el-button>
+          <el-button v-if="isGroup" size="small" @click="emit('showMembers')">群成员</el-button>
+        </div>
       </header>
+
+      <el-alert
+        v-if="trustWarningVisible"
+        class="message-panel__trust-alert"
+        type="warning"
+        show-icon
+        :closable="false"
+        title="对方安全码已变更，请重新核实身份后再继续聊天"
+      >
+        <template #default>
+          <el-button size="small" type="warning" plain @click="confirmTrustChange">我已核实，更新信任</el-button>
+        </template>
+      </el-alert>
 
       <div ref="scrollContainer" class="message-panel__body" @scroll="handleScroll">
         <div v-if="chatStore.loadingMoreConversationId === chatStore.currentConversationId" class="message-panel__loading-more">
@@ -107,7 +144,12 @@ function retry(message: LocalChatMessage) {
         >
           <div class="message-bubble">
             <div v-if="isGroup && !isMine(message)" class="message-bubble__sender">{{ message.senderName }}</div>
-            <div class="message-bubble__content">{{ message.content }}</div>
+            <div
+              class="message-bubble__content"
+              :class="{ 'message-bubble__content--failed': message.decryptState === 'failed' }"
+            >
+              {{ bubbleText(message) }}
+            </div>
             <div class="message-bubble__meta">
               <span>{{ message.sendTime }}</span>
               <span v-if="isMine(message) && message.status === 'sending'" class="message-bubble__status">发送中…</span>
@@ -133,6 +175,13 @@ function retry(message: LocalChatMessage) {
       </footer>
     </template>
     <el-empty v-else class="message-panel__placeholder" description="请选择左侧会话开始聊天" />
+
+    <security-code-dialog
+      v-if="isSingle"
+      v-model="securityCodeVisible"
+      :counterpart-user-id="chatStore.currentCounterpartUserId"
+      :counterpart-name="chatStore.currentConversation?.name ?? ''"
+    />
   </section>
 </template>
 
@@ -155,6 +204,22 @@ function retry(message: LocalChatMessage) {
   font-size: 15px;
   color: var(--color-ink);
   margin: 0;
+}
+
+.message-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.message-panel__trust-alert {
+  margin-bottom: 12px;
+
+  :deep(.el-alert__content) {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
 }
 
 .message-panel__body {
@@ -211,6 +276,11 @@ function retry(message: LocalChatMessage) {
   color: var(--color-text);
   white-space: pre-wrap;
   word-break: break-word;
+
+  &--failed {
+    color: var(--color-text-tertiary);
+    font-style: italic;
+  }
 }
 
 .message-bubble__meta {

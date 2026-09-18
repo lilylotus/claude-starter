@@ -160,9 +160,18 @@ export class ChatSocketClient {
   }
 
   // 发送单聊消息，返回本次使用的 msgId；重发失败消息时可显式传入原 msgId 复用
-  // （服务端按 msgId 幂等处理，见 chat-messaging spec"消息 ACK 确认与幂等重发"需求）
-  sendSingle(toUserId: number, content: string, msgType = 1, msgId: string = generateMsgId()): string {
-    const body = { msgId, toUserId, msgType, content }
+  // （服务端按 msgId 幂等处理，见 chat-messaging spec"消息 ACK 确认与幂等重发"需求）。
+  // content 由调用方（stores/chat.ts）在调用前完成本地加密，传入的已经是密文信封 JSON
+  // 字符串；senderIdentityKeyFingerprint 是发送方身份公钥指纹快照，服务端原样落库，
+  // 不在本文件做任何加解密相关处理（chat-end-to-end-encryption change design.md Decision 1）
+  sendSingle(
+    toUserId: number,
+    content: string,
+    msgType = 1,
+    msgId: string = generateMsgId(),
+    senderIdentityKeyFingerprint?: string,
+  ): string {
+    const body = { msgId, toUserId, msgType, content, senderIdentityKeyFingerprint }
     this.trackPending(msgId, ChatFrameType.CHAT_SINGLE, body)
     this.sendFrame(ChatFrameType.CHAT_SINGLE, body)
     return msgId

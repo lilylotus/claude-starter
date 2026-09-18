@@ -82,7 +82,8 @@ public class ChatBusinessHandler extends SimpleChannelInboundHandler<ChatFrame> 
         }
         try {
             SendMessageResult result = chatMessageService.sendSingleMessage(senderId, body.getToUserId(),
-                    body.getMsgId(), body.getMsgType(), body.getContent(), sessionRegistry::hasOnlineChannel);
+                    body.getMsgId(), body.getMsgType(), body.getContent(), body.getSenderIdentityKeyFingerprint(),
+                    sessionRegistry::hasOnlineChannel);
             afterSend(ctx, result);
         } catch (BusinessException e) {
             ctx.writeAndFlush(ChatFrame.of(ChatFrameType.ERROR,

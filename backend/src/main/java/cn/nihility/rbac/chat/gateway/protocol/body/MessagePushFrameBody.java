@@ -30,8 +30,12 @@ public class MessagePushFrameBody {
     /** 消息内容类型。 */
     private Integer msgType;
 
-    /** 消息内容（敏感词过滤/替换后的内容）。 */
+    /** 消息内容：群聊为敏感词过滤/替换后的明文；单聊为客户端生成的密文信封（需前端本地
+     *  解密）。 */
     private String content;
+
+    /** 单聊消息发送方身份公钥指纹快照，供接收端做安全码比对；群聊消息为空。 */
+    private String senderIdentityKeyFingerprint;
 
     /** 发送时间。 */
     private LocalDateTime sendTime;
@@ -54,6 +58,7 @@ public class MessagePushFrameBody {
         body.setSenderId(message.getSenderId());
         body.setMsgType(message.getMsgType());
         body.setContent(message.getContent());
+        body.setSenderIdentityKeyFingerprint(message.getSenderIdentityKeyFingerprint());
         body.setSendTime(message.getSendTime());
         body.setOffline(offline);
         return body;

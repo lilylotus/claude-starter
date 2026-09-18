@@ -52,8 +52,14 @@ export interface ChatMessageVO {
   senderId: number
   senderName: string
   msgType: number
+  // 群聊为明文；单聊为客户端生成的密文信封 JSON 字符串（chatCrypto.ChatCiphertextEnvelope
+  // 序列化结果），服务端只透传/落库，前端需在本地解密后展示（chat-end-to-end-encryption
+  // change design.md Decision 1）
   content: string
   filtered: boolean
+  // 单聊消息发送方身份公钥指纹快照；群聊消息/历史明文消息为空。前端据此判断本条消息是否
+  // 需要走解密路径，不依赖会话类型查表（对"本地尚未同步到的新会话"场景更健壮）
+  senderIdentityKeyFingerprint: string | null
   sendTime: string
 }
 
@@ -125,7 +131,10 @@ export interface ChatSingleFrameBody {
   msgId: string
   toUserId: number
   msgType: number
+  // 客户端生成的密文信封 JSON 字符串，服务端不解析（见 ChatMessageVO.content 注释）
   content: string
+  // 发送方身份公钥指纹快照，服务端原样落库供接收端做安全码比对
+  senderIdentityKeyFingerprint: string
 }
 
 // CHAT_GROUP 帧体（客户端 -> 服务端）
@@ -152,6 +161,8 @@ export interface MessagePushFrameBody {
   senderId: number
   msgType: number
   content: string
+  // 单聊消息发送方身份公钥指纹快照；群聊消息为空
+  senderIdentityKeyFingerprint: string | null
   sendTime: string
   offline: boolean
 }
@@ -161,4 +172,23 @@ export interface ErrorFrameBody {
   code: number
   message: string
   msgId: string | null
+}
+
+// ---- 聊天密钥目录（单聊端到端加密，chat-end-to-end-encryption change） ----
+
+// POST /api/v1/chat/keys/me 请求体
+export interface ChatKeyRegisterRequest {
+  // X25519 身份公钥，Base64 编码
+  identityPublicKey: string
+}
+
+// POST /api/v1/chat/keys/me、GET /api/v1/chat/keys/{userId} 响应
+export interface ChatUserKeyVO {
+  userId: number
+  identityPublicKey: string
+  // 服务端留痕用指纹（对 identityPublicKey 原始字符串做 SHA-256），仅供审计；客户端做
+  // 安全码比对/TOFU 判断必须使用自己对解码后公钥字节计算出的指纹
+  // （chatCrypto.computeFingerprint），不能直接信任这个字段
+  keyFingerprint: string
+  updateTime: string
 }

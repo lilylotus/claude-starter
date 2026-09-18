@@ -72,6 +72,9 @@ async function submit() {
     await chatStore.selectConversation(conversationId)
     emit('created', conversationId)
     close()
+  } catch {
+    // 对方尚未注册聊天身份公钥等错误已由 request.ts 响应拦截器/chatStore 内部统一
+    // ElMessage 提示，这里只需要保留弹窗让用户可以重新选择对象或取消，不重复弹提示
   } finally {
     submitting.value = false
   }

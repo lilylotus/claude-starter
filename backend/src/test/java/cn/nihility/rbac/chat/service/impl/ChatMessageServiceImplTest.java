@@ -29,6 +29,7 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -75,7 +76,7 @@ class ChatMessageServiceImplTest {
     /** 发送者不能是接收者本人。 */
     @Test
     void sendSingleMessage_shouldRejectSendingToSelf() {
-        assertThatThrownBy(() -> chatMessageService.sendSingleMessage(1L, 1L, "msg-1", 1, "hi", id -> true))
+        assertThatThrownBy(() -> chatMessageService.sendSingleMessage(1L, 1L, "msg-1", 1, "hi", null, id -> true))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("自己");
     }
@@ -86,7 +87,7 @@ class ChatMessageServiceImplTest {
         ChatMessageEntity existing = ChatMessageEntity.builder().id(100L).msgId("msg-1").build();
         when(chatMessageMapper.selectOne(any())).thenReturn(existing);
 
-        SendMessageResult result = chatMessageService.sendSingleMessage(1L, 2L, "msg-1", 1, "hi", id -> true);
+        SendMessageResult result = chatMessageService.sendSingleMessage(1L, 2L, "msg-1", 1, "hi", null, id -> true);
 
         assertThat(result.isDuplicate()).isTrue();
         assertThat(result.getMessage()).isSameAs(existing);
@@ -102,16 +103,16 @@ class ChatMessageServiceImplTest {
         when(conversationService.getOrCreateSingleConversation(1L, 2L))
                 .thenReturn(ConversationEntity.builder().id(10L).conversationType(ConversationType.SINGLE).build());
         when(conversationService.nextSeq(10L)).thenReturn(1L);
-        when(sensitiveWordFilterService.filter(anyString()))
-                .thenReturn(new AhoCorasickAutomaton.FilterResult("hi", false));
 
-        SendMessageResult result = chatMessageService.sendSingleMessage(1L, 2L, "msg-2", 1, "hi", id -> true);
+        SendMessageResult result = chatMessageService.sendSingleMessage(1L, 2L, "msg-2", 1, "cipher-envelope",
+                "fp-1", id -> true);
 
         assertThat(result.isDuplicate()).isFalse();
         assertThat(result.getRecipients()).hasSize(1);
         assertThat(result.getRecipients().get(0).online()).isTrue();
         verify(chatMessageOfflineMapper, never()).insert(any(ChatMessageOfflineEntity.class));
         verify(chatMessageMapper, times(1)).insert(any(ChatMessageEntity.class));
+        verify(sensitiveWordFilterService, never()).filter(anyString());
     }
 
     /** 接收方离线时应标记 online = false，并写入离线消息队列。 */
@@ -121,13 +122,33 @@ class ChatMessageServiceImplTest {
         when(conversationService.getOrCreateSingleConversation(1L, 2L))
                 .thenReturn(ConversationEntity.builder().id(10L).conversationType(ConversationType.SINGLE).build());
         when(conversationService.nextSeq(10L)).thenReturn(1L);
-        when(sensitiveWordFilterService.filter(anyString()))
-                .thenReturn(new AhoCorasickAutomaton.FilterResult("hi", false));
 
-        SendMessageResult result = chatMessageService.sendSingleMessage(1L, 2L, "msg-3", 1, "hi", id -> false);
+        SendMessageResult result = chatMessageService.sendSingleMessage(1L, 2L, "msg-3", 1, "cipher-envelope",
+                "fp-1", id -> false);
 
         assertThat(result.getRecipients().get(0).online()).isFalse();
         verify(chatMessageOfflineMapper, times(1)).insert(any(ChatMessageOfflineEntity.class));
+    }
+
+    /** 单聊消息端到端加密：不再触发服务端敏感词过滤，密文信封原样落库，filtered 恒为
+     *  false，且身份公钥指纹快照原样写入。 */
+    @Test
+    void sendSingleMessage_shouldSkipSensitiveWordFilterAndPersistCiphertextAsIs() {
+        when(chatMessageMapper.selectOne(any())).thenReturn(null);
+        when(conversationService.getOrCreateSingleConversation(1L, 2L))
+                .thenReturn(ConversationEntity.builder().id(10L).conversationType(ConversationType.SINGLE).build());
+        when(conversationService.nextSeq(10L)).thenReturn(1L);
+        String opaqueCiphertext = "{\"ciphertext\":\"AbCdEf==\",\"nonce\":\"Xyz123==\"}";
+
+        chatMessageService.sendSingleMessage(1L, 2L, "msg-6", 1, opaqueCiphertext, "fingerprint-abc", id -> true);
+
+        ArgumentCaptor<ChatMessageEntity> captor = ArgumentCaptor.forClass(ChatMessageEntity.class);
+        verify(chatMessageMapper, times(1)).insert(captor.capture());
+        ChatMessageEntity persisted = captor.getValue();
+        assertThat(persisted.getContent()).isEqualTo(opaqueCiphertext);
+        assertThat(persisted.getFiltered()).isFalse();
+        assertThat(persisted.getSenderIdentityKeyFingerprint()).isEqualTo("fingerprint-abc");
+        verify(sensitiveWordFilterService, never()).filter(anyString());
     }
 
     /** 非群成员发送群聊消息应被拒绝，不落库不投递。 */

@@ -4,7 +4,7 @@
 import { computed } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { usePermission } from '@/composables/usePermission'
-import { CONVERSATION_TYPE_GROUP, type ConversationVO } from '@/types/chat'
+import { CONVERSATION_TYPE_GROUP, CONVERSATION_TYPE_SINGLE, type ConversationVO } from '@/types/chat'
 
 const emit = defineEmits<{
   startSingleChat: []
@@ -15,8 +15,13 @@ const chatStore = useChatStore()
 const { hasPermission } = usePermission()
 const canCreateGroup = computed(() => hasPermission('Chat:conversation:create'))
 
+// 单聊会话摘要不展示服务端返回的原始内容——单聊生效后 lastMessageContent 承载的是密文
+// 信封 JSON 字符串，服务端也无法代为解密出摘要文本；本地对每条会话摘要做实时解密展示
+// 超出了本 change 明确的任务范围（tasks.md 6.1-6.4 只覆盖会话内的消息列表），这里改用
+// 统一占位文案，避免把一段乱码 JSON 展示给用户
 function summaryText(conversation: ConversationVO): string {
   if (!conversation.lastMessageContent) return '暂无消息'
+  if (conversation.conversationType === CONVERSATION_TYPE_SINGLE) return '[加密消息]'
   return conversation.lastMessageContent
 }
 

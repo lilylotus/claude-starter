@@ -4,10 +4,12 @@ import { useRouter, useRoute } from 'vue-router'
 import { User, Lock } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
+import { useChatStore } from '@/stores/chat'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+const chatStore = useChatStore()
 
 const formRef = ref<FormInstance>()
 const submitting = ref(false)
@@ -33,6 +35,13 @@ async function handleSubmit() {
       router.push({ name: 'change-password' })
       return
     }
+    // 登录成功（非首登强制改密场景）后解锁/生成本地聊天端到端加密身份密钥：用当次输入的
+    // 密码派生包裹密钥，只在浏览器内存里使用一次，不额外发送给服务端（design.md
+    // Decision 2，chat-end-to-end-encryption change tasks.md 5.1）。首登强制改密场景下
+    // 密码即将作废，这一步放到用户改密后下次正常登录时再做。
+    // 密钥初始化失败已在 chatStore 内部用 ElMessage 明确提示，这里不阻塞登录跳转，
+    // 单聊收发届时会因 keysUnlocked=false 提前失败并各自提示，不影响系统其余功能使用。
+    void chatStore.unlockOrGenerateIdentityKeys(form.username, form.password)
     const redirect = (route.query.redirect as string) || '/dashboard'
     router.push(redirect)
   } catch {

@@ -14,20 +14,23 @@ import java.util.function.Predicate;
 public interface ChatMessageService {
 
     /**
-     * 发送单聊消息：校验发送者不能是接收者本人 → msgId 幂等命中检查 → 敏感词过滤 →
-     * 会话内取号并落库 → 按 {@code onlineChecker} 判断接收方在线状态，离线则在同一事务内
-     * 写入离线消息队列。
+     * 发送单聊消息：校验发送者不能是接收者本人 → msgId 幂等命中检查 → 会话内取号并落库 →
+     * 按 {@code onlineChecker} 判断接收方在线状态，离线则在同一事务内写入离线消息队列。
+     * 单聊已端到端加密，{@code content} 是客户端生成的密文信封，服务端只做透传/落库，
+     * 不再执行敏感词过滤，{@code filtered} 恒为 {@code false}（chat-end-to-end-encryption
+     * change design.md Decision 1/5）。
      *
-     * @param senderId      发送者用户 id
-     * @param toUserId      接收者用户 id
-     * @param msgId         客户端生成的消息幂等 id
-     * @param msgType       消息内容类型
-     * @param content       原始消息内容（落库前会经过敏感词过滤）
-     * @param onlineChecker 判断指定用户当前是否存在在线连接的回调
+     * @param senderId                     发送者用户 id
+     * @param toUserId                     接收者用户 id
+     * @param msgId                        客户端生成的消息幂等 id
+     * @param msgType                      消息内容类型
+     * @param content                      消息内容（客户端生成的密文信封，服务端不解析）
+     * @param senderIdentityKeyFingerprint 发送方身份公钥指纹快照，原样落库，可为空
+     * @param onlineChecker                判断指定用户当前是否存在在线连接的回调
      * @return 发送处理结果
      */
     SendMessageResult sendSingleMessage(Long senderId, Long toUserId, String msgId, Integer msgType, String content,
-            Predicate<Long> onlineChecker);
+            String senderIdentityKeyFingerprint, Predicate<Long> onlineChecker);
 
     /**
      * 发送群聊消息：校验发送者是当前群成员 → msgId 幂等命中检查 → 敏感词过滤 → 会话内取号

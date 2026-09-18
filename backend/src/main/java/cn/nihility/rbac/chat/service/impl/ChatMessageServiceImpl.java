@@ -69,7 +69,7 @@ public class ChatMessageServiceImpl implements ChatMessageService {
     @Override
     @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
     public SendMessageResult sendSingleMessage(Long senderId, Long toUserId, String msgId, Integer msgType,
-            String content, Predicate<Long> onlineChecker) {
+            String content, String senderIdentityKeyFingerprint, Predicate<Long> onlineChecker) {
         if (Objects.equals(senderId, toUserId)) {
             throw new BusinessException(ChatErrorCode.INVALID_FRAME, "不能向自己发送单聊消息");
         }
@@ -81,7 +81,10 @@ public class ChatMessageServiceImpl implements ChatMessageService {
         ConversationEntity conversation = conversationService.getOrCreateSingleConversation(senderId, toUserId);
         ChatMessageEntity message;
         try {
-            message = insertMessage(conversation.getId(), senderId, msgId, msgType, content);
+            // 单聊已端到端加密，跳过敏感词过滤，content 为客户端生成的密文信封（design.md
+            // Decision 1/5），服务端只透传落库。
+            message = insertMessage(conversation.getId(), senderId, msgId, msgType, content,
+                    senderIdentityKeyFingerprint, true);
         } catch (DuplicateKeyException e) {
             return SendMessageResult.duplicate(findByMsgId(msgId).orElseThrow(() -> e));
         }
@@ -116,7 +119,8 @@ public class ChatMessageServiceImpl implements ChatMessageService {
 
         ChatMessageEntity message;
         try {
-            message = insertMessage(conversationId, senderId, msgId, msgType, content);
+            // 群聊消息保持服务端敏感词过滤，不携带身份公钥指纹（该字段仅单聊端到端加密使用）。
+            message = insertMessage(conversationId, senderId, msgId, msgType, content, null, false);
         } catch (DuplicateKeyException e) {
             return SendMessageResult.duplicate(findByMsgId(msgId).orElseThrow(() -> e));
         }
@@ -176,20 +180,36 @@ public class ChatMessageServiceImpl implements ChatMessageService {
     }
 
     /**
-     * 对消息内容做敏感词过滤、在同一事务内取会话级序号并落库。
+     * 在同一事务内取会话级序号并落库；群聊消息落库前经敏感词过滤，单聊消息已端到端加密，
+     * 服务端不可见明文，跳过过滤（{@code skipSensitiveWordFilter = true}，
+     * {@code filtered} 恒为 {@code false}，见 design.md Decision 5）。
      *
-     * @param conversationId 会话 id
-     * @param senderId       发送者用户 id
-     * @param msgId          客户端生成的消息幂等 id
-     * @param msgType        消息内容类型
-     * @param content        原始消息内容
+     * @param conversationId                会话 id
+     * @param senderId                      发送者用户 id
+     * @param msgId                         客户端生成的消息幂等 id
+     * @param msgType                       消息内容类型
+     * @param content                       原始消息内容（群聊为待过滤明文，单聊为密文信封）
+     * @param senderIdentityKeyFingerprint  单聊消息发送方身份公钥指纹快照，群聊消息传
+     *                                       {@code null}
+     * @param skipSensitiveWordFilter       是否跳过敏感词过滤（单聊传 {@code true}，
+     *                                       群聊传 {@code false}）
      * @return 落库后的消息实体
      * @throws DuplicateKeyException 并发场景下 {@code msgId} 唯一索引冲突，
      *                                调用方需捕获并按幂等处理（design.md Decision 6）
      */
     private ChatMessageEntity insertMessage(Long conversationId, Long senderId, String msgId, Integer msgType,
-            String content) {
-        AhoCorasickAutomaton.FilterResult filterResult = sensitiveWordFilterService.filter(content);
+            String content, String senderIdentityKeyFingerprint, boolean skipSensitiveWordFilter) {
+        String finalContent;
+        boolean filtered;
+        if (skipSensitiveWordFilter) {
+            finalContent = content;
+            filtered = false;
+        } else {
+            AhoCorasickAutomaton.FilterResult filterResult = sensitiveWordFilterService.filter(content);
+            finalContent = filterResult.content();
+            filtered = filterResult.hit();
+        }
+
         long seq = conversationService.nextSeq(conversationId);
         LocalDateTime now = LocalDateTime.now();
         String operator = Objects.toString(senderId, null);
@@ -199,8 +219,9 @@ public class ChatMessageServiceImpl implements ChatMessageService {
                 .conversationSeq(seq)
                 .senderId(senderId)
                 .msgType(msgType == null ? ChatMessageType.TEXT : msgType)
-                .content(filterResult.content())
-                .filtered(filterResult.hit())
+                .content(finalContent)
+                .filtered(filtered)
+                .senderIdentityKeyFingerprint(senderIdentityKeyFingerprint)
                 .sendTime(now)
                 .createBy(operator)
                 .createTime(now)

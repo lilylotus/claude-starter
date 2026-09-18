@@ -42,11 +42,16 @@ public class ChatMessageEntity {
     /** 消息内容类型，见 {@link cn.nihility.rbac.chat.constant.ChatMessageType}。 */
     private Integer msgType;
 
-    /** 消息内容（敏感词过滤/替换后落库，本阶段服务端可见明文）。 */
+    /** 消息内容：群聊为敏感词过滤/替换后落库的明文；单聊为客户端生成的密文信封（服务端
+     *  只做透传/落库，不解析、不做敏感词过滤，见 chat-end-to-end-encryption change
+     *  design.md Decision 1/5）。 */
     private String content;
 
-    /** 是否命中过敏感词。 */
+    /** 是否命中过敏感词，仅群聊消息有效；单聊消息恒为 {@code false}（不再执行服务端过滤）。 */
     private Boolean filtered;
+
+    /** 单聊消息发送方身份公钥指纹快照，历史明文消息与群聊消息为空。 */
+    private String senderIdentityKeyFingerprint;
 
     /** 发送时间。 */
     private LocalDateTime sendTime;
