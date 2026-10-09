@@ -27,13 +27,19 @@
 // - 公钥指纹：`crypto_generichash`（20 字节输出，128-bit 强度对指纹用途足够，展示时更短），
 //   按每 4 字节（8 个十六进制字符）分组，便于带外核对。
 
-// 注意：必须用 default import，不能用 `import * as sodium`。libsodium-wrappers 的
+// 注意：必须用 default import，不能用 `import * as sodium`。libsodium-wrappers-sumo 的
 // 各个 crypto_* 函数不是静态 ESM 具名导出，而是在 `sodium.ready` resolve 之后动态挂到
 // default 导出的那个对象上（WASM 初始化完成后才知道实际可用的符号列表），命名空间导入
 // 拿到的是构建时静态分析出的只读绑定视图，看不到运行时动态挂载的属性，会导致
 // `sodium.crypto_box_keypair` 等在实际调用时是 `undefined`（vite build 也会对此发出
 // "will always be undefined" 警告）。
-import sodium from 'libsodium-wrappers'
+//
+// 注意：必须用 sumo（全量）版本，不能用精简版 `libsodium-wrappers`。精简版剔除了
+// `crypto_pwhash`（Argon2id）这整族 API，本文件的 `wrapPrivateKey`/`unwrapPrivateKey`
+// 依赖它做口令派生；装精简版会导致两个函数在运行时拿到 `undefined` 的长度常量，调用
+// `randombytes_buf`/`crypto_pwhash` 时直接抛 `TypeError`（fix-chat-pwhash-dependency
+// change 实测确认，用 Node 直接验证精简版 `sodium.crypto_pwhash` 为 `undefined`）。
+import sodium from 'libsodium-wrappers-sumo'
 
 // 身份密钥对（X25519）：publicKey 用于注册到服务端密钥目录，privateKey 全程只保存在
 // 浏览器本地内存/IndexedDB（口令包裹后），不会以明文形式发送到任何地方。
