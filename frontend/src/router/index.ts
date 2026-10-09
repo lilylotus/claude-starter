@@ -48,6 +48,8 @@ const implementedComponents: Record<string, () => Promise<unknown>> = {
   '/system/sensitive-words': () => import('@/views/chat/SensitiveWordManagementView.vue'),
   '/workflow/models': () => import('@/views/workflow/process-model/ProcessModelListView.vue'),
   '/workflow/bindings': () => import('@/views/workflow/binding/ProcessBindingView.vue'),
+  '/common-service/images': () => import('@/views/image/ImageManagementView.vue'),
+  '/common-service/gallery': () => import('@/views/image/ImageGalleryView.vue'),
 }
 
 const menuRoutes = MENU_GROUPS.flatMap((group) =>

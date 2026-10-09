@@ -281,6 +281,13 @@ rbac:
     # 文件保存根目录，默认 upload；上传时目录不存在会自动创建。
     directory: upload
 
+  # 图片模块配置（add-image-gallery change design.md Decision 4），与 rbac.file-upload
+  # 各自独立、互不影响；全部为默认值，此处显式列出便于按需覆盖；目录路径为相对路径时相对于
+  # 应用当前工作目录解析。
+  image:
+    # 图片保存根目录，默认 images；上传时目录不存在会自动创建。
+    directory: images
+
   # 插件包升级相关配置（plugin-jar-upgrade change design.md Decision 1/5/6），全部为默认值，
   # 此处显式列出便于按需覆盖；插件目录路径为相对路径时相对于应用当前工作目录解析。
   plugin:

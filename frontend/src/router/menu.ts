@@ -1,4 +1,4 @@
-import { UserFilled, Grid, Lock, Setting, Document, Checked, Connection, ChatDotRound } from '@element-plus/icons-vue'
+import { UserFilled, Grid, Lock, Setting, Document, Checked, Connection, ChatDotRound, Picture } from '@element-plus/icons-vue'
 import type { MenuGroup } from '@/types/menu'
 
 // 侧边栏的四个一级菜单及其子菜单，供 Sidebar 渲染，也是 router 子路由的数据来源。
@@ -100,6 +100,17 @@ export const MENU_GROUPS: MenuGroup[] = [
     title: '聊天',
     icon: ChatDotRound,
     children: [{ title: '聊天', path: '/chat', permissionKey: 'Chat:conversation:view' }],
+  },
+  {
+    // 公共服务独立一级导航分组，对应后端 ImageManagement/ImageGallery 两个权限模块
+    // （见 openspec/changes/add-image-gallery），当前只有"图片管理"与"图片展示"两个页面
+    key: 'common-service',
+    title: '公共服务',
+    icon: Picture,
+    children: [
+      { title: '图片管理', path: '/common-service/images', permissionKey: 'ImageManagement:image:view' },
+      { title: '图片展示', path: '/common-service/gallery', permissionKey: 'ImageGallery:image:view' },
+    ],
   },
 ]
 
