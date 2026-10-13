@@ -159,6 +159,17 @@ AppAccessManagement（应用访问授权，/permission/app-access，见 openspec
 - AppAccessManagement:override:add       新增/编辑人工例外（手动授权或手动收回）
 - AppAccessManagement:override:delete    删除人工例外
 
+AbacManagement（ABAC 策略管理，/permission/abac-policy，见 openspec/changes/abac-policy-engine）
+- AbacManagement:policy:view     ABAC 策略管理页面访问（在现有 RBAC 权限点判定通过之后，
+  叠加一层基于用户属性 + 时间窗口的限制性 DENY-only 判定，命中策略即拒绝，未命中任意
+  策略的资源编码不受影响）
+- AbacManagement:policy:add      新增策略规则
+- AbacManagement:policy:edit     编辑策略规则
+- AbacManagement:policy:enable   启用策略规则
+- AbacManagement:policy:disable  停用策略规则
+- AbacManagement:policy:delete   删除策略规则（物理删除，级联清理目标资源编码/用户属性
+  条件/时间窗口条件）
+
 
 系统管理
 --------

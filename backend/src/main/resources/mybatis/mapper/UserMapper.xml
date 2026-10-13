@@ -125,6 +125,29 @@
         </choose>
     </select>
 
+    <!-- ABAC 用户属性条件单用户实时判定：column 只接受调用方（AbacUserAttrEvaluator）从
+         tab_metadata_field 目录解析得到、并经白名单校验（table_name='tab_user' 且列名
+         仅含字母数字下划线）的合法列名，不接受任意字符串拼接，避免 SQL 注入
+         （abac-policy-engine change design.md Decision 3）。同时排除已被逻辑删除的用户
+         （-1000 为 UserStatus.DELETED 的字面量）。 -->
+    <select id="countMatchingAttrCondition" resultType="int">
+        SELECT COUNT(*) FROM tab_user
+        WHERE id = #{userId}
+        AND status != -1000
+        <choose>
+            <when test="operator == 'EQ'">
+                AND ${column} = #{singleValue}
+            </when>
+            <when test="operator == 'NE'">
+                AND ${column} != #{singleValue}
+            </when>
+            <when test="operator == 'IN'">
+                AND ${column} IN
+                <foreach collection="values" item="v" open="(" separator="," close=")">#{v}</foreach>
+            </when>
+        </choose>
+    </select>
+
     <!-- 对账摘要接口游标式批量查询：按 id 升序、id > lastId 翻页（app-sync-changelog-pull
          change design.md Decision 10），不做 updateTime/ids/codes/mobile 过滤；组织范围
          过滤复用与 selectSyncPullPage 相同的"存在至少一条未删除任职落在范围内"子查询。 -->

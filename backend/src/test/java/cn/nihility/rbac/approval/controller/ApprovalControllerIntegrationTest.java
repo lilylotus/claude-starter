@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import cn.nihility.rbac.abac.service.AbacAuthorizationService;
 import cn.nihility.rbac.approval.dto.ApprovalSubmitRequest;
 import cn.nihility.rbac.approval.dto.ApprovalSwitchVO;
 import cn.nihility.rbac.approval.dto.WriteOperationResultVO;
@@ -67,6 +68,10 @@ class ApprovalControllerIntegrationTest {
     @Mock
     private AuthorizationService authorizationService;
 
+    /** ABAC 运行时限制判定服务。 */
+    @Mock
+    private AbacAuthorizationService abacAuthorizationService;
+
     /** MockMvc 测试客户端。 */
     private MockMvc mockMvc;
 
@@ -82,7 +87,8 @@ class ApprovalControllerIntegrationTest {
         IdentityAuthFilter authFilter = new IdentityAuthFilter(
                 tokenService,
                 passwordService,
-                authorizationService);
+                authorizationService,
+                abacAuthorizationService);
         mockMvc = MockMvcBuilders.standaloneSetup(requestController, switchController)
                 .addFilters(authFilter)
                 .build();

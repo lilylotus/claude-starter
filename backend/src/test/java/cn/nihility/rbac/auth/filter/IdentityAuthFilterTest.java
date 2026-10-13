@@ -6,6 +6,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import cn.nihility.rbac.abac.service.AbacAuthorizationService;
 import cn.nihility.rbac.auth.constant.AuthErrorCode;
 import cn.nihility.rbac.auth.context.CurrentUserContext;
 import cn.nihility.rbac.auth.service.AuthorizationService;
@@ -43,6 +44,10 @@ class IdentityAuthFilterTest {
     @Mock
     private AuthorizationService authorizationService;
 
+    /** 被测过滤器的 ABAC 运行时限制判定业务逻辑依赖，使用 Mockito 打桩。 */
+    @Mock
+    private AbacAuthorizationService abacAuthorizationService;
+
     /** 被测过滤器实例。 */
     private IdentityAuthFilter filter;
 
@@ -51,7 +56,7 @@ class IdentityAuthFilterTest {
      */
     @BeforeEach
     void setUp() {
-        filter = new IdentityAuthFilter(tokenService, passwordService, authorizationService);
+        filter = new IdentityAuthFilter(tokenService, passwordService, authorizationService, abacAuthorizationService);
         CurrentUserContext.clear();
     }
 
@@ -189,6 +194,7 @@ class IdentityAuthFilterTest {
         verify(filterChain).doFilter(request, response);
         verify(passwordService, never()).isFirstLogin(any());
         verify(authorizationService, never()).hasPermission(any(), any());
+        verify(abacAuthorizationService, never()).isDenied(any(), any());
     }
 
     /**
@@ -210,6 +216,91 @@ class IdentityAuthFilterTest {
         filter.doFilter(request, response, filterChain);
 
         verify(filterChain).doFilter(request, response);
+    }
+
+    /**
+     * RBAC 权限点判定不通过时，不应触发 ABAC 判定（abac-policy-engine spec.md "RBAC
+     * 判定不通过时不触发 ABAC 判定" Scenario）。
+     */
+    @Test
+    void doFilter_shouldNotTriggerAbacCheck_whenRbacPermissionDenied() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/users");
+        request.addHeader("identity-token", "valid-access-key");
+        request.addHeader("menu", "UserManagement:user:view");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain filterChain = org.mockito.Mockito.mock(FilterChain.class);
+        when(tokenService.verifyAccessKey("valid-access-key")).thenReturn(Optional.of(1L));
+        when(passwordService.isFirstLogin(1L)).thenReturn(false);
+        when(authorizationService.hasPermission(1L, "UserManagement:user:view")).thenReturn(false);
+
+        filter.doFilter(request, response, filterChain);
+
+        verify(filterChain, never()).doFilter(any(), any());
+        assertThat(response.getContentAsString()).contains("\"code\":" + AuthErrorCode.FORBIDDEN);
+        verify(abacAuthorizationService, never()).isDenied(any(), any());
+    }
+
+    /**
+     * RBAC 判定通过但 ABAC 判定命中策略应拒绝时，请求仍被拦截（abac-policy-engine
+     * spec.md "RBAC 判定通过但 ABAC 判定拒绝时请求仍被拦截" Scenario）。
+     */
+    @Test
+    void doFilter_shouldReturnForbidden_whenAbacDeniesAfterRbacPasses() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/users");
+        request.addHeader("identity-token", "valid-access-key");
+        request.addHeader("menu", "UserManagement:user:view");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain filterChain = org.mockito.Mockito.mock(FilterChain.class);
+        when(tokenService.verifyAccessKey("valid-access-key")).thenReturn(Optional.of(1L));
+        when(passwordService.isFirstLogin(1L)).thenReturn(false);
+        when(authorizationService.hasPermission(1L, "UserManagement:user:view")).thenReturn(true);
+        when(abacAuthorizationService.isDenied(1L, "UserManagement:user:view")).thenReturn(true);
+
+        filter.doFilter(request, response, filterChain);
+
+        verify(filterChain, never()).doFilter(any(), any());
+        assertThat(response.getContentAsString()).contains("\"code\":" + AuthErrorCode.FORBIDDEN);
+    }
+
+    /**
+     * RBAC 判定通过且 ABAC 不拒绝时，请求正常放行，行为与引入 ABAC 之前一致
+     * （abac-policy-engine spec.md "RBAC 判定通过且 ABAC 不拒绝时请求正常放行" Scenario）。
+     */
+    @Test
+    void doFilter_shouldPass_whenRbacPassesAndAbacDoesNotDeny() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/users");
+        request.addHeader("identity-token", "valid-access-key");
+        request.addHeader("menu", "UserManagement:user:view");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain filterChain = org.mockito.Mockito.mock(FilterChain.class);
+        when(tokenService.verifyAccessKey("valid-access-key")).thenReturn(Optional.of(1L));
+        when(passwordService.isFirstLogin(1L)).thenReturn(false);
+        when(authorizationService.hasPermission(1L, "UserManagement:user:view")).thenReturn(true);
+        when(abacAuthorizationService.isDenied(1L, "UserManagement:user:view")).thenReturn(false);
+
+        filter.doFilter(request, response, filterChain);
+
+        verify(filterChain).doFilter(request, response);
+    }
+
+    /**
+     * 豁免 RBAC 权限点校验的白名单路径（如首次登录强制改密接口）同样豁免本次追加的 ABAC
+     * 判定（abac-policy-engine spec.md "豁免 RBAC 权限点校验的请求同样豁免 ABAC 判定"
+     * Scenario）。
+     */
+    @Test
+    void doFilter_shouldNotTriggerAbacCheck_whenPathExemptFromRbac() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/auth/password");
+        request.addHeader("identity-token", "valid-access-key");
+        request.addHeader("menu", "Auth:password:change");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain filterChain = org.mockito.Mockito.mock(FilterChain.class);
+        when(tokenService.verifyAccessKey("valid-access-key")).thenReturn(Optional.of(1L));
+
+        filter.doFilter(request, response, filterChain);
+
+        verify(filterChain).doFilter(request, response);
+        verify(abacAuthorizationService, never()).isDenied(any(), any());
     }
 
     /**

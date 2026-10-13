@@ -32,6 +32,9 @@ export const MENU_GROUPS: MenuGroup[] = [
       { title: '权限点管理', path: '/permission/points', permissionKey: 'PermissionManagement:permission:view' },
       { title: '管理员管理', path: '/permission/admins', permissionKey: 'AdminManagement:admin:view' },
       { title: '应用访问授权', path: '/permission/app-access', permissionKey: 'AppAccessManagement:appAccess:view' },
+      // ABAC 策略管理：在 RBAC 权限点判定通过之后，按用户属性/时间窗口进一步收紧对指定
+      // 资源的访问，见 openspec/changes/abac-policy-engine
+      { title: 'ABAC 策略管理', path: '/permission/abac-policy', permissionKey: 'AbacManagement:policy:view' },
     ],
   },
   {

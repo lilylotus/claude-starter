@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import cn.nihility.rbac.abac.service.AbacAuthorizationService;
 import cn.nihility.rbac.auth.constant.AuthErrorCode;
 import cn.nihility.rbac.auth.filter.IdentityAuthFilter;
 import cn.nihility.rbac.auth.service.AuthorizationService;
@@ -55,12 +56,16 @@ class WorkflowProcessModelControllerIntegrationTest {
     @Mock
     private AuthorizationService authorizationService;
 
+    @Mock
+    private AbacAuthorizationService abacAuthorizationService;
+
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         WorkflowProcessModelController controller = new WorkflowProcessModelController(workflowProcessModelService);
-        IdentityAuthFilter authFilter = new IdentityAuthFilter(tokenService, passwordService, authorizationService);
+        IdentityAuthFilter authFilter = new IdentityAuthFilter(tokenService, passwordService, authorizationService,
+                abacAuthorizationService);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .addFilters(authFilter)

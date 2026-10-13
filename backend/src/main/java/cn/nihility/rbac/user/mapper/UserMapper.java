@@ -13,7 +13,8 @@ import org.apache.ibatis.annotations.Param;
 /**
  * 用户 MyBatis-Plus 数据访问接口，单表 CRUD 直接复用 {@link BaseMapper}，不在此处
  * 编写 SQL；{@link #countByColumnValue}、{@link #selectUserPage}、
- * {@link #selectSyncPullPage}、{@link #selectIdsByAttrCondition} 是例外，SQL 写在
+ * {@link #selectSyncPullPage}、{@link #selectIdsByAttrCondition}、
+ * {@link #countMatchingAttrCondition} 是例外，SQL 写在
  * {@code resources/mybatis/mapper/UserMapper.xml} 里。
  */
 @Mapper
@@ -104,6 +105,25 @@ public interface UserMapper extends VersionedBaseMapper<UserEntity> {
      */
     List<Long> selectIdsByAttrCondition(@Param("column") String column, @Param("operator") String operator,
             @Param("singleValue") String singleValue, @Param("values") List<String> values);
+
+    /**
+     * 判断单个未被逻辑删除的用户是否匹配给定的动态列名与运算符条件，供 ABAC 用户属性
+     * 条件的单用户实时判定使用（abac-policy-engine change design.md Decision 3，区别于
+     * {@link #selectIdsByAttrCondition} 的"哪些用户满足"批量场景，这里是"这一个用户是否
+     * 满足"）。{@code column} 只接受调用方从 {@code tab_metadata_field} 目录解析得到、并
+     * 经白名单校验（{@code table_name='tab_user'} 且列名仅含字母数字下划线）的合法列名，
+     * 不接受任意字符串拼接，避免 SQL 注入。
+     *
+     * @param userId      用户 id
+     * @param column      目标列名，仅接受白名单内的合法列名
+     * @param operator    运算符：{@code EQ}/{@code NE}/{@code IN}
+     * @param singleValue {@code EQ}/{@code NE} 时的比较值，{@code IN} 时忽略
+     * @param values      {@code IN} 时的一组比较值，{@code EQ}/{@code NE} 时忽略
+     * @return 命中的记录数（0 或 1），调用方按 {@code > 0} 判断是否匹配
+     */
+    int countMatchingAttrCondition(@Param("userId") Long userId, @Param("column") String column,
+            @Param("operator") String operator, @Param("singleValue") String singleValue,
+            @Param("values") List<String> values);
 
     /**
      * 按 {@code id} 升序游标式批量查询用户当前数据，供对账摘要接口流式扫描全部可见记录使用

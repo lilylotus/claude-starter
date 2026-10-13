@@ -1,5 +1,6 @@
 package cn.nihility.rbac.auth.filter;
 
+import cn.nihility.rbac.abac.service.AbacAuthorizationService;
 import cn.nihility.rbac.auth.constant.AuthErrorCode;
 import cn.nihility.rbac.auth.context.CurrentUserContext;
 import cn.nihility.rbac.auth.service.AuthorizationService;
@@ -52,6 +53,11 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * render-schema-permission change design.md Decision 1）。因此这些接口（{@link
  * #FIRST_LOGIN_WHITELIST}）同时豁免首登拦截与权限判断，保持同一批白名单、同一个语义
  * （"自助操作，不受角色权限点约束"）。
+ * <p>
+ * abac-policy-engine change 在第四步 RBAC 权限点判定通过之后，追加第五步 ABAC 判定：
+ * 对存在匹配策略的资源编码，叠加一层基于用户属性 + 时间窗口的限制性（DENY-only）判定，
+ * 命中即拒绝，与 RBAC 判定不通过时使用同一错误码与提示文案；{@link #FIRST_LOGIN_WHITELIST}
+ * 豁免 RBAC 权限点校验的同一批路径同样豁免本次追加的 ABAC 判定（design.md Decision 5）。
  */
 @RequiredArgsConstructor
 public class IdentityAuthFilter extends OncePerRequestFilter {
@@ -157,6 +163,12 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
     private final AuthorizationService authorizationService;
 
     /**
+     * ABAC 运行时限制判定业务逻辑接口，在 RBAC 权限点判定通过之后追加一次基于用户属性 +
+     * 时间窗口的限制性判定（abac-policy-engine change design.md Decision 5）。
+     */
+    private final AbacAuthorizationService abacAuthorizationService;
+
+    /**
      * {@inheritDoc}
      */
     @Override
@@ -199,6 +211,11 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
 
             String requiredPermission = resolveRequiredPermission(request.getMethod(), path, menu);
             if (!firstLoginExempt && !authorizationService.hasPermission(userId, requiredPermission)) {
+                writeError(response, AuthErrorCode.FORBIDDEN, "无权限访问该资源");
+                return;
+            }
+
+            if (!firstLoginExempt && abacAuthorizationService.isDenied(userId, requiredPermission)) {
                 writeError(response, AuthErrorCode.FORBIDDEN, "无权限访问该资源");
                 return;
             }

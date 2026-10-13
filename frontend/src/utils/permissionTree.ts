@@ -75,6 +75,7 @@ export const PERMISSION_MODULE_LABELS: Record<string, string> = {
   WorkflowDesign: '流程设计',
   ImageManagement: '图片管理',
   ImageGallery: '图片展示',
+  AbacManagement: 'ABAC 策略管理',
 }
 
 // 角色管理/权限点管理页面只允许展示中文模块名，不允许英文模块编码前缀直接暴露给用户；

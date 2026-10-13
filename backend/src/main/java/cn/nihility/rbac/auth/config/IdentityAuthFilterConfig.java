@@ -1,5 +1,6 @@
 package cn.nihility.rbac.auth.config;
 
+import cn.nihility.rbac.abac.service.AbacAuthorizationService;
 import cn.nihility.rbac.auth.filter.IdentityAuthFilter;
 import cn.nihility.rbac.auth.service.AuthorizationService;
 import cn.nihility.rbac.auth.service.PasswordService;
@@ -19,16 +20,18 @@ public class IdentityAuthFilterConfig {
     /**
      * 注册请求身份校验过滤器。
      *
-     * @param tokenService         会话令牌业务逻辑接口
-     * @param passwordService      密码业务逻辑接口
-     * @param authorizationService 运行时鉴权业务逻辑接口
+     * @param tokenService             会话令牌业务逻辑接口
+     * @param passwordService          密码业务逻辑接口
+     * @param authorizationService     运行时鉴权业务逻辑接口
+     * @param abacAuthorizationService ABAC 运行时限制判定业务逻辑接口
      * @return 过滤器注册信息
      */
     @Bean
     public FilterRegistrationBean<IdentityAuthFilter> identityAuthFilter(TokenService tokenService,
-            PasswordService passwordService, AuthorizationService authorizationService) {
+            PasswordService passwordService, AuthorizationService authorizationService,
+            AbacAuthorizationService abacAuthorizationService) {
         FilterRegistrationBean<IdentityAuthFilter> registration = new FilterRegistrationBean<>(
-                new IdentityAuthFilter(tokenService, passwordService, authorizationService));
+                new IdentityAuthFilter(tokenService, passwordService, authorizationService, abacAuthorizationService));
         registration.addUrlPatterns("/*");
         registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 10);
         registration.setName("identityAuthFilter");

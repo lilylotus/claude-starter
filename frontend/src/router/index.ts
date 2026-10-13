@@ -34,6 +34,7 @@ const implementedComponents: Record<string, () => Promise<unknown>> = {
   '/permission/points': () => import('@/views/permission/permission/PermissionManagementView.vue'),
   '/permission/admins': () => import('@/views/permission/admin/AdminManagementView.vue'),
   '/permission/app-access': () => import('@/views/permission/app-access/AppAccessView.vue'),
+  '/permission/abac-policy': () => import('@/views/permission/AbacPolicyManagementView.vue'),
   '/system/dicts': () => import('@/views/system/dict/DictManagementView.vue'),
   '/system/menus': () => import('@/views/system/menu/MenuManagementView.vue'),
   '/system/metadata-fields': () => import('@/views/system/metadatafields/MetadataFieldListView.vue'),
