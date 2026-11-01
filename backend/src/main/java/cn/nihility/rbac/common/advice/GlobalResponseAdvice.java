@@ -7,6 +7,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.converter.ByteArrayHttpMessageConverter;
 import org.springframework.http.converter.HttpMessageConverter;
 import org.springframework.http.converter.ResourceHttpMessageConverter;
+import org.springframework.http.converter.ResourceRegionHttpMessageConverter;
 import org.springframework.http.converter.StringHttpMessageConverter;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
@@ -25,7 +26,10 @@ public class GlobalResponseAdvice implements ResponseBodyAdvice<Object> {
 
     /**
      * 所有返回值都需要经过本处理器判断是否包装，二进制文件下载类接口（选中
-     * {@link ByteArrayHttpMessageConverter}/{@link ResourceHttpMessageConverter}）除外。
+     * {@link ByteArrayHttpMessageConverter}/{@link ResourceHttpMessageConverter}）除外；
+     * 视频流式播放等携带 {@code Range} 请求头的 206 分段响应选中的是
+     * {@link ResourceRegionHttpMessageConverter}（不是 {@link ResourceHttpMessageConverter}
+     * 的子类），同样不做包装（add-video-management change design.md Decision 3）。
      *
      * @param returnType    方法返回类型
      * @param converterType 将要使用的消息转换器类型
@@ -34,7 +38,8 @@ public class GlobalResponseAdvice implements ResponseBodyAdvice<Object> {
     @Override
     public boolean supports(MethodParameter returnType, Class<? extends HttpMessageConverter<?>> converterType) {
         return !ByteArrayHttpMessageConverter.class.isAssignableFrom(converterType)
-                && !ResourceHttpMessageConverter.class.isAssignableFrom(converterType);
+                && !ResourceHttpMessageConverter.class.isAssignableFrom(converterType)
+                && !ResourceRegionHttpMessageConverter.class.isAssignableFrom(converterType);
     }
 
     /**

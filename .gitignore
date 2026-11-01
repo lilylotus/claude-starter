@@ -3,6 +3,7 @@ frontend/node_modules/**
 .gradle-user-home/**
 backend/.gradle-user-home/**
 backend/images/*
+backend/videos/*
 
 HELP.md
 .gradle

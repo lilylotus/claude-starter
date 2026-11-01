@@ -51,6 +51,7 @@ const implementedComponents: Record<string, () => Promise<unknown>> = {
   '/workflow/bindings': () => import('@/views/workflow/binding/ProcessBindingView.vue'),
   '/common-service/images': () => import('@/views/image/ImageManagementView.vue'),
   '/common-service/gallery': () => import('@/views/image/ImageGalleryView.vue'),
+  '/common-service/videos': () => import('@/views/video/VideoManagementView.vue'),
 }
 
 const menuRoutes = MENU_GROUPS.flatMap((group) =>

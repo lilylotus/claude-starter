@@ -12,10 +12,13 @@ spring:
 
   # Excel 批量导入上传文件的大小限制，默认的 1MB 单文件上限不足以覆盖上限 1000 行
   # 的导入场景，适当调大；具体行数上限由业务层（BatchImportServiceImpl）控制。
+  # 视频上传需要支持单个 2GB 文件（add-video-management change design.md Decision 4），全局上限
+  # 放开到 2GB；除视频上传外的普通 multipart 请求仍由 rbac.upload.default-max-request-size
+  # （默认 10MB）经 MultipartSizeLimitFilter 守卫，保持原 10MB 上限语义。
   servlet:
     multipart:
-      max-file-size: 10MB
-      max-request-size: 10MB
+      max-file-size: 2GB
+      max-request-size: 2GB
 
   # 以下数据源配置为本地开发占位值（localhost:3306 / rbac_demo / root / root），
   # 仅用于离线编译和联调脚手架，各环境（测试/预发/生产）务必替换为各自的真实连接信息，
@@ -287,6 +290,23 @@ rbac:
   image:
     # 图片保存根目录，默认 images；上传时目录不存在会自动创建。
     directory: images
+
+  # 视频模块配置（add-video-management change design.md Decision 2/3），与 rbac.image 各自独立；
+  # 全部为默认值，此处显式列出便于按需覆盖；目录路径为相对路径时相对于应用当前工作目录解析。
+  video:
+    # 视频保存根目录，默认 videos；上传时目录不存在会自动创建。
+    directory: videos
+    # 单个视频文件大小上限，不能大于 spring.servlet.multipart.max-file-size。
+    max-file-size: 2GB
+    # 播放凭证有效期（秒），持续播放期间每次 Range 请求校验通过后滑动续期。
+    play-ticket-ttl-seconds: 600
+
+  # multipart 上传大小守卫（add-video-management change design.md Decision 4）：除
+  # large-upload-paths 外的 multipart 请求超过 default-max-request-size 直接拒绝。
+  upload:
+    default-max-request-size: 10MB
+    large-upload-paths:
+      - /api/videos/upload
 
   # 插件包升级相关配置（plugin-jar-upgrade change design.md Decision 1/5/6），全部为默认值，
   # 此处显式列出便于按需覆盖；插件目录路径为相对路径时相对于应用当前工作目录解析。

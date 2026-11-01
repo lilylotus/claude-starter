@@ -82,6 +82,10 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
      * （app-sso-protocol-runtime change design.md Decision 7）。{@code /api/captcha/image}
      * 是图形验证码生成接口，语义上就是给未登录场景使用的人机识别能力，必须在登录之前即可
      * 访问（add-captcha-rate-limit change spec.md "图形验证码生成" Requirement）。
+     * {@code /api/videos/*}{@code /stream} 是视频流式播放接口，浏览器原生 {@code <video src>}
+     * 无法携带自定义请求头，改由业务层校验短期播放凭证（只对单个视频有效、滑动过期，凭证本身
+     * 只能通过需要登录与 {@code VideoManagement:video:view} 权限的接口换取，add-video-management
+     * change design.md Decision 3）。
      */
     private static final List<String> FULL_WHITELIST = List.of(
             "/api/auth/public-key",
@@ -95,7 +99,8 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
             "/webjars/**",
             "/open/api/sync/**",
             "/api/authn/**",
-            "/api/captcha/image");
+            "/api/captcha/image",
+            "/api/videos/*/stream");
 
     /**
      * 仍需 {@code identity-token}/{@code menu} 校验，但豁免"首登强制改密"拦截与
@@ -151,7 +156,14 @@ public class IdentityAuthFilter extends OncePerRequestFilter {
             new PermissionMapping("POST", "/api/approval-requests/*/approve", "ApprovalManagement:request:approve"),
             new PermissionMapping("POST", "/api/approval-requests/*/reject", "ApprovalManagement:request:approve"),
             new PermissionMapping("POST", "/api/v1/workflow/process-instances/*/terminate",
-                    "WorkflowDesign:instance:terminate"));
+                    "WorkflowDesign:instance:terminate"),
+            // 视频管理接口（add-video-management change design.md Decision 5），流式播放接口在
+            // FULL_WHITELIST 中按播放凭证鉴权，不在此表内
+            new PermissionMapping("GET", "/api/videos", "VideoManagement:video:view"),
+            new PermissionMapping("POST", "/api/videos/*/play-ticket", "VideoManagement:video:view"),
+            new PermissionMapping("POST", "/api/videos/upload", "VideoManagement:video:add"),
+            new PermissionMapping("DELETE", "/api/videos/batch", "VideoManagement:video:delete"),
+            new PermissionMapping("DELETE", "/api/videos/*", "VideoManagement:video:delete"));
 
     /** 会话令牌业务逻辑接口。 */
     private final TokenService tokenService;

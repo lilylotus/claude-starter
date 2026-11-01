@@ -2,8 +2,10 @@ package cn.nihility.rbac.common.exception;
 
 import cn.nihility.rbac.common.result.Result;
 import cn.nihility.rbac.sync.openapi.support.SyncRateLimiter;
+import cn.nihility.rbac.video.exception.InvalidPlayTicketException;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.catalina.connector.ClientAbortException;
 import org.springframework.http.HttpStatus;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -11,6 +13,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -47,6 +50,19 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(BusinessException.class)
     public Result<Void> handleBusinessException(BusinessException ex) {
+        return Result.error(ex.getCode(), ex.getMessage());
+    }
+
+    /**
+     * 处理视频播放凭证无效：浏览器原生 {@code <video>} 无法读取响应体，需要真实的 HTTP 403
+     * 状态码让播放器触发 error 事件（add-video-management change design.md Decision 3）。
+     *
+     * @param ex 播放凭证无效异常
+     * @return 携带业务状态码和提示信息的响应
+     */
+    @ExceptionHandler(InvalidPlayTicketException.class)
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public Result<Void> handleInvalidPlayTicket(InvalidPlayTicketException ex) {
         return Result.error(ex.getCode(), ex.getMessage());
     }
 
@@ -107,6 +123,22 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public Result<Void> handleNoResourceFound(NoResourceFoundException ex) {
         return Result.error(NOT_FOUND_CODE, "请求的资源不存在：" + ex.getResourcePath());
+    }
+
+    /**
+     * 处理客户端主动断开连接：视频流式播放时浏览器拖动进度条、关闭播放弹窗会取消正在传输的
+     * Range 请求，属于正常行为（add-video-management change tasks.md 2.9）。连接已断开，既不能
+     * 也不需要再写响应体（响应 Content-Type 已是 {@code video/*}，写 JSON 还会二次报
+     * {@code HttpMessageNotWritableException}），因此只记 DEBUG 日志，不按"系统异常"打 ERROR
+     * 堆栈。方法声明 {@link HttpServletResponse} 参数，使 Spring 视为已完整处理响应，不再
+     * 尝试渲染视图。
+     *
+     * @param ex       客户端断开连接异常
+     * @param response 当前响应（仅用于标记响应已处理）
+     */
+    @ExceptionHandler({AsyncRequestNotUsableException.class, ClientAbortException.class})
+    public void handleClientAbort(Exception ex, HttpServletResponse response) {
+        log.debug("客户端已断开连接，忽略本次响应写出：{}", ex.getMessage());
     }
 
     /**

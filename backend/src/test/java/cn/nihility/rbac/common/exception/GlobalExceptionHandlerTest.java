@@ -4,12 +4,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import cn.nihility.rbac.common.result.Result;
 import cn.nihility.rbac.sync.openapi.support.SyncRateLimiter;
+import java.io.IOException;
+import org.apache.catalina.connector.ClientAbortException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpMethod;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
+import org.springframework.web.method.annotation.ExceptionHandlerMethodResolver;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -106,5 +110,35 @@ class GlobalExceptionHandlerTest {
 
         assertThat(result.getCode()).isEqualTo(404);
         assertThat(result.getMessage()).isEqualTo("请求的资源不存在：/not-exist-xyz");
+    }
+
+    /**
+     * 视频流式播放时客户端主动断开连接（拖动进度条/关闭播放弹窗）应由专门的处理方法静默处理，
+     * 不落入按"系统异常"打 ERROR 堆栈并尝试写 JSON 的兜底分支（add-video-management change
+     * tasks.md 2.9）；与客户端断开无关的普通 IOException 仍走兜底分支。
+     */
+    @Test
+    void clientAbortExceptions_shouldResolveToSilentHandler() {
+        ExceptionHandlerMethodResolver resolver = new ExceptionHandlerMethodResolver(GlobalExceptionHandler.class);
+        ClientAbortException clientAbort = new ClientAbortException(new IOException("Connection reset by peer"));
+
+        assertThat(resolver.resolveMethod(new AsyncRequestNotUsableException("write failed", clientAbort)).getName())
+                .isEqualTo("handleClientAbort");
+        assertThat(resolver.resolveMethod(clientAbort).getName()).isEqualTo("handleClientAbort");
+        assertThat(resolver.resolveMethod(new IOException("disk failure")).getName()).isEqualTo("handleException");
+    }
+
+    /**
+     * 客户端断开处理方法不写任何响应体、不修改响应状态。
+     */
+    @Test
+    void handleClientAbort_shouldNotWriteResponse() throws Exception {
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        response.setContentType("video/mp4");
+
+        handler.handleClientAbort(new ClientAbortException(new IOException("reset")), response);
+
+        assertThat(response.getContentAsByteArray()).isEmpty();
+        assertThat(response.getStatus()).isEqualTo(200);
     }
 }

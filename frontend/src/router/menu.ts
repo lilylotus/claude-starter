@@ -105,14 +105,16 @@ export const MENU_GROUPS: MenuGroup[] = [
     children: [{ title: '聊天', path: '/chat', permissionKey: 'Chat:conversation:view' }],
   },
   {
-    // 公共服务独立一级导航分组，对应后端 ImageManagement/ImageGallery 两个权限模块
-    // （见 openspec/changes/add-image-gallery），当前只有"图片管理"与"图片展示"两个页面
+    // 公共服务独立一级导航分组，对应后端 ImageManagement/ImageGallery/VideoManagement 三个权限模块
+    // （见 openspec/changes/add-image-gallery、add-video-management）
     key: 'common-service',
     title: '公共服务',
     icon: Picture,
     children: [
       { title: '图片管理', path: '/common-service/images', permissionKey: 'ImageManagement:image:view' },
       { title: '图片展示', path: '/common-service/gallery', permissionKey: 'ImageGallery:image:view' },
+      // 视频管理：上传、分页管理、弹窗流式播放都在同一页面内完成（add-video-management change）
+      { title: '视频管理', path: '/common-service/videos', permissionKey: 'VideoManagement:video:view' },
     ],
   },
 ]
