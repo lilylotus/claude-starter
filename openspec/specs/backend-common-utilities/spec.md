@@ -4,6 +4,7 @@
 后端跨模块复用的公共基础设施能力，与 CLAUDE.md 里 `common/` 目录下已有的 `Result`、`GlobalResponseAdvice`、`BusinessException`、`GlobalExceptionHandler` 同属一类定位：不属于任何具体业务模块，供各业务模块直接复用，避免重复实现。目前包含统一的 JSON 序列化/反序列化/类型转换工具类 `JacksonUtils`、统一解析当前登录操作人账号编码的 `CurrentOperatorService`、统一发起对外 HTTP 请求的 `HttpClientUtils`、统一的全局固定大小线程池工具类 `ThreadPoolUtils`、统一的 Redis 操作工具类 `RedisUtils`/`RedisObjectUtils`，以及可复用的转换脚本执行工具类 `ScriptTransformExecutor`。
 
 ## Requirements
+
 ### Requirement: 统一的 JSON 序列化/反序列化工具类
 系统 SHALL 提供一个位于 `cn.nihility.rbac.common.util` 包下的静态工具类 `JacksonUtils`，封装 JSON 序列化、反序列化与对象间类型转换能力，供后端各模块复用，避免各处重复注入 `ObjectMapper` 并各自处理初始化配置与异常。`JacksonUtils` 内部维护的 `ObjectMapper` 实例 SHALL 是独立于 Spring 自动装配、用于 HTTP 响应实际序列化的 `ObjectMapper` Bean 的另一份实例，两者互不影响；调用 `JacksonUtils` 不 SHALL 改变任何 `@RestController` 接口对外返回的 JSON 输出格式。
 
@@ -85,22 +86,22 @@
 ### Requirement: Flyway 迁移目录保持单一基线
 `backend/src/main/resources/db/migration/` 目录 SHALL 以一份反映当前最终数据库状态（全部建表语句 + 全部种子数据）的单一基线迁移文件（`V1__init_schema.sql`）作为起点，不 SHALL 无限堆积仅用于记录“某张表历史上是怎么一步步改过来的”的中间过程 `ALTER`/`UPDATE` 文件；基线文件 SHALL 直接体现字段和种子数据的最终形态，不保留转换前的中间列定义、存量回填步骤或后续修正语句。后续新的结构变更 SHALL 继续以递增版本号的增量迁移文件形式添加在基线之后，不 SHALL 修改已发布的基线文件本身；当增量迁移文件积累到影响可维护性的程度时，SHALL 允许重新合并出一份新的基线。
 
-同一基线文件 SHALL 能在空的 MySQL 5.7 与 MySQL 8.0 schema 上执行，且执行后产生相同范围的 73 张业务表及完整种子数据；基线不得使用仅 MySQL 8.0 支持、MySQL 5.7 不支持的 CTE、窗口函数、`JSON_TABLE` 等语法。当前基线 SHALL 等价于 V1–V14、V18–V20 实际存在的 17 个迁移脚本按数值版本顺序执行后的最终状态，并 SHALL 包含 `权限资源.txt` 当前登记的 145 个权限编码及 SUPER_ADMIN 对这些权限的完整授权。
+同一基线文件 SHALL 能在空的 MySQL 5.7 与 MySQL 8.0 schema 上执行，且执行后产生相同范围的 76 张业务表及完整种子数据；基线不得使用仅 MySQL 8.0 支持、MySQL 5.7 不支持的 CTE、窗口函数、`JSON_TABLE` 等语法。当前基线 SHALL 等价于 V1–V8 共 8 个迁移脚本按数值版本顺序执行后的最终状态，并 SHALL 包含 `权限资源.txt` 当前登记的 151 个权限编码及 SUPER_ADMIN 对这些权限的完整授权。
 
 #### Scenario: 新环境执行迁移只需应用基线文件
 - **WHEN** 在一个全新、空的 MySQL 5.7 schema 上执行 `flyway migrate`
-- **THEN** 系统只应用 `V1__init_schema.sql` 一个文件，即得到全部 73 张业务表结构与完整种子数据，无需再应用任何历史中间迁移文件
+- **THEN** 系统只应用 `V1__init_schema.sql` 一个文件，即得到全部 76 张业务表结构与完整种子数据，无需再应用任何历史中间迁移文件
 
 #### Scenario: MySQL 8.0 新环境执行同一基线文件
 - **WHEN** 在一个全新、空的 MySQL 8.0 schema 上执行 `flyway migrate`
-- **THEN** 系统应用与 MySQL 5.7 完全相同的 `V1__init_schema.sql`，并得到相同范围的 73 张业务表结构与完整种子数据
+- **THEN** 系统应用与 MySQL 5.7 完全相同的 `V1__init_schema.sql`，并得到相同范围的 76 张业务表结构与完整种子数据
 
 #### Scenario: 基线权限种子与资源编码清单一致
 - **WHEN** 在空 schema 上执行新的 `V1__init_schema.sql` 并按权限 code 检查初始化结果
-- **THEN** `tab_permission` 的编码集合与 `权限资源.txt` 当前登记的 145 个唯一权限编码完全一致，且 SUPER_ADMIN 角色拥有全部这些权限
+- **THEN** `tab_permission` 的编码集合与 `权限资源.txt` 当前登记的 151 个唯一权限编码完全一致，且 SUPER_ADMIN 角色拥有全部这些权限
 
 #### Scenario: 已执行过旧版本历史迁移的库需要保留旧链
-- **WHEN** 某个数据库已经执行过本次被合并、删除的 V1–V14、V18–V20 旧迁移链且其中的数据需要保留
+- **WHEN** 某个数据库已经执行过本次被合并、删除的 V1–V8 旧迁移链且其中的数据需要保留
 - **THEN** 该数据库不得删除 `flyway_schema_history`、执行 `repair` 后强制接受新校验和或直接换用新 V1，而必须继续使用与既有历史校验和匹配的旧迁移集合，或者经过单独设计和验证的数据迁移方案
 
 #### Scenario: 可丢弃数据的环境重建后使用新基线

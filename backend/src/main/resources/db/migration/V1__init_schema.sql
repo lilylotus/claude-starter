@@ -1,16 +1,17 @@
 -- ============================================================================
 -- RBAC 权限管理系统数据库初始化脚本
 --
--- 本文件由原 V1–V14、V18–V20 共 17 个实际存在的迁移脚本合并而成（V15–V17 不存在），
--- 代表这些迁移按数值版本顺序执行完毕后的最终数据库状态：73 张业务表及完整种子数据。
--- 表结构直接表达最终字段、默认值、可空性、索引和约束，不保留历史 ALTER 或回填过程。
+-- 本文件由原 V1–V8 共 8 个迁移脚本合并而成（其中原 V1 本身已是更早一轮 V1–V14、V18–V20
+-- 合并后的基线），代表这些迁移按数值版本顺序执行完毕后的最终数据库状态：76 张业务表及
+-- 完整种子数据。表结构直接表达最终字段、默认值、可空性、索引和约束，不保留历史 ALTER、
+-- 回填或分段补授过程。
 --
 -- 适用范围：仅限全新、空的 schema；同一脚本兼容 MySQL 5.7 与 MySQL 8.0。
 -- 已执行旧迁移链且需要保留数据的数据库不得直接替换本文件，不得仅删除
 -- flyway_schema_history 或执行 repair 后强制重跑；应继续使用与旧校验和匹配的迁移集合，
 -- 或另行设计并验证数据迁移方案。可丢弃数据的开发/测试环境必须完整重建 schema。
 -- ============================================================================
--- 第一部分：建表语句（共 73 张表）
+-- 第一部分：建表语句（共 76 张表）
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -1153,6 +1154,7 @@ CREATE TABLE IF NOT EXISTS `tab_chat_message`
     `msg_type`         INT         NOT NULL DEFAULT 1 COMMENT '消息内容类型：1=文本（本阶段仅支持文本，其余类型预留占位）',
     `content`          TEXT        NOT NULL COMMENT '消息内容（敏感词过滤/替换后落库，本阶段服务端可见明文，不做信封加密）',
     `filtered`         TINYINT     NOT NULL DEFAULT 0 COMMENT '是否命中过敏感词：0=否，1=是',
+    `sender_identity_key_fingerprint` VARCHAR(128) NULL COMMENT '发送方身份公钥指纹快照（单聊端到端加密消息使用，历史明文消息为空）',
     `send_time`        DATETIME    NOT NULL COMMENT '发送时间',
     `create_by`        VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
     `create_time`      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -1199,6 +1201,23 @@ CREATE TABLE IF NOT EXISTS `tab_chat_sensitive_word`
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_general_ci
   COMMENT = '聊天敏感词库表，服务启动时加载进内存构建 AC 自动机，变更后触发内存重建';
+
+CREATE TABLE IF NOT EXISTS `tab_chat_user_key`
+(
+    `id`                  BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `user_id`             BIGINT      NOT NULL COMMENT '用户 id，关联 tab_user.id，不建物理外键',
+    `identity_public_key` VARCHAR(64) NOT NULL COMMENT 'X25519 身份公钥（Base64 编码，定长）',
+    `key_fingerprint`     VARCHAR(128) NOT NULL COMMENT '身份公钥指纹，服务端留痕/审计用，非安全校验唯一依据',
+    `create_by`           VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`         DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`           VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`         DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_chat_user_key_user_id` (`user_id`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci
+  COMMENT = '聊天单聊端到端加密身份公钥目录表，每个用户至多一条记录';
 
 -- ----------------------------------------------------------------------------
 -- V4 合并的最终表结构
@@ -1298,6 +1317,7 @@ CREATE TABLE IF NOT EXISTS `tab_wf_process_definition` (
     `node_mapping_json` LONGTEXT NULL COMMENT '节点 id 到 BPMN activityId 的映射快照（JSON）',
     `rule_snapshot_json` LONGTEXT NULL COMMENT '发布时刻节点审批人规则的完整快照（JSON），审计与试运行报告比对用',
     `form_version_id` BIGINT NULL COMMENT '绑定的表单版本 id，关联 tab_wf_form_version.id',
+    `route_field_codes` TEXT NULL COMMENT '条件分支引用的路由字段清单（JSON 数组，元素形如 {"bizType":"ORG","fieldCode":"riskLevel"}），发布时从条件边提取去重写入，历史版本为空',
     `status`                  VARCHAR(16)  NOT NULL DEFAULT 'PUBLISHED' COMMENT '状态：PUBLISHED/DISABLED',
     `published_by`            VARCHAR(64)  NULL COMMENT '发布人',
     `published_time`          DATETIME     NULL COMMENT '发布时间',
@@ -1484,14 +1504,14 @@ CREATE TABLE IF NOT EXISTS `tab_wf_process_binding` (
     `definition_id`   BIGINT      NOT NULL COMMENT '绑定的流程定义 id，关联 tab_wf_process_definition.id，显式版本，不隐式取最新',
     `execution_mode`  VARCHAR(24) NOT NULL DEFAULT 'LEGACY_SYNC' COMMENT '该绑定下发起申请使用的执行模式：LEGACY_SYNC/RELIABLE_ASYNC',
     `revision`        BIGINT      NOT NULL DEFAULT 1 COMMENT '乐观锁修订号，切换绑定版本时自增',
-    `enabled`         TINYINT(1)  NOT NULL DEFAULT 1 COMMENT '是否启用，禁用后该维度拒绝新发起，与唯一性约束无关（保留行以便重新启用）',
+    `status`          INT         NOT NULL DEFAULT 2000 COMMENT '绑定状态：2000=启用，3000=停用，-1000=已删除（逻辑删除）',
     `create_by`       VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
     `create_time`     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `update_by`       VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
     `update_time`     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_tab_wf_process_binding_dimension` (`biz_type`, `operation_type`, `scope_type`, `scope_id`),
-    KEY `idx_tab_wf_process_binding_definition` (`definition_id`)
+    KEY `idx_tab_wf_process_binding_definition` (`definition_id`),
+    KEY `idx_tab_wf_process_binding_dimension` (`biz_type`, `operation_type`, `scope_type`, `scope_id`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '业务绑定表：biz_type+operation_type 精确定位到显式 definitionId';
 
 CREATE TABLE IF NOT EXISTS `tab_wf_form_version` (
@@ -1619,6 +1639,48 @@ CREATE TABLE IF NOT EXISTS `tab_wf_notification` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_tab_wf_notification` (`event_id`, `recipient_id`, `channel`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '站内通知投递记录表';
+
+-- ----------------------------------------------------------------------------
+-- 公共服务模块：通用文件上传记录、图片记录
+-- ----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS `tab_file_upload`
+(
+    `id`                 BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `original_file_name` VARCHAR(255) NOT NULL COMMENT '原始文件名（含后缀），仅用于展示和下载时的 Content-Disposition 文件名',
+    `stored_file_name`   VARCHAR(128) NOT NULL COMMENT '保存在磁盘目录中的文件名（UUID 去横线 + 原始后缀）',
+    `file_size`          BIGINT       NOT NULL DEFAULT 0 COMMENT '文件大小（字节）',
+    `status`             INT          NOT NULL DEFAULT 2000 COMMENT '文件状态：2000=正常，3000=失效',
+    `create_by`          VARCHAR(64)  NULL COMMENT '创建人',
+    `create_time`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`          VARCHAR(64)  NULL COMMENT '更新人',
+    `update_time`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_tab_file_upload_status` (`status`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci
+  COMMENT = '文件上传记录表';
+
+CREATE TABLE IF NOT EXISTS `tab_image`
+(
+    `id`                 BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `original_file_name` VARCHAR(255) NOT NULL COMMENT '原始文件名（含后缀），仅用于展示，不参与磁盘路径拼接',
+    `stored_file_name`   VARCHAR(128) NOT NULL COMMENT '保存在磁盘目录中的文件名（UUID 去横线 + 原始后缀）',
+    `file_size`          BIGINT       NOT NULL DEFAULT 0 COMMENT '文件大小（字节）',
+    `image_width`        INT          NOT NULL COMMENT '图片宽度（像素），ImageIO 解析得到',
+    `image_height`       INT          NOT NULL COMMENT '图片高度（像素），ImageIO 解析得到',
+    `status`             INT          NOT NULL DEFAULT 2000 COMMENT '状态：2000=正常，-1000=已删除（逻辑删除）',
+    `create_by`          VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
+    `create_time`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`          VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
+    `update_time`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_tab_image_status` (`status`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci
+  COMMENT = '图片记录表';
 
 -- ============================================================================
 -- 第二部分：种子数据（按依赖关系顺序插入）
@@ -2053,10 +2115,12 @@ INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_orde
 VALUES ('待我审批', 'ApprovalManagement:request:approve', @approval_group_id, 1, 15,
         '查看并处理全部待审批申请', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
        ('修改审批开关', 'ApprovalManagement:switch:edit', @approval_switch_view_id, 2, 10,
-        NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+        NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('审批历史', 'ApprovalManagement:record:view', @approval_group_id, 1, 5,
+        '查看当前登录用户自己已经审批过的历史记录页面访问', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
 
 -- ----------------------------------------------------------------------------
--- 权限点种子数据（145 条，按 权限资源.txt 模块分段插入）
+-- 权限点种子数据（全文件合计 151 条，与 权限资源.txt 唯一编码集合一致，按模块分段插入）
 -- ----------------------------------------------------------------------------
 -- 组织/用户/任职/应用/角色/权限点/管理员/菜单/字典/元数据配置/表单管理/操作日志
 -- 共 95 条源自 权限资源.txt（一次性脚本 gen_permission_seed.py 解析生成，此前版本的
@@ -2261,11 +2325,12 @@ INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, 
 VALUES ('查看我的申请/待我审批', 'ApprovalManagement:request:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
        ('审批通过/拒绝', 'ApprovalManagement:request:approve', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
        ('查看审批开关', 'ApprovalManagement:switch:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
-       ('修改审批开关', 'ApprovalManagement:switch:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
+       ('修改审批开关', 'ApprovalManagement:switch:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('查看审批历史', 'ApprovalManagement:record:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
 
 -- ----------------------------------------------------------------------------
 -- ============================================================================
--- V2–V14、V18–V20 合并的最终种子数据
+-- 后续增量迁移合并的最终种子数据（聊天、流程设计、业务绑定、审批历史、公共服务等）
 -- ============================================================================
 
 -- 种子敏感词数据（最小可用示例集，生产环境请通过后台管理接口按需维护）。
@@ -2477,9 +2542,9 @@ SET @wf_master_data_definition_id := (
 );
 
 INSERT INTO `tab_wf_process_binding` (`biz_type`, `operation_type`, `scope_type`, `scope_id`, `definition_id`,
-                                       `execution_mode`, `revision`, `enabled`, `create_by`, `create_time`,
+                                       `execution_mode`, `revision`, `status`, `create_by`, `create_time`,
                                        `update_by`, `update_time`)
-SELECT biz.`biz_type`, op.`operation_type`, 'GLOBAL', 0, @wf_master_data_definition_id, 'LEGACY_SYNC', 1, 1,
+SELECT biz.`biz_type`, op.`operation_type`, 'GLOBAL', 0, @wf_master_data_definition_id, 'LEGACY_SYNC', 1, 2000,
        @admin_user_id_text, NOW(), @admin_user_id_text, NOW()
 FROM (SELECT 'ORG' AS `biz_type`
       UNION ALL
@@ -2533,6 +2598,14 @@ SELECT '业务绑定编辑', 'WorkflowDesign:binding:edit', @workflow_binding_vi
 WHERE @workflow_binding_view_id IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM `tab_menu` WHERE `code` = 'WorkflowDesign:binding:edit');
 
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+SELECT '业务绑定删除', 'WorkflowDesign:binding:delete', @workflow_binding_view_id, 2, 6,
+       '删除业务绑定（软删除），删除后该绑定维度可重新新建绑定', 2000, @admin_user_id_text, NOW(),
+       @admin_user_id_text, NOW()
+WHERE @workflow_binding_view_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM `tab_menu` WHERE `code` = 'WorkflowDesign:binding:delete');
+
 INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`,
                               `update_by`, `update_time`)
 SELECT '流程发布审核', 'WorkflowDesign:model:review', 0, NULL, 2000, @admin_user_id_text, NOW(),
@@ -2550,6 +2623,12 @@ INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, 
 SELECT '业务绑定编辑', 'WorkflowDesign:binding:edit', 0, NULL, 2000, @admin_user_id_text, NOW(),
        @admin_user_id_text, NOW()
 WHERE NOT EXISTS (SELECT 1 FROM `tab_permission` WHERE `code` = 'WorkflowDesign:binding:edit');
+
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`,
+                              `update_by`, `update_time`)
+SELECT '业务绑定删除', 'WorkflowDesign:binding:delete', 0, NULL, 2000, @admin_user_id_text, NOW(),
+       @admin_user_id_text, NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `tab_permission` WHERE `code` = 'WorkflowDesign:binding:delete');
 
 SET @admin_user_id_text := '1';
 
@@ -2569,8 +2648,46 @@ SELECT '运维终止流程实例', 'WorkflowDesign:instance:terminate', 0, NULL,
        @admin_user_id_text, NOW()
 WHERE NOT EXISTS (SELECT 1 FROM `tab_permission` WHERE `code` = 'WorkflowDesign:instance:terminate');
 
--- 超级管理员角色，关联上面全部 145 个种子权限点；本 INSERT...SELECT 位于全部权限点之后，
--- 天然覆盖本次合并新增的插件、导出和审批权限，不需要单独补授。
+-- ----------------------------------------------------------------------------
+-- 公共服务：一级分组"公共服务" + 图片管理（含上传/删除按钮）+ 图片展示
+-- ----------------------------------------------------------------------------
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('公共服务', 'common-service', 0, 1, 50, '侧边栏一级导航分组', 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW());
+
+SET @common_service_group_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'common-service');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('图片管理', 'ImageManagement:image:view', @common_service_group_id, 1, 20,
+        '图片管理页面访问（上传 + 分页管理已上传图片）', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('图片展示', 'ImageGallery:image:view', @common_service_group_id, 1, 10,
+        '图片展示页面访问（瀑布流 + 无限滚动浏览，纯浏览无管理操作）', 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW());
+
+SET @image_management_view_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'ImageManagement:image:view');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+VALUES ('上传图片', 'ImageManagement:image:add', @image_management_view_id, 2, 20, NULL, 2000, @admin_user_id_text,
+        NOW(), @admin_user_id_text, NOW()),
+       ('删除图片', 'ImageManagement:image:delete', @image_management_view_id, 2, 10, NULL, 2000, @admin_user_id_text,
+        NOW(), @admin_user_id_text, NOW());
+
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`,
+                              `update_by`, `update_time`)
+VALUES ('图片管理页面访问', 'ImageManagement:image:view', 0, NULL, 2000, @admin_user_id_text, NOW(),
+        @admin_user_id_text, NOW()),
+       ('上传图片', 'ImageManagement:image:add', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()),
+       ('删除图片', 'ImageManagement:image:delete', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+        NOW()),
+       ('图片展示页面访问', 'ImageGallery:image:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+        NOW());
+
+-- 超级管理员角色，关联上面全部种子权限点；本 INSERT...SELECT 位于全部权限点之后，
+-- 天然覆盖历次合并新增的插件、导出、审批、业务绑定删除、审批历史和图片权限，不需要单独补授。
 -- ----------------------------------------------------------------------------
 
 INSERT INTO `tab_role` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
