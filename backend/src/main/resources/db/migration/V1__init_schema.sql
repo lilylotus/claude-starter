@@ -1,9 +1,9 @@
 -- ============================================================================
 -- RBAC 权限管理系统数据库初始化脚本
 --
--- 本文件由原 V1–V8 共 8 个迁移脚本合并而成（其中原 V1 本身已是更早一轮 V1–V14、V18–V20
--- 合并后的基线），代表这些迁移按数值版本顺序执行完毕后的最终数据库状态：76 张业务表及
--- 完整种子数据。表结构直接表达最终字段、默认值、可空性、索引和约束，不保留历史 ALTER、
+-- 本文件由原 V1、V9（ABAC 策略引擎）、V10（视频管理）共 3 个迁移脚本合并而成（其中原 V1
+-- 本身已是更早几轮 V1–V8、V1–V14/V18–V20 等合并后的基线），代表这些迁移按数值版本顺序执行
+-- 完毕后的最终数据库状态：81 张业务表及完整种子数据。表结构直接表达最终字段、默认值、可空性、索引和约束，不保留历史 ALTER、
 -- 回填或分段补授过程。
 --
 -- 适用范围：仅限全新、空的 schema；同一脚本兼容 MySQL 5.7 与 MySQL 8.0。
@@ -11,7 +11,7 @@
 -- flyway_schema_history 或执行 repair 后强制重跑；应继续使用与旧校验和匹配的迁移集合，
 -- 或另行设计并验证数据迁移方案。可丢弃数据的开发/测试环境必须完整重建 schema。
 -- ============================================================================
--- 第一部分：建表语句（共 76 张表）
+-- 第一部分：建表语句（共 81 张表）
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
@@ -747,6 +747,81 @@ CREATE TABLE IF NOT EXISTS `tab_admin_org_scope` (
     KEY `idx_tab_admin_org_scope_admin_id` (`admin_id`),
     KEY `idx_tab_admin_org_scope_org_id` (`org_id`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '管理员组织管辖范围表，无独立 status，随管理员整体同步、物理删除';
+
+-- ----------------------------------------------------------------------------
+-- ABAC 策略模块（原 V9）：策略主表、目标资源、用户属性条件、时间窗口条件
+-- ----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS `tab_abac_policy`
+(
+    `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `name`        VARCHAR(128) NOT NULL COMMENT '策略名称',
+    `remark`      VARCHAR(255)          DEFAULT NULL COMMENT '备注',
+    `status`      INT          NOT NULL DEFAULT 2000 COMMENT '状态：2000=启用，3000=停用（无逻辑删除语义，删除接口做物理删除）',
+    `show_order`  INT          NOT NULL DEFAULT 0 COMMENT '显示序号，仅用于列表展示排序，不参与判定优先级',
+    `create_by`   VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
+    `create_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`   VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
+    `update_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_tab_abac_policy_status` (`status`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci
+  COMMENT = 'ABAC 策略规则主数据表';
+
+CREATE TABLE IF NOT EXISTS `tab_abac_policy_resource`
+(
+    `id`              BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `policy_id`       BIGINT      NOT NULL COMMENT '所属策略 id，关联 tab_abac_policy.id',
+    `permission_code` VARCHAR(128) NOT NULL COMMENT '目标资源编码（三段式权限编码，与 menu 运行时鉴权口径一致）',
+    `create_by`       VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`       VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_tab_abac_policy_resource` (`policy_id`, `permission_code`),
+    KEY `idx_tab_abac_policy_resource_code` (`permission_code`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci
+  COMMENT = 'ABAC 策略目标资源编码表，随所属策略整体替换（先删后插），物理删除';
+
+CREATE TABLE IF NOT EXISTS `tab_abac_policy_user_attr`
+(
+    `id`                BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `policy_id`         BIGINT      NOT NULL COMMENT '所属策略 id，关联 tab_abac_policy.id',
+    `metadata_field_id` BIGINT      NOT NULL COMMENT '关联的元数据字段 id，关联 tab_metadata_field.id（biz_type=USER）',
+    `operator`          VARCHAR(8)  NOT NULL COMMENT '运算符：EQ=等于，NE=不等于，IN=属于多值',
+    `attr_value`        VARCHAR(512) NOT NULL COMMENT '比较值：EQ/NE 为单个值，IN 为逗号分隔的多个值',
+    `create_by`         VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`       DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`         VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`       DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_tab_abac_policy_user_attr_policy_id` (`policy_id`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci
+  COMMENT = 'ABAC 策略用户属性条件表，随所属策略整体替换（先删后插），物理删除';
+
+CREATE TABLE IF NOT EXISTS `tab_abac_policy_time_window`
+(
+    `id`            BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `policy_id`     BIGINT      NOT NULL COMMENT '所属策略 id，关联 tab_abac_policy.id',
+    `day_of_week`   TINYINT              DEFAULT NULL COMMENT '星期：1=周一...7=周日，NULL 表示每天均适用',
+    `start_time`    TIME        NOT NULL COMMENT '窗口起始时间',
+    `end_time`      TIME        NOT NULL COMMENT '窗口结束时间，须晚于起始时间',
+    `create_by`     VARCHAR(64)          DEFAULT NULL COMMENT '创建人',
+    `create_time`   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`     VARCHAR(64)          DEFAULT NULL COMMENT '更新人',
+    `update_time`   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_tab_abac_policy_time_window_policy_id` (`policy_id`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci
+  COMMENT = 'ABAC 策略时间窗口条件表，随所属策略整体替换（先删后插），物理删除';
 
 -- ----------------------------------------------------------------------------
 -- 操作日志模块
@@ -1682,6 +1757,25 @@ CREATE TABLE IF NOT EXISTS `tab_image`
   COLLATE = utf8mb4_general_ci
   COMMENT = '图片记录表';
 
+CREATE TABLE IF NOT EXISTS `tab_video`
+(
+    `id`                 BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键 id',
+    `original_file_name` VARCHAR(255) NOT NULL COMMENT '原始文件名（含后缀），仅用于展示，不参与磁盘路径拼接',
+    `stored_file_name`   VARCHAR(128) NOT NULL COMMENT '保存在磁盘目录中的文件名（UUID 去横线 + 小写原始后缀）',
+    `file_size`          BIGINT       NOT NULL DEFAULT 0 COMMENT '文件大小（字节）',
+    `content_type`       VARCHAR(64)  NOT NULL COMMENT '内容类型，按后缀确定：video/mp4、video/webm、video/ogg',
+    `status`             INT          NOT NULL DEFAULT 2000 COMMENT '状态：2000=正常，-1000=已删除（逻辑删除）',
+    `create_by`          VARCHAR(64)           DEFAULT NULL COMMENT '创建人',
+    `create_time`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_by`          VARCHAR(64)           DEFAULT NULL COMMENT '更新人',
+    `update_time`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_tab_video_status` (`status`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_general_ci
+  COMMENT = '视频记录表';
+
 -- ============================================================================
 -- 第二部分：种子数据（按依赖关系顺序插入）
 -- ============================================================================
@@ -2120,7 +2214,7 @@ VALUES ('待我审批', 'ApprovalManagement:request:approve', @approval_group_id
         '查看当前登录用户自己已经审批过的历史记录页面访问', 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW());
 
 -- ----------------------------------------------------------------------------
--- 权限点种子数据（全文件合计 151 条，与 权限资源.txt 唯一编码集合一致，按模块分段插入）
+-- 权限点种子数据（全文件合计 160 条，与 权限资源.txt 唯一编码集合一致，按模块分段插入）
 -- ----------------------------------------------------------------------------
 -- 组织/用户/任职/应用/角色/权限点/管理员/菜单/字典/元数据配置/表单管理/操作日志
 -- 共 95 条源自 权限资源.txt（一次性脚本 gen_permission_seed.py 解析生成，此前版本的
@@ -2686,8 +2780,147 @@ VALUES ('图片管理页面访问', 'ImageManagement:image:view', 0, NULL, 2000,
        ('图片展示页面访问', 'ImageGallery:image:view', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
         NOW());
 
+-- ----------------------------------------------------------------------------
+-- ABAC 策略管理（原 V9）：挂在"权限管理"分组下的页面 + 5 个按钮，6 个权限点
+-- ----------------------------------------------------------------------------
+-- 1) tab_menu：挂在"权限管理"一级分组下，排在既有子菜单最后（show_order 取 0，比
+--    AppAccessManagement 的 1 更小，排在其后）。
+SET @permission_group_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'permission');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+SELECT 'ABAC 策略管理', 'AbacManagement:policy:view', @permission_group_id, 1, 0,
+       'ABAC 策略管理页面访问（在 RBAC 权限点判定通过之后，叠加一层基于用户属性 + 时间窗口的限制性判定）',
+       2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()
+WHERE @permission_group_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM `tab_menu` WHERE `code` = 'AbacManagement:policy:view');
+
+SET @abac_policy_menu_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'AbacManagement:policy:view');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+SELECT '新增策略规则', 'AbacManagement:policy:add', @abac_policy_menu_id, 2, 60, NULL, 2000, @admin_user_id_text,
+       NOW(), @admin_user_id_text, NOW()
+WHERE @abac_policy_menu_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM `tab_menu` WHERE `code` = 'AbacManagement:policy:add');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+SELECT '编辑策略规则', 'AbacManagement:policy:edit', @abac_policy_menu_id, 2, 50, NULL, 2000, @admin_user_id_text,
+       NOW(), @admin_user_id_text, NOW()
+WHERE @abac_policy_menu_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM `tab_menu` WHERE `code` = 'AbacManagement:policy:edit');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+SELECT '启用策略规则', 'AbacManagement:policy:enable', @abac_policy_menu_id, 2, 40, NULL, 2000, @admin_user_id_text,
+       NOW(), @admin_user_id_text, NOW()
+WHERE @abac_policy_menu_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM `tab_menu` WHERE `code` = 'AbacManagement:policy:enable');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+SELECT '停用策略规则', 'AbacManagement:policy:disable', @abac_policy_menu_id, 2, 30, NULL, 2000, @admin_user_id_text,
+       NOW(), @admin_user_id_text, NOW()
+WHERE @abac_policy_menu_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM `tab_menu` WHERE `code` = 'AbacManagement:policy:disable');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+SELECT '删除策略规则', 'AbacManagement:policy:delete', @abac_policy_menu_id, 2, 20, NULL, 2000, @admin_user_id_text,
+       NOW(), @admin_user_id_text, NOW()
+WHERE @abac_policy_menu_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM `tab_menu` WHERE `code` = 'AbacManagement:policy:delete');
+
+-- 2) tab_permission：对应 6 条权限点记录。
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`,
+                              `update_by`, `update_time`)
+SELECT 'ABAC 策略管理页面访问', 'AbacManagement:policy:view', 0, NULL, 2000, @admin_user_id_text, NOW(),
+       @admin_user_id_text, NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `tab_permission` WHERE `code` = 'AbacManagement:policy:view');
+
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`,
+                              `update_by`, `update_time`)
+SELECT '新增策略规则', 'AbacManagement:policy:add', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+       NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `tab_permission` WHERE `code` = 'AbacManagement:policy:add');
+
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`,
+                              `update_by`, `update_time`)
+SELECT '编辑策略规则', 'AbacManagement:policy:edit', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+       NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `tab_permission` WHERE `code` = 'AbacManagement:policy:edit');
+
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`,
+                              `update_by`, `update_time`)
+SELECT '启用策略规则', 'AbacManagement:policy:enable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+       NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `tab_permission` WHERE `code` = 'AbacManagement:policy:enable');
+
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`,
+                              `update_by`, `update_time`)
+SELECT '停用策略规则', 'AbacManagement:policy:disable', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+       NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `tab_permission` WHERE `code` = 'AbacManagement:policy:disable');
+
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`,
+                              `update_by`, `update_time`)
+SELECT '删除策略规则', 'AbacManagement:policy:delete', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+       NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `tab_permission` WHERE `code` = 'AbacManagement:policy:delete');
+
+-- ----------------------------------------------------------------------------
+-- 视频管理（原 V10）：挂在"公共服务"分组下的页面 + 上传/删除按钮，3 个权限点
+-- ----------------------------------------------------------------------------
+SET @common_service_group_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'common-service');
+
+-- 1) tab_menu：挂在"公共服务"分组下，show_order 取 5，排在图片管理(20)、图片展示(10)之后
+--    （本分组按 show_order 降序展示），页面下挂上传/删除两个按钮。
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+SELECT '视频管理', 'VideoManagement:video:view', @common_service_group_id, 1, 5,
+       '视频管理页面访问（分页管理已上传视频、换取播放凭证在线播放）', 2000, @admin_user_id_text, NOW(),
+       @admin_user_id_text, NOW()
+WHERE @common_service_group_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM `tab_menu` WHERE `code` = 'VideoManagement:video:view');
+
+SET @video_management_view_id := (SELECT `id` FROM `tab_menu` WHERE `code` = 'VideoManagement:video:view');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+SELECT '上传视频', 'VideoManagement:video:add', @video_management_view_id, 2, 20, NULL, 2000, @admin_user_id_text,
+       NOW(), @admin_user_id_text, NOW()
+WHERE @video_management_view_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM `tab_menu` WHERE `code` = 'VideoManagement:video:add');
+
+INSERT INTO `tab_menu` (`name`, `code`, `parent_id`, `resource_type`, `show_order`, `remark`, `status`, `create_by`,
+                         `create_time`, `update_by`, `update_time`)
+SELECT '删除视频', 'VideoManagement:video:delete', @video_management_view_id, 2, 10, NULL, 2000, @admin_user_id_text,
+       NOW(), @admin_user_id_text, NOW()
+WHERE @video_management_view_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM `tab_menu` WHERE `code` = 'VideoManagement:video:delete');
+
+-- 2) tab_permission：对应 3 条权限点记录。
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`,
+                              `update_by`, `update_time`)
+SELECT '视频管理页面访问', 'VideoManagement:video:view', 0, NULL, 2000, @admin_user_id_text, NOW(),
+       @admin_user_id_text, NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `tab_permission` WHERE `code` = 'VideoManagement:video:view');
+
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`,
+                              `update_by`, `update_time`)
+SELECT '上传视频', 'VideoManagement:video:add', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text, NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `tab_permission` WHERE `code` = 'VideoManagement:video:add');
+
+INSERT INTO `tab_permission` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`,
+                              `update_by`, `update_time`)
+SELECT '删除视频', 'VideoManagement:video:delete', 0, NULL, 2000, @admin_user_id_text, NOW(), @admin_user_id_text,
+       NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `tab_permission` WHERE `code` = 'VideoManagement:video:delete');
+
 -- 超级管理员角色，关联上面全部种子权限点；本 INSERT...SELECT 位于全部权限点之后，
--- 天然覆盖历次合并新增的插件、导出、审批、业务绑定删除、审批历史和图片权限，不需要单独补授。
+-- 天然覆盖历次合并新增的插件、导出、审批、业务绑定删除、审批历史、图片、ABAC 策略和视频权限，
+-- 不需要单独补授。
 -- ----------------------------------------------------------------------------
 
 INSERT INTO `tab_role` (`name`, `code`, `show_order`, `remark`, `status`, `create_by`, `create_time`, `update_by`, `update_time`)
