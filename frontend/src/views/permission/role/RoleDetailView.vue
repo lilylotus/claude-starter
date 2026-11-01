@@ -7,7 +7,7 @@ import { ArrowLeft } from '@element-plus/icons-vue'
 import OperationHistoryPanel from '@/components/OperationHistoryPanel.vue'
 import * as roleApi from '@/api/role'
 import { ROLE_STATUS_ENABLED, type RoleRow } from '@/types/role'
-import { buildPermissionTree, resolvePermissionModuleLabel } from '@/utils/permissionTree'
+import { buildPermissionTree } from '@/utils/permissionTree'
 
 const route = useRoute()
 const router = useRouter()
@@ -18,13 +18,12 @@ const loading = ref(false)
 const loadError = ref('')
 const detailData = ref<RoleRow | null>(null)
 
-// 已分配权限点按编码冒号分隔的第一段（模块）分组，只读展示，不提供勾选交互，
-// 分组算法与中文模块名映射复用 src/utils/permissionTree.ts，与
-// RoleManagementView.vue 新增/编辑弹窗内的权限点树、PermissionManagementView.vue
-// 权限点管理树保持一致，避免三处各自维护一份可能漂移的分组/中文名解析逻辑
-const groupedPermissions = computed(() =>
-  buildPermissionTree(detailData.value?.permissions ?? [], resolvePermissionModuleLabel),
-)
+// 已分配权限点按左侧侧边栏菜单组织为"一级菜单 → 二级页面 → 权限点"三层，只读展示，
+// 不提供勾选交互；构树算法复用 src/utils/permissionTree.ts，与 RoleManagementView.vue
+// 新增/编辑弹窗内的权限点树、PermissionManagementView.vue 权限点管理树保持一致，避免
+// 三处各自维护一份可能漂移的结构/中文名解析逻辑。只包含该角色实际拥有权限点所在的
+// 菜单与页面（空页面/空菜单由构树工具过滤）
+const groupedPermissions = computed(() => buildPermissionTree(detailData.value?.permissions ?? []))
 
 async function fetchDetail() {
   loading.value = true
@@ -87,10 +86,13 @@ function goBack() {
         <div v-else class="role-permission-groups">
           <div v-for="group in groupedPermissions" :key="group.id" class="role-permission-group">
             <span class="role-permission-group__name">{{ group.label }}</span>
-            <div class="role-permission-group__tags">
-              <el-tag v-for="item in group.children" :key="item.id" class="role-permission-tag">
-                {{ item.label }}
-              </el-tag>
+            <div v-for="page in group.children" :key="page.id" class="role-permission-page">
+              <span class="role-permission-page__name">{{ page.label }}</span>
+              <div class="role-permission-group__tags">
+                <el-tag v-for="item in page.children" :key="item.id" class="role-permission-tag">
+                  {{ item.label }}
+                </el-tag>
+              </div>
             </div>
           </div>
         </div>
@@ -188,6 +190,38 @@ function goBack() {
   font-weight: 600;
   color: var(--color-ink);
   margin-bottom: 8px;
+}
+
+// 二级页面行：相对一级菜单缩进，左侧小圆点延续链式连接视觉语言
+.role-permission-page {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-left: 14px;
+  margin-bottom: 8px;
+}
+
+.role-permission-page:last-child {
+  margin-bottom: 0;
+}
+
+.role-permission-page::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: var(--chain-dot-size-sm);
+  height: var(--chain-dot-size-sm);
+  border-radius: 50%;
+  background: var(--chain-line-color);
+}
+
+.role-permission-page__name {
+  flex: 0 0 96px;
+  font-size: 13px;
+  line-height: 24px;
+  color: var(--color-text-secondary);
 }
 
 .role-permission-group__tags {

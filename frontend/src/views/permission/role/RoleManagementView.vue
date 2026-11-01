@@ -24,7 +24,7 @@ import {
 import type { PermissionOption } from '@/types/permission'
 import type { OrgTreeNode } from '@/types/org'
 import { METADATA_FIELD_STATUS_ENABLED, type MetadataField } from '@/types/metadataField'
-import { buildPermissionTree, resolvePermissionModuleLabel, type PermissionTreeNode } from '@/utils/permissionTree'
+import { buildPermissionTree, type PermissionTreeNode } from '@/utils/permissionTree'
 import { usePermission } from '@/composables/usePermission'
 
 const roleStore = useRoleStore()
@@ -45,14 +45,13 @@ function handlePageChange(targetPage: number) {
 const permissionOptions = ref<PermissionOption[]>([])
 const permissionTreeRef = ref<TreeInstance>()
 
-// 按权限点编码冒号分隔的第一段（模块）分组构造两层树：第一层是分组虚拟节点（id 形如
-// "group:模块名"，不对应任何真实权限点，仅用于分组展示、全选/半选联动），第二层是
-// 具体权限点叶子节点（id 为权限点真实数字 id，label 用中文名称）。分组算法本身抽取为
-// 共享工具 buildPermissionTree（src/utils/permissionTree.ts），供权限点管理树复用；分组
-// 节点的中文模块名解析同样复用共享的 resolvePermissionModuleLabel，与权限点管理页面
-// 保持同一份映射，不重复维护
+// 按左侧侧边栏菜单构造三层树：第一层是一级菜单虚拟节点（id 形如 "menu:identity"），
+// 第二层是二级页面虚拟节点（id 形如 "page:/identity/orgs"），两层虚拟节点都不对应任何
+// 真实权限点，仅用于分层展示、全选/半选联动；第三层是具体权限点叶子节点（id 为权限点
+// 真实数字 id，label 用中文名称）。构树算法为共享工具 buildPermissionTree
+// （src/utils/permissionTree.ts），与权限点管理页面、角色详情页共用同一份实现
 const permissionTreeData = computed<PermissionTreeNode<PermissionOption>[]>(() =>
-  buildPermissionTree(permissionOptions.value, resolvePermissionModuleLabel),
+  buildPermissionTree(permissionOptions.value),
 )
 
 async function fetchPermissionOptions() {
@@ -122,7 +121,7 @@ async function submitForm() {
 
   submitting.value = true
   try {
-    // el-tree 的分组虚拟节点 id 是字符串（"group:模块名"），只有叶子节点（真实权限点）
+    // el-tree 的一级菜单/二级页面虚拟节点 id 是字符串（"menu:xxx"/"page:xxx"），只有叶子节点（真实权限点）
     // 的 id 是数字，getCheckedKeys() 默认不返回半选中的分组节点，这里再按类型过滤一层
     // 保险，确保绝不会把分组虚拟节点当作权限点 id 提交给后端
     const checkedKeys = permissionTreeRef.value?.getCheckedKeys() ?? []
@@ -521,7 +520,14 @@ async function handleRuleSave() {
             node-key="id"
             :props="{ label: 'label', children: 'children' }"
             empty-text="暂无可分配的权限点"
-          />
+          >
+            <template #default="{ node, data }">
+              <span class="role-permission-tree__node" :class="data.level && `role-permission-tree__node--${data.level}`">
+                <span>{{ node.label }}</span>
+                <el-tag v-if="data.level" size="small" round>{{ data.count ?? 0 }}</el-tag>
+              </span>
+            </template>
+          </el-tree>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -728,6 +734,22 @@ async function handleRuleSave() {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   padding: 8px 4px;
+}
+
+.role-permission-tree__node {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-ink);
+}
+
+// 一级菜单节点加粗、二级页面节点中等字重，区分三层结构
+.role-permission-tree__node--menu {
+  font-weight: 600;
+}
+
+.role-permission-tree__node--page {
+  font-weight: 500;
 }
 
 // 操作列（详情/编辑/启用停用/删除）相邻按钮间距收紧，比 Element Plus 默认更紧凑

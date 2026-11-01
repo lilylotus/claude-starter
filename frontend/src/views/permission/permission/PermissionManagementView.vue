@@ -7,19 +7,19 @@ import type Node from 'element-plus/es/components/tree/src/model/node'
 import { usePermissionStore } from '@/stores/permission'
 import * as permissionApi from '@/api/permission'
 import { PERMISSION_STATUS_ENABLED, type PermissionFormRequest, type PermissionRow } from '@/types/permission'
-import { buildPermissionTree, resolvePermissionModuleLabel, type PermissionTreeNode } from '@/utils/permissionTree'
+import { buildPermissionTree, collectVirtualNodeIds, type PermissionTreeNode } from '@/utils/permissionTree'
 import { usePermission } from '@/composables/usePermission'
 
 const permissionStore = usePermissionStore()
 const router = useRouter()
 const { hasPermission } = usePermission()
 
-// ---- 按模块分组的两层虚拟树（分组算法复用 src/utils/permissionTree.ts，与角色管理
-// 弹窗内的权限点勾选树共用同一份实现，分组节点的中文模块名解析同样复用共享的
-// resolvePermissionModuleLabel）。后端 GET /api/permissions/list 已按 showOrder
-// 升序、id 升序排好序，buildPermissionTree 只负责分组、保留原始顺序，不重新排序 ----
+// ---- 按左侧侧边栏菜单组织的三层虚拟树（一级菜单 → 二级页面 → 权限点，构树算法复用
+// src/utils/permissionTree.ts，与角色管理弹窗内的权限点勾选树、角色详情页共用同一份
+// 实现）。后端 GET /api/permissions/list 已按 showOrder 升序、id 升序排好序，
+// buildPermissionTree 只负责归属页面、保留原始顺序，不重新排序 ----
 const permissionTreeData = computed<PermissionTreeNode<PermissionRow>[]>(() =>
-  buildPermissionTree(permissionStore.list, resolvePermissionModuleLabel),
+  buildPermissionTree(permissionStore.list),
 )
 
 const treeRef = ref<TreeInstance>()
@@ -48,8 +48,9 @@ function handleNodeCollapse(_data: unknown, node: Node) {
   if (index !== -1) expandedKeys.value.splice(index, 1)
 }
 
+// 一次性展开一级菜单与二级页面两层虚拟节点，直接看到全部权限点
 function expandAll() {
-  expandedKeys.value = permissionTreeData.value.map((group) => group.id)
+  expandedKeys.value = collectVirtualNodeIds(permissionTreeData.value)
 }
 
 function collapseAll() {
@@ -217,7 +218,7 @@ async function handleDelete(row: PermissionRow) {
               <el-button v-if="hasPermission('PermissionManagement:permission:delete')" link type="danger" @click.stop="handleDelete(asTreeNode(data).raw!)">删除</el-button>
             </span>
           </div>
-          <div v-else class="permission-tree__group">
+          <div v-else class="permission-tree__group" :class="`permission-tree__group--${asTreeNode(data).level}`">
             <span class="permission-tree__group-name">{{ node.label }}</span>
             <el-tag size="small" round>{{ asTreeNode(data).count ?? 0 }}</el-tag>
           </div>
@@ -291,6 +292,15 @@ async function handleDelete(row: PermissionRow) {
 .permission-tree__group-name {
   color: var(--color-ink);
   font-weight: 500;
+}
+
+// 一级菜单节点加粗突出，二级页面节点保持常规字重，区分两层虚拟节点
+.permission-tree__group--menu .permission-tree__group-name {
+  font-weight: 600;
+}
+
+.permission-tree__group--page .permission-tree__group-name {
+  font-weight: 400;
 }
 
 .permission-tree__leaf {
